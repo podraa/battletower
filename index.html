@@ -1,0 +1,2738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Team — SBL Dashboard</title>
+<style>
+  :root{
+    --bg:#0e1218;
+    --panel:#161c26;
+    --panel-alt:#1c2432;
+    --border:#2a3444;
+    --text:#e8edf5;
+    --text-dim:#8996a8;
+    --amber:#ffb454;
+    --amber-text:#1a1206;
+    --teal:#5eead4;
+    --red:#ff7a7a;
+    --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; min-height:100vh; background:
+      radial-gradient(1100px 600px at 12% -10%, rgba(255,180,84,.07), transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, rgba(94,234,212,.06), transparent 55%),
+      var(--bg);
+    color:var(--text); font-family:var(--sans); -webkit-font-smoothing:antialiased;}
+  #app{max-width:1280px; margin:0 auto; padding:28px 24px 72px;}
+
+  header{margin-bottom:20px;}
+  h1{font-size:22px; margin:0 0 2px; letter-spacing:.2px;}
+  .sub{color:var(--text-dim); font-size:13px; margin-bottom:16px;}
+
+  nav.tabs{display:flex; gap:4px; margin:20px 0 16px; border-bottom:1px solid var(--border); flex-wrap:wrap;}
+  nav.tabs button{background:none; border:none; color:var(--text-dim); padding:10px 14px; font-size:13px; font-weight:600; cursor:pointer; border-bottom:2px solid transparent; font-family:var(--sans); transition:color .15s ease, border-color .15s ease;}
+  nav.tabs button.active{color:var(--text); border-bottom-color:var(--amber);}
+  nav.tabs button:hover{color:var(--text);}
+
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px; box-shadow:0 8px 24px rgba(0,0,0,.18);}
+  .panel + .panel{margin-top:14px;}
+  .panel h2{font-size:14px; margin:0 0 12px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-dim);}
+
+  label{display:block; font-size:12px; color:var(--text-dim); margin-bottom:6px;}
+  input[type=text], input[type=email], input[type=password], select{
+    width:100%; background:var(--panel-alt); border:1px solid var(--border); border-radius:8px;
+    color:var(--text); padding:10px 12px; font-family:var(--sans); font-size:13px;
+  }
+  .row{display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px;}
+  .row > div{flex:1; min-width:160px;}
+
+  button.primary{background:var(--amber); color:var(--amber-text); border:none; border-radius:8px; padding:10px 18px; font-weight:700; font-size:13px; cursor:pointer; font-family:var(--sans); transition:transform .12s ease, box-shadow .12s ease, filter .12s ease;}
+  button.primary:hover:not(:disabled){filter:brightness(1.06); box-shadow:0 6px 16px rgba(255,180,84,.25); transform:translateY(-1px);}
+  button.primary:disabled{opacity:.5; cursor:default;}
+  button.ghost{background:none; border:1px solid var(--border); color:var(--text); border-radius:8px; padding:9px 14px; font-size:12px; cursor:pointer; font-family:var(--sans); transition:border-color .12s ease, transform .12s ease;}
+  button.ghost:hover{border-color:var(--amber); transform:translateY(-1px);}
+  button.small{padding:5px 10px; font-size:11px;}
+  button.danger{border:1px solid var(--red); color:var(--red); background:none; border-radius:8px; padding:9px 14px; font-size:12px; cursor:pointer;}
+  button.teal{background:var(--teal); color:#062521; border:none; border-radius:8px; padding:9px 14px; font-size:12px; font-weight:700; cursor:pointer;}
+
+  .note{font-size:12px; color:var(--text-dim); margin-top:10px; line-height:1.5;}
+  .note.danger{color:var(--red);}
+  .note.ok{color:var(--teal);}
+  .empty-state{color:var(--text-dim); font-size:13px; padding:20px 0; text-align:center;}
+  .badge{display:inline-block; font-size:10px; padding:2px 7px; border-radius:20px; background:var(--panel-alt); border:1px solid var(--border); color:var(--text-dim); margin-left:6px;}
+  .foot-actions{display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;}
+
+  .status-pill{display:inline-block; font-size:11px; font-weight:700; padding:3px 10px; border-radius:20px; text-transform:uppercase; letter-spacing:.04em;}
+  .status-pill.pending{color:var(--amber); background:#3a2c12; border:1px solid #5a4620;}
+  .status-pill.approved{color:var(--teal); background:#0f2b27; border:1px solid #1c4a43;}
+  .status-pill.rejected{color:var(--red); background:#3a1414; border:1px solid #5a2020;}
+  .status-pill.accepted{color:var(--teal); background:#0f2b27; border:1px solid #1c4a43;}
+  .status-pill.withdrawn{color:var(--text-dim); background:var(--panel-alt); border:1px solid var(--border);}
+  .status-pill.reverted{color:var(--text-dim); background:var(--panel-alt); border:1px solid var(--border);}
+
+  .sprite{width:32px; height:32px; object-fit:contain; vertical-align:middle; image-rendering:pixelated; background:var(--panel-alt); border-radius:6px;}
+  .mon-pill{display:inline-flex; align-items:center; gap:6px; background:var(--panel-alt); border:1px solid var(--border); border-radius:20px; padding:3px 10px 3px 3px; font-size:12px; margin:3px 4px 3px 0;}
+  .mon-list{display:flex; flex-wrap:wrap; margin-top:4px;}
+  .pts{color:var(--text-dim); font-family:var(--mono); font-size:11px;}
+
+  /* trade picker: pokemon cards */
+  .pick-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(108px,1fr)); gap:8px; margin-top:10px;}
+  .pick-card{position:relative; display:flex; flex-direction:column; align-items:center; gap:5px; background:var(--panel-alt); border:1px solid var(--border); border-radius:12px; padding:10px 6px 9px; cursor:pointer; text-align:center; transition:.15s ease; user-select:none;}
+  .pick-card:hover{border-color:var(--amber);}
+  .pick-card:focus-visible{outline:2px solid var(--amber); outline-offset:1px;}
+  .pick-card.checked{border-color:var(--amber); background:#241d0f;}
+  .pick-card .sprite{width:40px; height:40px;}
+  .pick-card-name{font-size:11.5px; font-weight:600; line-height:1.25;}
+  .pick-card-pts{font-family:var(--mono); font-size:10px; color:var(--amber);}
+  .pick-card-check{position:absolute; top:6px; right:6px; width:16px; height:16px; border-radius:50%; background:var(--amber); color:var(--amber-text); font-size:10px; font-weight:800; line-height:16px; text-align:center; opacity:0; transform:scale(.6); transition:.15s ease;}
+  .pick-card.checked .pick-card-check{opacity:1; transform:scale(1);}
+
+  .selected-row{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;}
+  .selected-row:empty{display:none; margin:0;}
+  .selected-chip{display:inline-flex; align-items:center; gap:6px; background:var(--panel-alt); border:1px solid var(--amber); border-radius:20px; padding:3px 6px 3px 3px; font-size:11.5px;}
+  .selected-chip .sprite{width:22px; height:22px;}
+  .selected-chip button{background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:14px; line-height:1; padding:0 2px; font-family:var(--sans);}
+  .selected-chip button:hover{color:var(--red);}
+
+  .fa-search-wrap{position:relative; margin-top:2px;}
+  .fa-hint, .fa-empty{color:var(--text-dim); font-size:12px; padding:18px 4px; text-align:center; border:1px dashed var(--border); border-radius:10px; margin-top:10px;}
+
+  .budget-bar{height:8px; border-radius:6px; background:var(--panel-alt); border:1px solid var(--border); overflow:hidden; margin-top:8px;}
+  .budget-fill{height:100%; background:var(--amber);}
+  .budget-fill.over{background:var(--red);}
+
+  .trade-card{border:1px solid var(--border); border-radius:10px; background:var(--panel-alt); padding:14px; margin-bottom:10px;}
+  .trade-head{display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;}
+  .trade-teams{font-weight:700; font-size:13px;}
+  .trade-teams .arrow{color:var(--text-dim); margin:0 6px; font-weight:400;}
+  .trade-sub{font-size:11px; color:var(--text-dim); margin-top:2px;}
+  .trade-cols{display:flex; gap:16px; flex-wrap:wrap; margin-top:6px;}
+  .trade-col{flex:1; min-width:180px;}
+  .trade-col h4{font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-dim); margin:0 0 4px;}
+  .trade-column-grid{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:14px;align-items:start;margin-top:14px;}
+  .trade-column-main,.trade-column-side{min-width:0;}
+  .trade-history-mini{position:sticky;top:16px;}
+  .trade-tab-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;}
+  .tab-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--amber);color:var(--amber-text);font-size:10px;font-family:var(--mono);vertical-align:middle;margin-left:4px;}
+  @media(max-width:800px){.trade-column-grid{grid-template-columns:1fr;}.trade-history-mini{position:static;}}
+
+
+  .roster-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px;}
+  .roster-card{border:1px solid var(--border); background:var(--panel-alt); border-radius:10px; padding:12px;}
+  .roster-card.mine{border-color:var(--amber);}
+  .roster-card h3{margin:0 0 4px; font-size:14px;}
+
+  .gate{max-width:420px; width:100%; margin:0 auto; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:calc(100vh - 220px);}
+  .gate .panel{
+    text-align:left; width:100%; padding:32px 30px 28px;
+    background:linear-gradient(160deg, var(--panel), var(--panel-alt));
+    border:1px solid var(--border); border-radius:16px;
+    box-shadow:0 24px 60px rgba(0,0,0,.35), 0 0 0 1px rgba(255,180,84,.04);
+    position:relative; overflow:hidden;
+  }
+  .gate .panel::before{
+    content:""; position:absolute; top:0; left:0; right:0; height:3px;
+    background:linear-gradient(90deg, var(--amber), var(--teal));
+  }
+  .gate .panel h2{font-size:20px; text-transform:none; letter-spacing:0; color:var(--text); margin:0 0 4px; text-align:center;}
+  .gate .panel .gate-sub{color:var(--text-dim); font-size:12.5px; text-align:center; margin:0 0 20px;}
+  .gate .panel label{font-size:11.5px;}
+  .gate .panel input{padding:11px 13px; font-size:14px; border-radius:9px; transition:border-color .12s ease, box-shadow .12s ease;}
+  .gate .panel input:focus{outline:none; border-color:var(--amber); box-shadow:0 0 0 3px rgba(255,180,84,.14);}
+  .gate .panel .foot-actions{margin-top:18px;}
+  .gate-mark{width:52px; height:52px; margin:0 auto 14px; border-radius:14px; background:linear-gradient(145deg, var(--amber), #ff9d4d); display:flex; align-items:center; justify-content:center; font-size:24px; font-weight:800; color:var(--amber-text); box-shadow:0 10px 24px rgba(255,180,84,.28);}
+
+  .page-nav{position:fixed;top:14px;right:18px;z-index:1000;display:flex;align-items:center;gap:7px}
+  .page-nav label{font-size:11px;color:var(--text-dim);font-weight:700}
+  .page-nav select{font-size:12px;padding:7px 30px 7px 10px;box-shadow:0 2px 8px rgba(0,0,0,.25); width:auto; transition:opacity .15s ease;}
+  .page-nav select:disabled{opacity:.45;cursor:not-allowed;}
+  .page-nav .lock-hint{font-size:10.5px;color:var(--text-dim);opacity:.85;}
+  @media(max-width:700px){.page-nav{top:8px;right:8px}.page-nav label{display:none}.page-nav .lock-hint{display:none}}
+
+  .hero{background:linear-gradient(135deg,#182338,#101827);border:1px solid var(--border);border-radius:18px;padding:24px;margin-bottom:18px;}
+  .hero-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap;}
+  .hero-title h2{margin:0;font-size:30px;}
+  .hero-title p{margin:6px 0 0;color:var(--text-dim);}
+  .budget-card{min-width:280px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:14px;padding:16px;}
+  .budget-row{display:flex;justify-content:space-between;align-items:center;}
+  .budget-value{font-family:var(--mono);font-weight:700;}
+  .roster-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;margin-top:18px;}
+  .pokemon-card{background:linear-gradient(180deg,#1b2434,#151d2b);border:1px solid var(--border);border-radius:16px;padding:18px;transition:.18s ease;}
+  .pokemon-card:hover{border-color:var(--amber);transform:translateY(-2px);}
+  .pokemon-head{display:flex;align-items:center;gap:14px;}
+  .pokemon-head .sprite{width:64px;height:64px;border-radius:10px;}
+  .pokemon-name{font-size:18px;font-weight:700;}
+  .pokemon-points{display:inline-flex;margin-top:12px;padding:6px 10px;border-radius:999px;background:var(--panel);border:1px solid var(--border);font-family:var(--mono);font-size:12px;color:var(--amber);}
+  .pokemon-meta{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px;}
+  .meta-box{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:10px;}
+  .meta-box .label{font-size:10px;text-transform:uppercase;color:var(--text-dim);}
+  .meta-box .value{font-family:var(--mono);font-size:16px;font-weight:700;margin-top:4px;}
+  .meta-box .value.dealt{color:var(--amber);}
+  .meta-box .value.taken{color:var(--red);}
+  .meta-box .value.assists{color:var(--teal);}
+  .meta-box .value.kills{color:var(--teal);}
+  .pokemon-sub{color:var(--text-dim);font-size:11px;margin-top:2px;}
+
+  .theme-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; margin-top:8px;}
+.theme-category-row{display:flex;align-items:center;gap:9px;margin-top:12px;margin-bottom:2px;}
+.theme-category-row label{font-size:11px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;}
+.theme-category-row select{min-width:180px;padding:8px 30px 8px 10px;border:1px solid var(--border);border-radius:9px;background:var(--panel-alt);color:var(--text);font:inherit;font-size:12px;cursor:pointer;}
+.theme-category-row select:focus{outline:2px solid var(--amber);outline-offset:1px;}
+@media(max-width:520px){.theme-category-row{align-items:flex-start;flex-direction:column}.theme-category-row select{width:100%;}}
+
+  .theme-swatch{display:flex; flex-direction:column; gap:8px; background:var(--panel-alt); border:1px solid var(--border); border-radius:10px; padding:10px; cursor:pointer; font-family:var(--sans); font-size:12px; color:var(--text); text-align:left;}
+  .theme-swatch:hover{border-color:var(--text-dim);}
+  .theme-swatch.active{border-color:var(--theme-accent,var(--amber)); box-shadow:0 0 0 1px var(--theme-accent,var(--amber));}
+  .theme-swatch .preview{display:flex; height:34px; border-radius:6px; overflow:hidden; border:1px solid rgba(255,255,255,.08);}
+  .theme-swatch .preview span{flex:1;}
+  .theme-swatch .label-row{display:flex; align-items:center; justify-content:space-between;}
+  .theme-swatch .check{color:var(--theme-accent); font-weight:800; opacity:0;}
+  .theme-swatch.active .check{opacity:1;}
+
+
+/* My Team redesign */
+.myteam-hero{background:linear-gradient(135deg,var(--panel-alt),var(--panel));border:1px solid var(--border);border-radius:18px;padding:22px;margin-bottom:16px;position:relative;overflow:hidden}
+.myteam-hero:after{content:"";position:absolute;right:-70px;top:-90px;width:220px;height:220px;border-radius:50%;background:var(--amber);opacity:.06;pointer-events:none}
+.myteam-hero-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:stretch}
+.myteam-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--amber);font-weight:800}
+.myteam-title{font-size:30px;font-weight:800;margin:4px 0 4px;letter-spacing:-.02em}
+.myteam-sub{color:var(--text-dim);font-size:13px}
+.myteam-record{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}
+.record-box{min-width:92px;background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:12px;padding:10px 12px}
+.record-box .label{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-dim)}
+.record-box .value{font-family:var(--mono);font-size:20px;font-weight:800;margin-top:3px}
+.record-box.win .value{color:var(--teal)} .record-box.loss .value{color:var(--red)}
+.myteam-budget{background:rgba(0,0,0,.12);border:1px solid var(--border);border-radius:14px;padding:16px}
+.myteam-budget-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.myteam-budget-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);font-weight:800}
+.myteam-budget-value{font-family:var(--mono);font-size:22px;font-weight:800}
+.myteam-budget-bar{height:9px;background:var(--panel);border:1px solid var(--border);border-radius:99px;overflow:hidden;margin:12px 0 8px}
+.myteam-budget-fill{height:100%;background:var(--amber);border-radius:99px}
+.myteam-budget-remaining{display:flex;justify-content:space-between;font-size:11px;color:var(--text-dim)}
+.myteam-section-head{display:flex;justify-content:space-between;align-items:end;gap:12px;margin-bottom:12px}
+.myteam-section-head h2{margin:0}
+.myteam-section-head .note{margin:0}
+.myteam-roster-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.myteam-mon{background:var(--panel-alt);border:1px solid var(--border);border-radius:14px;padding:12px;transition:.15s ease;position:relative;overflow:hidden}
+.myteam-mon:hover{border-color:var(--amber);transform:translateY(-1px)}
+.myteam-mon-top{display:flex;align-items:center;gap:10px}
+.myteam-mon .sprite{width:52px;height:52px;margin:0;border-radius:10px}
+.myteam-mon-name{font-weight:750;font-size:13px;line-height:1.2}
+.myteam-mon-points{display:inline-flex;margin-top:4px;font-family:var(--mono);font-size:11px;font-weight:800;color:var(--amber);background:rgba(255,255,255,.035);border:1px solid var(--border);padding:3px 7px;border-radius:999px}
+.myteam-mon-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
+.myteam-mon-stat{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:7px 6px}
+.myteam-mon-stat .v{font-family:var(--mono);font-size:13px;font-weight:800}.myteam-mon-stat .l{font-size:9px;color:var(--text-dim);text-transform:uppercase;margin-top:2px}
+.myteam-dashboard-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(280px,.8fr);gap:14px;margin-top:14px}
+.myteam-stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.myteam-stat-card{background:var(--panel-alt);border:1px solid var(--border);border-radius:12px;padding:12px}
+.myteam-stat-card .eyebrow{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);font-weight:800}
+.myteam-stat-card .big{font-size:18px;font-weight:800;margin-top:4px}.myteam-stat-card .small{font-size:11px;color:var(--text-dim);margin-top:2px}
+.random-trade{background:linear-gradient(135deg,rgba(255,255,255,.025),rgba(255,255,255,.01));border:1px solid var(--border);border-radius:12px;padding:13px}
+.random-trade-result{margin-top:10px;padding:10px;border-radius:10px;background:var(--panel);border:1px solid var(--border)}
+.random-trade-flow{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center}.random-trade-side{min-width:0}.random-trade-side .label{font-size:9px;color:var(--text-dim);text-transform:uppercase}.random-trade-mon{font-weight:800;font-size:12px;margin-top:2px}.random-trade-arrow{font-size:18px;color:var(--amber)}
+@media(max-width:850px){.myteam-hero-grid,.myteam-dashboard-grid{grid-template-columns:1fr}}
+@media(max-width:600px){.myteam-stat-grid{grid-template-columns:1fr}.myteam-title{font-size:25px}}
+
+/* feedback tab */
+.feedback-form-grid{display:grid;grid-template-columns:180px 1fr;gap:12px;align-items:start}
+.feedback-form-grid .full{grid-column:1/-1}
+.feedback-list{display:grid;gap:10px;margin-top:14px}
+.feedback-card{padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--panel-alt)}
+.feedback-card-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.feedback-card-title{font-weight:800;font-size:14px}
+.feedback-meta{font-size:11px;color:var(--text-dim);margin-top:4px}
+.feedback-status{display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:999px;padding:4px 9px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.feedback-status.new{color:var(--amber)}
+.feedback-status.in-progress{color:var(--teal)}
+.feedback-status.resolved{color:#86efac}
+.feedback-status.wont-fix{color:var(--text-dim)}
+@media(max-width:700px){.feedback-form-grid{grid-template-columns:1fr}.feedback-form-grid .full{grid-column:auto}}
+</style>
+<style>
+.page-nav{width:100%;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;padding:10px 16px;margin:0 0 20px;border-bottom:1px solid var(--border,#ddd);background:var(--panel,#fff);box-sizing:border-box;position:relative;z-index:50}
+.page-nav a{display:inline-flex;align-items:center;justify-content:center;padding:8px 13px;border-radius:8px;color:var(--text,#222);text-decoration:none;font-size:12px;font-weight:700;white-space:nowrap;transition:background .15s,border-color .15s,color .15s; border:1px solid transparent}
+.page-nav a:hover{background:var(--panel-alt,#f4f4f4);border-color:var(--border,#ddd)}
+.page-nav a.active{background:var(--panel-alt,#f4f4f4);border-color:var(--border,#ddd);color:var(--amber,var(--accent,#c98b2e))}
+.page-nav.locked a{opacity:.45;cursor:not-allowed}
+.page-nav.locked a:hover{background:transparent;border-color:transparent}
+.page-nav .nav-lock-hint{font-size:11px;color:var(--text-dim,#777);font-weight:600;margin-left:6px}
+@media(max-width:700px){.page-nav{justify-content:flex-start;overflow-x:auto;flex-wrap:nowrap;padding:8px 10px}.page-nav a{flex:0 0 auto}}
+</style>
+<style>
+/* Auto-hiding site navigation */
+body{padding-top:58px;}
+.page-nav{position:fixed;top:0;left:0;right:0;width:100%;height:58px;margin:0;padding:9px 16px;box-shadow:0 6px 18px rgba(0,0,0,.18);transform:translateY(0);transition:transform .22s ease,box-shadow .22s ease;z-index:1000;}
+.page-nav.nav-hidden{transform:translateY(-100%);box-shadow:none;}
+.page-nav a{flex:0 0 auto;}
+.nav-hover-zone{position:fixed;top:0;left:0;right:0;height:9px;z-index:1001;}
+@media(max-width:700px){body{padding-top:52px}.page-nav{height:52px;padding:7px 10px;overflow-x:auto;flex-wrap:nowrap}.nav-hover-zone{height:8px}}
+</style>
+
+<style id="mobile-friendly-overrides">
+/* Site-wide mobile usability pass */
+html{overflow-x:hidden;-webkit-text-size-adjust:100%;}
+body{overflow-x:hidden;max-width:100%;}
+img,video,canvas,svg{max-width:100%;}
+button,input,select,textarea{font:inherit;max-width:100%;}
+button{touch-action:manipulation;}
+
+@media (max-width: 700px){
+  body{font-size:14px;}
+  #app{width:100%;max-width:none;box-sizing:border-box;padding-left:12px !important;padding-right:12px !important;}
+  header{padding-left:0 !important;padding-right:0 !important;}
+  header h1,h1{font-size:clamp(22px,7vw,32px);line-height:1.12;overflow-wrap:anywhere;}
+  h2{font-size:clamp(18px,5.5vw,24px);}
+  h3{font-size:17px;}
+  .sub,.note,.panel-desc{overflow-wrap:anywhere;}
+
+  /* Public header navigation */
+  .page-nav{max-width:100vw;box-sizing:border-box;}
+  .page-nav a{min-height:36px;padding:8px 11px;font-size:12px;}
+  .page-nav::-webkit-scrollbar{height:3px;}
+
+  /* Admin's dropdown navigation */
+  body[data-admin="true"] .page-nav{max-width:calc(100vw - 16px);}
+  body[data-admin="true"] .page-nav select{max-width:calc(100vw - 32px);}
+
+  /* Stacked controls instead of cramped horizontal rows */
+  .toolbar,.toolbar-wide,.banner-controls,.section-head-row,.trade-tab-head,.summary-header,
+  .franchise-header,.franchise-card-head,.team-card-head,.team-card-top,.speed-header,
+  .replay-teams,.replay-row,.compare-team,.trade-filter-panel{max-width:100%;}
+  .toolbar,.toolbar-wide,.banner-controls{flex-wrap:wrap !important;gap:8px !important;}
+  .toolbar > *, .toolbar-wide > *, .banner-controls > *{min-width:0 !important;max-width:100%;}
+
+  /* Form controls become comfortable touch targets */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,textarea{min-height:40px;box-sizing:border-box;}
+  input:not([type="checkbox"]):not([type="radio"]),select,textarea{width:100%;}
+  input[type="checkbox"],input[type="radio"]{width:auto;min-height:auto;}
+  button{min-height:40px;}
+  .foot-actions,.actions,.franchise-actions{flex-wrap:wrap !important;gap:8px !important;}
+  .foot-actions button,.actions button,.franchise-actions button{flex:1 1 auto;}
+
+  /* Panels/cards */
+  .panel,.card,.budget-card,.trade-card,.pokemon-card,.mon-card,.opponent-card,.set-card,
+  .franchise-card,.team-card,.commissioner-budget-card{min-width:0 !important;max-width:100%;box-sizing:border-box;}
+  .panel{padding:14px !important;}
+  .grid,.roster-grid,.roster-cards,.pokemon-grid,.team-card-grid,.franchise-cards,
+  .comparison-grid,.conference-standings,.mon-grid,.theme-grid{grid-template-columns:1fr !important;}
+  .trade-cols,.trade-column-grid,.profile-two-col,.summary-grid,.record-grid{grid-template-columns:1fr !important;}
+  .pick-grid{grid-template-columns:repeat(2,minmax(0,1fr)) !important;}
+  .theme-grid{grid-template-columns:repeat(2,minmax(0,1fr)) !important;}
+
+  /* Don't let long Pokémon/team names force horizontal scrolling */
+  .pokemon-name,.team-name,.team-card-name,.standings-team-name,.pick-card-name,
+  .mon-name,.opponent-name,.compare-team-name{overflow-wrap:anywhere;word-break:break-word;}
+
+  /* Tables: preserve all columns, allow deliberate horizontal swipe */
+  table{max-width:none;}
+  .table-wrap,.franchise-table-wrap,#globalTable,#pokemonSearchTable,.player-table-wrap,
+  .speed-table,.type-count-table{width:100%;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .table-wrap table,.franchise-table-wrap table,#globalTable table,#pokemonSearchTable table,
+  .player-table-wrap table,.speed-table table,.type-count-table table{min-width:max-content;}
+  th,td{white-space:nowrap;}
+
+  /* Modals fit inside a phone viewport */
+  .modal,.modalbox,.overview-modal,.replay-summary-box,.pokemon-modal,.audit-modal,
+  .modal-content{width:calc(100vw - 20px) !important;max-width:calc(100vw - 20px) !important;
+    max-height:calc(100vh - 24px);box-sizing:border-box;}
+  .modal-body,.pokemon-modal-body{overflow:auto;max-height:calc(100vh - 150px);}
+
+  /* Stat/analysis rows stack cleanly */
+  .gf-row{max-width:100%;}
+  .death-cause-entry{max-width:100%;box-sizing:border-box;}
+  .statbox{min-width:0 !important;}
+  .speed-row{min-width:560px;}
+
+  /* Draft / admin tab bars can scroll rather than squish buttons */
+  .tabs{max-width:100%;overflow-x:auto;flex-wrap:nowrap !important;-webkit-overflow-scrolling:touch;}
+  .tabs button{flex:0 0 auto;white-space:nowrap;}
+
+  /* Make auth/login cards comfortable */
+  #adminAuth,.gate{width:100%;max-width:420px;box-sizing:border-box;margin-left:auto;margin-right:auto;}
+}
+
+@media (max-width: 480px){
+  #app{padding-left:9px !important;padding-right:9px !important;}
+  .page-nav a{padding:7px 10px;font-size:11px;}
+  .panel{padding:12px !important;}
+  .pick-grid{grid-template-columns:repeat(2,minmax(0,1fr)) !important;}
+  .theme-grid{grid-template-columns:1fr 1fr !important;}
+  .sprite{max-width:44px;}
+  .pokemon-head .sprite,.team-card-top-sprite{width:56px !important;height:56px !important;}
+  .foot-actions button,.actions button,.franchise-actions button{width:100%;flex-basis:100%;}
+  .section-head-row{align-items:flex-start !important;}
+}
+</style>
+
+<style>[hidden]{display:none!important}</style>
+
+<style id="sitewide-hidden-scrollbars">
+/* Site-wide: keep every scroll area usable while never showing a scrollbar. */
+html, body, *, *::before, *::after {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+*::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+  background: transparent !important;
+}
+</style>
+
+<style id="trade-ui-refresh">
+/* Trade UI visual refresh — presentation only. No trade logic is changed. */
+#proposePanel{
+  position:relative;
+  overflow:hidden;
+  padding:24px !important;
+  background:
+    radial-gradient(500px 220px at 0% 0%, rgba(255,180,84,.08), transparent 65%),
+    linear-gradient(145deg, #182130, #141b26 70%);
+  border-color:#344054;
+  box-shadow:0 14px 34px rgba(0,0,0,.22);
+}
+#proposePanel::before{
+  content:"";
+  position:absolute;left:0;right:0;top:0;height:3px;
+  background:linear-gradient(90deg,var(--amber),var(--teal));
+  opacity:.9;
+}
+#proposePanel h2{font-size:20px;text-transform:none;letter-spacing:0;color:var(--text);margin:0 0 5px;}
+#proposePanel > .note:first-of-type{max-width:760px;margin:0 0 20px;font-size:12.5px;}
+#proposePanel .row{margin:0 0 18px;}
+#proposePanel .row > div{max-width:430px;}
+#proposePanel label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin-bottom:7px;}
+#proposePanel select{
+  height:42px;padding:9px 12px;border-radius:10px;
+  background:#111824;border-color:#344054;
+  transition:border-color .15s,box-shadow .15s;
+}
+#proposePanel select:focus{outline:none;border-color:var(--amber);box-shadow:0 0 0 3px rgba(255,180,84,.10);}
+#proposePanel .trade-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;margin-top:0;}
+#proposePanel .trade-col{
+  min-width:0;padding:15px;border:1px solid #303b4d;border-radius:14px;
+  background:rgba(10,15,23,.32);
+}
+#proposePanel .trade-col h4{
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:11px;color:var(--text);letter-spacing:.08em;margin:0 0 8px;
+}
+#proposePanel .trade-col h4::after{content:"";width:34px;height:2px;background:var(--border);border-radius:99px;}
+#proposePanel .selected-row{min-height:32px;margin:0 0 8px;}
+#proposePanel .pick-grid{grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:9px;max-height:410px;overflow:auto;padding:2px 2px 4px;}
+#proposePanel .pick-card{
+  min-height:108px;justify-content:center;
+  background:rgba(25,33,47,.82);border-color:#303b4d;border-radius:12px;padding:9px 6px;
+}
+#proposePanel .pick-card:hover{background:#202a3a;border-color:#69758a;transform:translateY(-1px);}
+#proposePanel .pick-card.checked{background:linear-gradient(160deg,#302612,#211b12);border-color:var(--amber);box-shadow:0 0 0 1px rgba(255,180,84,.12) inset;}
+#proposePanel .pick-card .sprite{width:48px;height:48px;background:#111824;border:1px solid rgba(255,255,255,.04);}
+#proposePanel .pick-card-name{font-size:11px;}
+#proposePanel .pick-card-pts{font-size:10px;}
+#proposePanel .selected-chip{background:#202a3a;border-color:#536176;box-shadow:0 2px 8px rgba(0,0,0,.12);}
+#proposePanel .selected-chip .sprite{background:#111824;}
+#proposePanel .fa-search-wrap input{height:40px;background:#111824;border-color:#344054;border-radius:10px;}
+#proposePanel .fa-search-wrap input:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px rgba(94,234,212,.08);}
+#proposePanel #tradeSummary{
+  margin:16px 0 0;padding:11px 13px;border-radius:10px;
+  background:#111824;border:1px solid #2d3748;color:#aab5c5;
+}
+#proposePanel .foot-actions{margin-top:12px;justify-content:flex-end;}
+#proposePanel #clearTradeSelectionBtn{border-color:#3a4658;}
+#proposePanel #submitTradeBtn{min-width:170px;}
+
+/* Allowance strip */
+#proposePanel + .panel{
+  background:linear-gradient(145deg,#171f2c,#141b25);
+  border-color:#303b4d;
+  padding:16px 18px;
+}
+#proposePanel + .panel .trade-cols{gap:10px;margin-top:10px !important;}
+#proposePanel + .panel .trade-col{
+  min-height:82px;padding:12px 14px;border-radius:11px;
+  background:rgba(10,15,23,.28);border:1px solid #2d3748;
+}
+#proposePanel + .panel .trade-col h4{color:#9aa7b9;margin-bottom:7px;}
+#proposePanel + .panel .budget-value{font-size:15px;line-height:1.2;}
+
+/* Trade filter / history header */
+.trade-filter-panel{
+  background:linear-gradient(145deg,#182130,#141b26);
+  border-color:#303b4d;
+}
+.trade-filter-panel h2{font-size:18px;text-transform:none;letter-spacing:0;color:var(--text);}
+.trade-filter-panel select{
+  min-width:180px !important;height:40px;border-radius:10px;
+  background:#111824;border-color:#344054;
+}
+
+/* Offer/history cards */
+#tradeViewBody .panel{
+  background:transparent;border:0;box-shadow:none;padding:0;
+}
+#tradeViewBody .panel + .panel{margin-top:20px;}
+#tradeViewBody .panel > h2{
+  display:flex;align-items:center;gap:5px;
+  padding:0 2px;margin:0 0 10px;font-size:11px;letter-spacing:.10em;color:#9aa7b9;
+}
+#tradeViewBody .panel > .note:first-of-type{margin:0 2px 12px;}
+#tradeViewBody .trade-card{
+  position:relative;margin-bottom:10px;padding:16px 17px;
+  background:linear-gradient(145deg,#1a2331,#161e2a);
+  border:1px solid #303b4d;border-radius:13px;
+  box-shadow:0 5px 16px rgba(0,0,0,.13);
+  transition:border-color .15s,transform .15s,box-shadow .15s;
+}
+#tradeViewBody .trade-card:hover{border-color:#47556a;transform:translateY(-1px);box-shadow:0 8px 20px rgba(0,0,0,.18);}
+#tradeViewBody .trade-head{margin-bottom:12px;}
+#tradeViewBody .trade-teams{font-size:14px;letter-spacing:.01em;}
+#tradeViewBody .trade-teams .arrow{color:var(--amber);font-size:15px;}
+#tradeViewBody .trade-sub{font-size:10.5px;color:#748196;margin-top:4px;}
+#tradeViewBody .status-pill{padding:4px 9px;font-size:9px;letter-spacing:.08em;}
+#tradeViewBody .trade-cols{gap:10px;margin-top:0;}
+#tradeViewBody .trade-col{padding:10px 11px;border-radius:10px;background:rgba(10,15,23,.28);border:1px solid #2b3545;}
+#tradeViewBody .trade-col h4{margin-bottom:6px;color:#7f8ca0;font-size:9px;letter-spacing:.10em;}
+#tradeViewBody .mon-list{gap:5px;}
+#tradeViewBody .mon-pill{margin:0;background:#202a39;border-color:#364255;padding:3px 8px 3px 3px;font-size:11px;}
+#tradeViewBody .mon-pill .sprite{width:26px;height:26px;margin-right:0;background:#111824;}
+#tradeViewBody .foot-actions{margin-top:12px;padding-top:10px;border-top:1px solid #293343;}
+#tradeViewBody .foot-actions button{min-height:30px;}
+#tradeViewBody .empty-state{padding:28px 14px;border:1px dashed #303b4d;border-radius:12px;background:rgba(10,15,23,.18);}
+
+@media(max-width:800px){
+  #proposePanel .trade-cols{grid-template-columns:1fr;}
+  #proposePanel .pick-grid{max-height:none;}
+}
+@media(max-width:560px){
+  #proposePanel{padding:18px !important;}
+  #proposePanel .pick-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
+  #proposePanel .foot-actions{justify-content:stretch;}
+  #proposePanel .foot-actions button{flex:1 1 100%;}
+}
+</style>
+
+<style id="trades-view-spacing-fix">
+.trade-column-side,.trade-history-mini{padding-bottom:14px;}
+.trade-column-side .panel + .panel,.trade-history-mini .panel + .panel{margin-top:18px;}
+.trade-column-side,.trade-history-mini{min-height:0;overflow:visible;}
+</style>
+
+<style id="myteam-stat-sprite-fix">
+.stat-mon{display:flex;align-items:center;gap:8px;}
+.stat-mon .sprite{width:34px;height:34px;object-fit:contain;flex:0 0 auto;}
+.myteam-stat-card .stat-mon .sprite{width:38px;height:38px;}
+.random-trade-mon .sprite{width:42px;height:42px;}
+</style>
+<style id="custom-theme-ui">
+.custom-theme-panel{margin-top:14px;padding:16px;border:1px solid var(--border);border-radius:14px;background:color-mix(in srgb,var(--panel) 88%,var(--bg));box-shadow:0 8px 24px rgba(0,0,0,.14)}
+.custom-theme-title{font-weight:800;font-size:13px;letter-spacing:.01em}
+.custom-theme-help{font-size:11px;line-height:1.5;color:var(--text-dim);margin:4px 0 14px}
+.custom-theme-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.custom-color-row{display:grid;grid-template-columns:20px 1fr 42px;align-items:center;gap:9px;padding:9px 10px;border:1px solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:10px;background:color-mix(in srgb,var(--panel-alt) 62%,var(--panel));transition:border-color .15s,background .15s}
+.custom-color-row:hover{border-color:var(--border);background:var(--panel-alt)}
+.custom-color-row span{font-size:11px;color:var(--text-dim)}
+.custom-color-row input[type=color]{width:36px;height:26px;padding:2px;border:1px solid var(--border);border-radius:7px;background:var(--panel);cursor:pointer}
+.custom-color-row input[type=checkbox]{appearance:none;-webkit-appearance:none;width:16px;height:16px;margin:0;border:1px solid var(--border);border-radius:4px;background:var(--panel);box-shadow:inset 0 0 0 1px rgba(0,0,0,.16);cursor:pointer;position:relative;transition:background .15s,border-color .15s,box-shadow .15s}
+.custom-color-row input[type=checkbox]:hover{border-color:var(--amber);background:var(--panel-alt)}
+.custom-color-row input[type=checkbox]:checked{background:var(--amber);border-color:var(--amber);box-shadow:0 0 0 2px color-mix(in srgb,var(--amber) 12%,transparent)}
+.custom-color-row input[type=checkbox]:checked::after{content:"✓";position:absolute;left:2px;top:-1px;color:var(--amber-text);font-size:12px;font-weight:900;line-height:16px}
+.custom-color-row input[type=checkbox]:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.custom-color-row:has(input[type=checkbox]:checked) span{color:var(--text)}
+.custom-theme-panel .foot-actions{margin-top:12px}
+.custom-theme-panel button{min-height:34px}
+@media(max-width:650px){.custom-theme-grid{grid-template-columns:1fr}}
+</style>
+<style id="record-controls-ui">.record-adjust{appearance:none;text-align:left;color:inherit;font:inherit;cursor:pointer;position:relative;transition:transform .12s ease,border-color .12s ease,background .12s ease}.record-adjust:hover{transform:translateY(-1px);border-color:currentColor;background:rgba(255,255,255,.05)}.record-adjust .label,.record-adjust .value{display:block}.record-note{font-size:10px;color:var(--text-dim);margin-top:7px;max-width:520px}</style>
+<style id="next-battle-ui">.myteam-hero-side{display:grid;grid-template-columns:minmax(180px,.9fr) minmax(230px,1.1fr);gap:12px;align-items:stretch}.next-battle-card{display:flex;flex-direction:column;justify-content:center;gap:5px;padding:15px 17px;border:1px solid rgba(255,255,255,.09);border-radius:14px;background:rgba(255,255,255,.035);color:inherit;text-decoration:none;transition:transform .16s ease,border-color .16s ease,background .16s ease}.next-battle-card:hover{transform:translateY(-1px);border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.055)}.next-battle-kicker{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim)}.next-battle-opponent{font-size:18px;font-weight:800;line-height:1.15}.next-battle-meta{font-size:12px;color:var(--text-dim)}@media(max-width:760px){.myteam-hero-side{grid-template-columns:1fr}}</style>
+<style id="myteam-next-battle-layout-fix">
+.myteam-hero-grid{grid-template-columns:minmax(0,1.2fr) minmax(210px,.8fr) minmax(240px,1fr)!important;align-items:stretch!important}
+.myteam-hero-grid>.myteam-hero-center{display:flex;align-items:stretch;min-width:0}
+.myteam-hero-center .next-battle-card{width:100%;min-height:100%;text-align:center;align-items:center;justify-content:center}
+.myteam-hero-grid>.myteam-hero-side{display:contents}
+.myteam-hero-side .myteam-budget{grid-column:3;grid-row:1}
+.myteam-hero-side .next-battle-card{grid-column:2;grid-row:1}
+@media(max-width:900px){.myteam-hero-grid{grid-template-columns:minmax(0,1fr) minmax(210px,.8fr)!important}.myteam-hero-side .myteam-budget{grid-column:2}.myteam-hero-side .next-battle-card{grid-column:1;grid-row:2}}
+@media(max-width:650px){.myteam-hero-grid{grid-template-columns:1fr!important}.myteam-hero-side .myteam-budget,.myteam-hero-side .next-battle-card{grid-column:1;grid-row:auto}}
+</style>
+<style id="sbl-global-theme-style">
+:root{--sbl-theme-accent:var(--amber);--sbl-theme-bg:var(--bg);--sbl-theme-panel:var(--panel);--sbl-theme-panel-alt:var(--panel-alt);--sbl-theme-border:var(--border);--sbl-theme-text:var(--text);--sbl-theme-muted:var(--text-dim)}
+/* Shared theme layer: keeps pages that use hard-coded colors visually in sync. */
+body{background-color:var(--bg);color:var(--text)}
+input,textarea,select{background-color:var(--panel-alt);border-color:var(--border);color:var(--text)}
+button{color:var(--text)}
+.panel,.card,.set-card,.statbox,.notice,.roster-toolbar,.ticker,.speed-matrix-wrap{background-color:var(--panel);border-color:var(--border)}
+.mon,.mon-pill,.pick-card,.pick-card.checked,.chip,.badge,.speed-pin-chip{background-color:var(--panel-alt);border-color:var(--border)}
+th{border-color:var(--border)}
+td{border-color:var(--border)}
+a{color:var(--amber)}
+</style>
+<script id="sbl-global-theme-loader" src="js/sbl-themes.js"></script>
+<style id="theme-family-ui">
+.theme-grid{align-items:stretch}
+.theme-family-label{grid-column:1/-1;margin:14px 0 2px;padding:7px 10px;border:1px solid var(--border);border-radius:9px;background:var(--panel-alt);color:var(--text-dim);font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em}
+.theme-family-label:first-child{margin-top:0}
+</style>
+
+<style id="myteam-updates-ui">
+.record-adjust{cursor:pointer}
+.recent-battles-list{display:grid;gap:8px}
+.recent-battle-row{display:grid;grid-template-columns:82px minmax(0,1fr) 92px auto;align-items:center;gap:12px;padding:11px 12px;border:1px solid var(--border);background:var(--panel-alt);border-radius:10px;transition:.12s ease}
+.recent-battle-row:hover{border-color:var(--amber);transform:translateY(-1px)}
+.recent-battle-week{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-dim);font-weight:800}
+.recent-battle-match{font-size:13px;font-weight:750;min-width:0}
+.recent-battle-match .vs{color:var(--text-dim);font-weight:400;margin:0 5px}
+.recent-battle-meta{font-size:11px;color:var(--text-dim);margin-top:2px}
+.recent-result{font-size:11px;font-weight:800;text-transform:uppercase}
+.recent-result.win{color:var(--teal)}.recent-result.loss{color:var(--red)}.recent-result.unknown{color:var(--text-dim)}
+@media(max-width:700px){.recent-battle-row{grid-template-columns:1fr auto}.recent-battle-week{grid-column:1}.recent-battle-match{grid-column:1}.recent-result{grid-column:2;grid-row:1/3}.recent-battle-row .ghost{grid-column:1/-1;width:100%}}
+/* Replay-browser-style match popup */
+.myteam-replay-overlay{position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;padding:24px 16px;overflow-y:auto;background:rgba(6,9,14,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);animation:myteamOverlayIn .22s ease both}
+.myteam-replay-box{background:linear-gradient(145deg,var(--panel),var(--panel-alt));border:1px solid var(--border);border-radius:14px;padding:20px;max-width:1080px;width:min(1080px,calc(100vw - 32px));box-shadow:0 28px 90px rgba(0,0,0,.5);animation:myteamModalIn .28s cubic-bezier(.16,1,.3,1) both}
+.myteam-summary-header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:14px}.myteam-summary-kicker{color:var(--text-dim);font-size:12px;text-transform:uppercase;letter-spacing:.08em}.myteam-summary-header h3{font-size:21px;margin:5px 0 3px}.myteam-summary-vs{color:var(--text-dim);font-weight:400}.myteam-summary-result{font-weight:700;color:var(--teal);font-size:13px}.myteam-summary-meta{display:flex;flex-direction:column;align-items:flex-end;gap:5px;color:var(--text-dim);font-size:11px;text-align:right}.myteam-summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.myteam-summary-side{border:1px solid var(--border);border-radius:10px;background:var(--panel-alt);padding:12px}.myteam-summary-side-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.myteam-summary-team{font-size:11px;color:var(--text-dim);margin-top:2px}.myteam-summary-score{font-size:11px;color:var(--text-dim)}.myteam-summary-line{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;font-size:11px;color:var(--text-dim)}.myteam-summary-mons{display:grid;gap:6px}.myteam-summary-mon{display:flex;align-items:center;gap:8px;border-top:1px solid var(--border);padding-top:7px}.myteam-summary-mon .sprite{width:34px;height:34px}.myteam-summary-mon-main{min-width:0;flex:1}.myteam-summary-mon-stats{font-size:10px;color:var(--text-dim);margin-top:2px}.myteam-summary-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+@keyframes myteamOverlayIn{from{opacity:0}to{opacity:1}}@keyframes myteamModalIn{from{opacity:0;transform:translateY(24px) scale(.94);filter:blur(2px)}to{opacity:1;transform:none;filter:blur(0)}}
+@media(max-width:700px){.myteam-summary-grid{grid-template-columns:1fr}.myteam-summary-header{flex-direction:column}.myteam-summary-meta{align-items:flex-start;text-align:left}.myteam-replay-box{width:calc(100vw - 20px);padding:14px}}
+</style>
+<style id="sbl-theme-final-overrides">
+/* Final site-wide theme surface and text pass */
+:root{
+  --sbl-card-bg:var(--panel);
+  --sbl-card-alt:var(--panel-alt);
+  --sbl-card-border:var(--border);
+  --sbl-page-bg:var(--bg);
+  --sbl-text:var(--text);
+  --sbl-muted:var(--text-dim);
+}
+
+html,body{background:var(--sbl-page-bg) !important;color:var(--sbl-text);}
+
+/* Major overview/team surfaces */
+.team-card,
+.overview-card,
+.franchise-card,
+.commissioner-budget-card,
+.pokemon-card,
+.hero,
+.myteam-hero,
+.myteam-card,
+.myteam-panel,
+.next-battle-card,
+.myteam-budget,
+.myteam-summary,
+.myteam-mon-card,
+.recent-battle-row,
+.fixture-match,
+.conference-block,
+.conference-heading,
+.roster-card,
+.roster-team,
+.free-agent-card,
+.fa-card,
+.team-analysis-card,
+.switch-card,
+.switch-card-detail,
+.damage-calc-card,
+.damage-calc-side,
+.trade-col,
+.trade-filter-panel,
+#proposePanel,
+#tradeSummary{
+  background:var(--sbl-card-bg) !important;
+  border-color:var(--sbl-card-border) !important;
+  color:var(--sbl-text);
+}
+
+.team-card:hover,
+.overview-card:hover,
+.franchise-card:hover,
+.pokemon-card:hover,
+.free-agent-card:hover,
+.standings-row:hover{
+  background:var(--sbl-card-alt) !important;
+}
+
+/* Team cards previously had a hard-coded dark gradient. */
+.team-card{background:var(--sbl-card-bg) !important;}
+
+/* Secondary surfaces */
+.mon,
+.mon-pill,
+.pick-card,
+.pick-card.checked,
+.chip,
+.badge,
+.speed-pin-chip,
+.myteam-mon-stat,
+.selected-chip{
+  background:var(--sbl-card-alt);
+  border-color:var(--sbl-card-border);
+}
+
+/* Inputs and controls */
+input,textarea,select{
+  background:var(--sbl-card-alt) !important;
+  border-color:var(--sbl-card-border) !important;
+  color:var(--sbl-text) !important;
+}
+
+/* Theme-aware headings and ordinary text. */
+.panel h1,.panel h2,.panel h3,.panel h4,
+.card h1,.card h2,.card h3,.card h4,
+.team-card-name,.team-card-sub,
+.team-name,.team-record,.death-cause-title,
+.franchise-name,.franchise-sub,
+.standings-team-name,.pokemon-name,.pick-card-name,
+.section-title,.page-title,.card-title{
+  color:var(--sbl-text) !important;
+}
+
+/* Table headings */
+th{color:var(--sbl-text) !important;border-color:var(--sbl-card-border) !important;}
+td{border-color:var(--sbl-card-border) !important;}
+
+/* Positive results follow theme accent. */
+.kills,.kill,.kill-count,.stat-kills,.stat-win,.stat-wins,
+.win-count,.wins,.record-win,.fixture-result,.fixture-summary,
+.myteam-summary-result,.result-win,.win-text,
+.fixture-match.fixture-played .fixture-status{
+  color:var(--teal) !important;
+}
+
+/* Losses use the theme-aware negative variable. */
+.loss,.losses,.loss-count,.stat-loss,.stat-losses,.loss-text,
+.record-loss,.result-loss,.form-pip.loss{
+  color:var(--red) !important;
+}
+
+/* Fixture cards */
+.fixture-team{color:var(--sbl-text) !important;}
+.fixture-team.fixture-winner{color:var(--teal) !important;}
+.fixture-status{
+  background:var(--sbl-card-alt) !important;
+  border-color:var(--sbl-card-border) !important;
+  color:var(--sbl-muted) !important;
+}
+
+/* Ladder: never hide teams below the cutoff. */
+.standings-row{
+  opacity:1 !important;
+  visibility:visible !important;
+  filter:none !important;
+  background:var(--sbl-card-bg) !important;
+  color:var(--sbl-text) !important;
+}
+
+/* Modals/popouts */
+.modal,.modal-card,.profile-modal,.summary-modal,.overview-modal,
+.prep-detail-dialog,.prep-opponent-popout{
+  background:var(--sbl-card-bg) !important;
+  border-color:var(--sbl-card-border) !important;
+  color:var(--sbl-text);
+}
+
+/* Keep Pokémon type badges readable; their white text is intentional. */
+.type-badge,[class^="type-"],[class*=" type-"]{color:#fff !important;}
+</style>
+
+<style id="sbl-final-theme-ui-fix">
+/* Final site-wide theme normalization.  All surfaces and semantic text use
+   the active theme variables; fixed type colors remain intentionally untouched. */
+html,body{background:var(--bg)!important;color:var(--text)!important}
+
+/* Common surfaces */
+.panel,.card,.set-card,.statbox,.notice,.team-card,.overview-card,
+.franchise-card,.pokemon-card,.roster-card,.free-agent-card,.fa-card,
+.team-analysis-card,.prep-opponent-card,.prep-switch-card,.switch-card-detail,
+.speed-detail-card,.speed-matrix-wrap,.damage-calc-card,.damage-calc-side,
+.damage-calc-grid,.myteam-card,.myteam-panel,.next-battle-card,
+.budget-card,.replay-summary-box,.modalbox,.modal-card,.pokemon-modal,
+.pokemon-profile,.conference-block,.fixture-match,.fixture-week,
+.trade-col,.selected-chip,#tradeSummary,#proposePanel,
+.showdown-import-card,.showdown-saved-item{
+  color:var(--text);
+  background-color:var(--panel);
+  border-color:var(--border);
+}
+
+/* Secondary surfaces */
+.mon,.mon-pill,.pick-card,.chip,.badge,.speed-pin-chip,
+.meta-box,.profile-record-tab,.profile-grid>div,.speed-detail-card,
+.dc-move-group,.dc-result-move,.dc-result-damage,.showdown-import-text,
+.showdown-saved-actions button{
+  color:var(--text);
+  background-color:var(--panel-alt);
+  border-color:var(--border);
+}
+
+/* Headings and ordinary labels must contrast on every theme. */
+h1,h2,h3,h4,h5,h6,
+.panel h1,.panel h2,.panel h3,.panel h4,
+.card h1,.card h2,.card h3,.card h4,
+.team-card-name,.franchise-card-title,.pokemon-name,
+.pokemon-modal-head strong,.pokemon-profile h2,.pokemon-profile h3,
+.speed-matrix th,.speed-matrix tbody th,
+.damage-calc-card h2,.damage-calc-card h3{
+  color:var(--text)!important;
+}
+
+.note,.small,.muted,.sub,.meta,.stat-label,
+.speed-condition-title,.speed-detail-card label,
+.switch-card-detail,.switch-card-evs,.dc-results-subheading,
+.dc-auto-status,.prep-card-section>span{
+  color:var(--text-dim)!important;
+}
+
+/* Inputs */
+input,textarea,select{
+  background:var(--panel-alt)!important;
+  color:var(--text)!important;
+  border-color:var(--border)!important;
+}
+
+/* Team overview / roster cards: never retain a dark-only gradient. */
+.team-card,.overview-card,.franchise-card,.pokemon-card,.roster-card,
+.free-agent-card,.team-analysis-card,.prep-opponent-card{
+  background:var(--panel)!important;
+}
+
+/* Pokémon profile modal header must follow the active theme. */
+.pokemon-modal-head{
+  background:color-mix(in srgb,var(--panel) 96%,transparent)!important;
+  color:var(--text)!important;
+  border-bottom-color:var(--border)!important;
+}
+
+/* Switch-in analyser: the raw-damage detail belongs to the same card. */
+#switchResults .switch-card-detail,
+.prep-switch-card .switch-card-detail{
+  background:transparent!important;
+  color:var(--text-dim)!important;
+  border-color:transparent!important;
+}
+
+/* Speed matrix: softer, theme-derived status cells. */
+.speed-cell{background:var(--panel)!important;border-color:var(--border)!important;color:var(--text)!important}
+.speed-cell.speed-faster{
+  background:color-mix(in srgb,var(--teal) 12%,var(--panel))!important;
+  border-color:color-mix(in srgb,var(--teal) 42%,var(--border))!important;
+  color:var(--teal)!important;
+}
+.speed-cell.speed-slower{
+  background:color-mix(in srgb,var(--red) 10%,var(--panel))!important;
+  border-color:color-mix(in srgb,var(--red) 38%,var(--border))!important;
+  color:var(--red)!important;
+}
+.speed-cell.speed-tie{
+  background:color-mix(in srgb,var(--amber) 10%,var(--panel))!important;
+  border-color:color-mix(in srgb,var(--amber) 38%,var(--border))!important;
+  color:var(--amber)!important;
+}
+
+/* Roster budget */
+.budget-value.good{color:var(--teal)!important}
+.budget-value.negative{color:var(--red)!important}
+
+/* Positive / negative semantic values */
+.kills,.kill,.kill-count,.stat-kills,.win-count,.wins,
+.result-win,.win-text,.fixture-result,.fixture-summary,
+.myteam-summary-result,.fixture-match.fixture-played .fixture-status{
+  color:var(--teal)!important;
+}
+.loss,.loss-count,.result-loss,.loss-text,.record-loss{color:var(--red)!important}
+
+/* Cards and rows on light themes need visible separation without glare. */
+.fixture-match,.standings-row,.speed-cell,.team-card,.overview-card{
+  box-shadow:0 1px 3px rgba(30,35,40,.055);
+}
+
+/* Keep the navigation itself theme-aware. */
+.page-nav,.page-nav a,.page-nav select{
+  background:var(--panel)!important;color:var(--text)!important;border-color:var(--border)!important;
+}
+.page-nav a.active{background:var(--panel-alt)!important;color:var(--amber)!important}
+
+/* Do not override Pokémon type badge text/backgrounds. */
+.type-badge,[class^="type-"],[class*=" type-"]{color:inherit}
+</style>
+
+
+<style id="myteam-ui-polish">
+/* Softer "Use suggestion" action */
+#useTradeSuggestionBtn{
+  background:var(--panel-alt) !important;
+  color:var(--text) !important;
+  border:1px solid color-mix(in srgb,var(--border) 72%,var(--amber) 28%) !important;
+  border-radius:9px !important;
+  box-shadow:none !important;
+}
+#useTradeSuggestionBtn:hover{
+  background:color-mix(in srgb,var(--panel-alt) 88%,var(--amber) 12%) !important;
+  border-color:var(--amber) !important;
+  color:var(--text) !important;
+  box-shadow:0 4px 12px rgba(0,0,0,.07) !important;
+}
+
+/* Make the random suggestion container calm and consistent with the
+   rest of the My Team cards. */
+.random-trade{
+  background:var(--panel) !important;
+  border:1px solid var(--border) !important;
+  border-radius:12px !important;
+  padding:14px !important;
+}
+.random-trade-result{
+  margin-top:10px !important;
+  padding:11px !important;
+  border-radius:10px !important;
+  background:var(--panel-alt) !important;
+  border:1px solid var(--border) !important;
+}
+.random-trade-arrow{
+  color:var(--amber) !important;
+}
+
+/* Trades panel: remove the old hard-coded dark theme. */
+.trade-filter-panel{
+  background:var(--panel) !important;
+  border-color:var(--border) !important;
+  color:var(--text) !important;
+  box-shadow:0 8px 24px rgba(0,0,0,.07) !important;
+}
+.trade-filter-panel select{
+  background:var(--panel-alt) !important;
+  border-color:var(--border) !important;
+  color:var(--text) !important;
+}
+.trade-filter-panel .note{
+  color:var(--text-dim) !important;
+}
+
+/* Incoming / outgoing sections sit clearly below the Trades control card. */
+.trade-filter-panel + .panel{
+  margin-top:22px !important;
+}
+.trade-filter-panel + .panel + .panel{
+  margin-top:12px !important;
+}
+
+/* Keep the trade allowance card visually tied to the light theme. */
+#proposePanel + .panel{
+  background:var(--panel) !important;
+  border-color:var(--border) !important;
+}
+#proposePanel + .panel .trade-col{
+  background:var(--panel-alt) !important;
+  border:1px solid var(--border) !important;
+  border-radius:10px !important;
+  padding:12px !important;
+}
+
+/* Make the page selector feel like the rest of the site. */
+nav.tabs{
+  gap:6px !important;
+  padding:5px !important;
+  margin:20px 0 16px !important;
+  border:1px solid var(--border) !important;
+  border-radius:12px !important;
+  background:var(--panel) !important;
+}
+nav.tabs button{
+  border:1px solid transparent !important;
+  border-bottom:0 !important;
+  border-radius:8px !important;
+  padding:9px 13px !important;
+  color:var(--text-dim) !important;
+}
+nav.tabs button.active{
+  color:var(--text) !important;
+  background:var(--panel-alt) !important;
+  border-color:var(--border) !important;
+  box-shadow:0 2px 7px rgba(0,0,0,.06) !important;
+}
+nav.tabs button:hover{
+  color:var(--text) !important;
+  background:color-mix(in srgb,var(--panel-alt) 70%,transparent) !important;
+}
+
+/* Mobile */
+@media(max-width:700px){
+  nav.tabs{
+    overflow-x:auto !important;
+    flex-wrap:nowrap !important;
+    scrollbar-width:none !important;
+  }
+  nav.tabs::-webkit-scrollbar{display:none}
+  nav.tabs button{flex:0 0 auto !important;white-space:nowrap !important;}
+}
+</style>
+
+
+<style id="random-trade-theme-fix">
+/* You Give / You Get cards — fully match the active light theme */
+.random-trade-flow{
+  gap:10px !important;
+}
+
+.random-trade-side{
+  min-width:0 !important;
+  padding:12px !important;
+  border:1px solid var(--border) !important;
+  border-radius:11px !important;
+  background:var(--panel-alt) !important;
+  box-shadow:0 3px 10px rgba(0,0,0,.045) !important;
+}
+
+.random-trade-side .label{
+  color:var(--text-dim) !important;
+  font-size:9px !important;
+  font-weight:800 !important;
+  letter-spacing:.07em !important;
+  text-transform:uppercase !important;
+}
+
+.random-trade-mon{
+  display:flex !important;
+  align-items:center !important;
+  gap:8px !important;
+  margin-top:7px !important;
+  padding:8px !important;
+  border:1px solid var(--border) !important;
+  border-radius:9px !important;
+  background:var(--panel) !important;
+  color:var(--text) !important;
+  font-weight:800 !important;
+  font-size:12px !important;
+}
+
+.random-trade-mon .sprite{
+  width:42px !important;
+  height:42px !important;
+  object-fit:contain !important;
+  flex:0 0 auto !important;
+}
+
+.random-trade-side > .note{
+  margin:6px 0 0 !important;
+  color:var(--text-dim) !important;
+  font-family:var(--mono) !important;
+  font-size:10px !important;
+  font-weight:700 !important;
+}
+
+.random-trade-arrow{
+  width:28px !important;
+  height:28px !important;
+  display:grid !important;
+  place-items:center !important;
+  border:1px solid var(--border) !important;
+  border-radius:50% !important;
+  background:var(--panel) !important;
+  color:var(--amber) !important;
+  font-size:16px !important;
+  font-weight:800 !important;
+  box-shadow:0 2px 7px rgba(0,0,0,.05) !important;
+}
+
+/* Keep the whole suggestion result visually unified */
+#randomTradeResult{
+  background:transparent !important;
+}
+
+@media(max-width:600px){
+  .random-trade-flow{
+    grid-template-columns:1fr !important;
+  }
+  .random-trade-arrow{
+    margin:auto !important;
+    transform:rotate(90deg);
+  }
+}
+</style>
+
+
+<style id="tabs-vertical-center-fix">
+/* Center Dashboard / Trades / Match History tabs vertically */
+nav.tabs{
+  display:flex !important;
+  align-items:center !important;
+  min-height:48px !important;
+  box-sizing:border-box !important;
+  padding:4px 5px !important;
+}
+
+nav.tabs button{
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  height:36px !important;
+  min-height:36px !important;
+  margin:0 !important;
+  padding:0 13px !important;
+  line-height:1 !important;
+  box-sizing:border-box !important;
+}
+
+nav.tabs button .tab-badge{
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  vertical-align:middle !important;
+  margin-left:5px !important;
+}
+
+@media(max-width:700px){
+  nav.tabs{
+    min-height:48px !important;
+    align-items:center !important;
+  }
+  nav.tabs button{
+    height:36px !important;
+    min-height:36px !important;
+  }
+}
+</style>
+
+
+<style id="site-nav-stats-match">
+/* My Team site nav: match Stats/Free Agency navigation exactly */
+.page-nav{
+  width:100% !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  gap:4px !important;
+  flex-wrap:wrap !important;
+  padding:10px 16px !important;
+  margin:0 0 20px !important;
+  border-bottom:1px solid var(--border,#ddd) !important;
+  background:var(--panel,#fff) !important;
+  box-sizing:border-box !important;
+  position:fixed !important;
+  top:0 !important;
+  left:0 !important;
+  right:0 !important;
+  width:100% !important;
+  height:58px !important;
+  z-index:1000 !important;
+  box-shadow:0 6px 18px rgba(0,0,0,.18) !important;
+  transform:translateY(0);
+  transition:transform .22s ease,box-shadow .22s ease;
+}
+.page-nav.nav-hidden{transform:translateY(-100%) !important;box-shadow:none !important}
+.page-nav a{
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  padding:8px 13px !important;
+  border-radius:8px !important;
+  color:var(--text,#222) !important;
+  text-decoration:none !important;
+  font-size:12px !important;
+  font-weight:700 !important;
+  white-space:nowrap !important;
+  transition:background .15s,border-color .15s,color .15s !important;
+  border:1px solid transparent !important;
+}
+.page-nav a:hover{background:var(--panel-alt,#f4f4f4) !important;border-color:var(--border,#ddd) !important}
+.page-nav a.active{background:var(--panel-alt,#f4f4f4) !important;border-color:var(--border,#ddd) !important;color:var(--amber,var(--accent,#c98b2e)) !important}
+body{padding-top:58px !important}
+</style>
+
+
+<style id="give-get-theme-match">
+.trade-cols{
+  gap:12px !important;
+}
+.trade-col{
+  background:var(--panel-alt) !important;
+  border:1px solid var(--border) !important;
+  border-radius:12px !important;
+  box-shadow:0 1px 3px rgba(30,35,40,.055) !important;
+}
+.trade-col h4{
+  color:var(--text) !important;
+}
+.selected-row{
+  background:var(--panel) !important;
+  border-color:var(--border) !important;
+}
+.pick-card{
+  background:var(--panel) !important;
+  border-color:var(--border) !important;
+  color:var(--text) !important;
+  box-shadow:0 1px 3px rgba(30,35,40,.045) !important;
+}
+.pick-card:hover{
+  background:var(--panel-alt) !important;
+  border-color:color-mix(in srgb,var(--border) 55%,var(--amber) 45%) !important;
+}
+</style>
+
+
+<style id="trade-sprite-theme-fix">
+.random-trade-mon,
+.trade-col .pick-card,
+.trade-col .pick-card .sprite-wrap,
+.trade-col .selected-row .chip{
+  background:var(--panel) !important;
+  border-color:var(--border) !important;
+  color:var(--text) !important;
+}
+.random-trade-mon .sprite,
+.trade-col .pick-card .sprite{
+  background:var(--panel) !important;
+  border-radius:8px !important;
+}
+.trade-col .pick-card:hover,
+.trade-col .pick-card:hover .sprite-wrap{
+  background:var(--panel-alt) !important;
+}
+</style>
+
+  <link rel="stylesheet" href="css/sbl-site.css">
+  <link rel="stylesheet" href="css/sbl-sprites-layout.css">
+</head>
+<body>
+
+<nav id="pageNav" class="page-nav" aria-label="Site navigation"></nav>
+<div id="app">
+  <header>
+    <h1>My Team</h1>
+    <div class="sub">Manage your roster, propose trades, and browse free agency</div>
+  </header>
+  <div id="content"><div class="empty-state">Loading…</div></div>
+</div>
+
+<script src="js/sbl-site.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/pokemon-dex-ids.js"></script>
+<script src="js/services/pokemon.js"></script>
+<script src="js/services/seasons.js"></script>
+<script src="js/services/league.js"></script>
+<script src="js/services/replays.js"></script>
+<script src="js/services/trades.js"></script>
+<script>
+(function(){
+  const SUPABASE_URL = 'https://dfxdkkemltukxaklhcpo.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_H7iIBiJTxY77lBAcpJn2VQ_u2hAG2CN';
+  const SUPABASE_STATE_ID = '__dashboard_state__';
+  
+  const ROSTER_BUDGET = 115; // keep in sync with the `budget` constant in accept_trade()
+  function currentSeason(){ return new Date().getFullYear(); }
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  // ---------- theme ----------
+  // A per-device full-palette preference for this dashboard: background,
+  // panels, borders, text, and accent all swap together, and the same
+  // palette is read by every other page on the site (see their own loader
+  // scripts) so the whole site stays in sync.
+  const THEMES = window.SBL_THEMES; // shared single source, defined in sbl-global-theme-loader above
+  // Kills/deaths stat colors stay constant across themes so they keep their
+  // meaning (teal = positive, red = negative) no matter which palette is active.
+  const THEME_TEAL = '#5eead4', THEME_RED = '#ff7a7a';
+  const THEME_STORAGE_KEY = 'sbl_dashboard_theme';
+  const CUSTOM_THEME_KEY = 'sbl_dashboard_custom_theme';
+  function getSavedThemeId(){
+    try{ return localStorage.getItem(THEME_STORAGE_KEY) || 'amber'; }catch(e){ return 'amber'; }
+  }
+  // persist=false just paints the palette without writing to storage, so a
+  // first-ever visit doesn't silently stamp "amber" as an explicit choice
+  // and override every other page's own default look.
+  function getCustomTheme(){ try{ return JSON.parse(localStorage.getItem(CUSTOM_THEME_KEY)||'null'); }catch(e){ return null; } }
+  function applyTheme(id, persist){
+    let theme;
+    if(id==='custom'){
+      const custom=getCustomTheme();
+      const base=THEMES.find(t=>t.id===(custom?.base||'amber'))||THEMES[0];
+      theme=Object.assign({},base,custom||{});
+      if(custom?.enabled){ Object.keys(base).forEach(k=>{ if(['id','name'].includes(k))return; if(custom.enabled[k]===false) theme[k]=base[k]; }); }
+    }else theme=THEMES.find(t=>t.id===id) || THEMES[0];
+    const root = document.documentElement.style;
+    ['bg','panel','panelAlt','border','text','textDim','accent','accentText'].forEach(k=>{ if(theme[k]) root.setProperty('--'+(k==='panelAlt'?'panel-alt':k==='textDim'?'text-dim':k==='accentText'?'amber-text':k),theme[k]); });
+    root.setProperty('--amber', theme.accent);
+    root.setProperty('--teal', theme.accent || THEME_TEAL);
+    root.setProperty('--red', 'color-mix(in srgb, #ef4444 72%, ' + (theme.accent || THEME_TEAL) + ')');
+
+    // Shared surface aliases. These must be updated here too so the
+    // currently-open page repaints immediately when the theme changes.
+    root.setProperty('--sbl-theme-accent', theme.accent || THEME_TEAL);
+    root.setProperty('--sbl-card-bg', theme.panel || theme.bg);
+    root.setProperty('--sbl-card-alt', theme.panelAlt || theme.panel || theme.bg);
+    root.setProperty('--sbl-card-border', theme.border || 'rgba(127,127,127,.25)');
+    root.setProperty('--sbl-page-bg', theme.bg || '#111');
+    root.setProperty('--sbl-text', theme.text || '#fff');
+    root.setProperty('--sbl-muted', theme.textDim || theme.text || '#aaa');
+
+    // Compatibility aliases used by some pages' CSS.
+    root.setProperty('--panel2', theme.panelAlt||theme.panel);
+    root.setProperty('--dim', theme.textDim||theme.text);
+    if(persist !== false){ try{ localStorage.setItem(THEME_STORAGE_KEY, id); }catch(e){} }
+    return theme;
+  }
+  applyTheme(getSavedThemeId(), false);
+  window.addEventListener('storage', function(e){ if(e.key==='sbl_dashboard_theme' && e.newValue){ applyTheme(e.newValue, false); } }); // apply saved (or default) theme as early as possible, without forcing a save
+
+  const appEl = document.getElementById('app');
+  const contentEl = document.getElementById('content');
+
+
+  let session = null;
+  let profile = null;
+  let DASH = { teamMap:{}, settings:{ rosters:{}, freeAgency:{ mons:[] }, feedback:[] }, replays:{} };
+  let trades = [];
+  let tradeLimits = [];
+  let activeTradeSeason = new Date().getFullYear();
+  let activeTab = 'myteam';
+  let draft = { target:'', offered:new Set(), requested:new Set(), faQuery:'' };
+  let statusMsg = '';
+
+  // ---------- helpers ----------
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function toShowdownId(species){ return SBL.pokemon.normalizeName(species); }
+  function spriteUrl(species){ return SBL.pokemon.spriteUrl(species); }
+  function spriteImg(species, cls){ return SBL.pokemon.spriteMarkup(species, cls || 'sprite'); }
+  function normalizeStoredRosters(rosters){
+    const out = {};
+    for(const [team, list] of Object.entries(rosters || {})){
+      out[team] = (Array.isArray(list) ? list : []).map(mon => {
+        if(typeof mon === 'string') return {name:mon, points:null};
+        return {name:String(mon?.name ?? ''), points:mon?.points ?? null};
+      }).filter(mon => mon.name);
+    }
+    return out;
+  }
+  function teamsList(){ return Object.keys(DASH.settings.rosters||{}).sort(); }
+  function myRoster(){ return (profile && profile.team_name && DASH.settings.rosters[profile.team_name]) || []; }
+  function rosterPoints(list){ return (list||[]).reduce((s,m)=> s + (Number(m.points)||0), 0); }
+  function freeAgencyMons(){
+    const pool = Array.isArray(DASH.settings?.freeAgency?.mons)
+      ? DASH.settings.freeAgency.mons
+      : [];
+
+    // Free Agency is only for genuinely undrafted Pokémon. The published
+    // Free Agency board may still contain a Pokémon that was later drafted,
+    // traded, or otherwise moved onto a team, so filter against every
+    // currently published team roster before showing anything as available.
+    const drafted = new Set();
+    for(const roster of Object.values(DASH.settings?.rosters || {})){
+      for(const mon of (Array.isArray(roster) ? roster : [])){
+        const name = typeof mon === 'string' ? mon : mon?.name;
+        if(name) drafted.add(pokemonMatchKey(name));
+      }
+    }
+
+    return pool.filter(mon => mon?.name && !drafted.has(pokemonMatchKey(mon.name)));
+  }
+
+  // ---------- pokémon stat aggregation (mirrors stats.html) ----------
+  function normName(n){
+    return String(n??'').trim().toLowerCase().replace(/-/g,' ').replace(/_/g,' ').replace(/\s+/g,' ');
+  }
+
+  // Pokémon forms can be named differently between the Free Agency board,
+  // published rosters, and trade records. Treat the optional "Paldea"
+  // regional token as equivalent while preserving the actual stored name.
+  function pokemonMatchKey(n){
+    return normName(n)
+      .replace(/\bpaldea\b/g)
+      .replace(/\bform\b/g)
+      .replace(/\s+/g,' ')
+      .trim();
+  }
+
+  function pokemonSameSpeciesForm(a,b){
+    const left=pokemonMatchKey(a), right=pokemonMatchKey(b);
+    return !!left && !!right && left===right;
+  }
+
+  function canonicalPokemonName(name,candidates){
+    const exact=String(name??'').trim();
+    const exactMatch=(candidates||[]).find(c=>normName(c)===normName(exact));
+    if(exactMatch) return exactMatch;
+    const k=pokemonMatchKey(exact);
+    return (candidates||[]).find(c=>pokemonMatchKey(c)===k) || exact;
+  }
+
+  // Pokémon forms can be named differently between the Free Agency board,
+  // published rosters, and trade records. In particular, Paldean Tauros
+  // forms may appear as either "Tauros Paldea Blaze" or "Tauros Blaze".
+  // Build a comparison key that treats the explicit "Paldea" token as
+  // optional, while preserving the actual stored roster name as canonical.
+  function pokemonMatchKey(n){
+    return normName(n)
+      .replace(/\bpaldea\b/g)
+      .replace(/\s+/g,' ')
+      .trim();
+  }
+
+  function canonicalPokemonName(name, candidates){
+    const target = normName(name);
+    const exact = (candidates||[]).find(c => normName(c) === target);
+    if(exact) return exact;
+
+    const key = pokemonMatchKey(name);
+    const match = (candidates||[]).find(c => pokemonMatchKey(c) === key);
+    return match || name;
+  }
+
+  function canonicalTradePokemonName(name, roster, freeAgencyPool){
+    const candidates = [
+      ...(Array.isArray(roster) ? roster : []).map(m => typeof m === 'string' ? m : m?.name),
+      ...(Array.isArray(freeAgencyPool) ? freeAgencyPool : []).map(m => typeof m === 'string' ? m : m?.name)
+    ].filter(Boolean);
+    return canonicalPokemonName(name, candidates);
+  }
+  function teamFor(username){
+    const key = (username||'').trim().toLowerCase();
+    return DASH.teamMap[key] || (username||'').trim() || 'Unknown';
+  }
+  // Aggregates this coach's season stats for one species across every stored
+  // replay where that Pokémon appeared on the coach's side.
+  function myPokemonStats(species){
+    if(!profile || !profile.team_name) return null;
+    const target = normName(species);
+    let dealt=0, taken=0, kills=0, deaths=0, assists=0, games=0, winGames=0, wins=0;
+    for(const r of Object.values(DASH.replays||{})){
+      for(const k in (r.mons||{})){
+        const m = r.mons[k];
+        if(normName(m.species) !== target) continue;
+        if(teamFor(r.players?.[m.side]) !== profile.team_name) continue;
+        dealt += m.damageDealt||0;
+        taken += m.damageTaken||0;
+        kills += m.kills||0;
+        deaths += m.deaths||0;
+        assists += m.assists||0;
+        const appearances = m.appearances||0;
+        games += appearances;
+        if(appearances > 0){
+          winGames++;
+          // Replays store the winner as a username (r.winner), not a per-side
+          // results map, so fall back to comparing against the coach on this side.
+          const result = r.results && r.results[m.side] ? r.results[m.side]
+            : (r.winner && r.winner.toLowerCase()===(r.players?.[m.side]||'').toLowerCase() ? 'W' : (r.winner ? 'L' : null));
+          if(result === 'W') wins++;
+        }
+      }
+    }
+    return { dealt, taken, kills, deaths, assists, games, winPct: winGames ? Math.round(100*wins/winGames) : null };
+  }
+
+  // ---------- data loading ----------
+  async function loadDashboardState(){
+    const { data, error } = await SBL.replays.load(supabase);
+    if(error) throw error;
+    const { sharedState, replays } = SBL.replays.partition(data);
+    const shared = sharedState || {};
+    const snap = SBL.seasons.getSnapshot(shared);
+    DASH.teamMap = snap.teamMap;
+    DASH.settings = Object.assign({ rosters:{}, freeAgency:{mons:[]} }, snap.settings || {});
+    DASH.settings.rosters = normalizeStoredRosters(DASH.settings.rosters||{});
+    DASH.replays = snap.archived ? snap.replays : replays;
+  }
+
+  async function loadProfile(){
+    const uid = session.user.id;
+    let {data, error} = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle();
+    if(error) throw error;
+    if(!data){
+      const {data: created, error: insErr} = await supabase.from('profiles')
+        .insert({ id: uid, email: session.user.email })
+        .select('*').single();
+      if(insErr) throw insErr;
+      data = created;
+    }
+    profile = data;
+  }
+
+  async function loadTrades(){
+    // The active trade season is controlled by the commissioner reset, not by
+    // the calendar year. This is critical after an end-of-season reset.
+    const {data:seasonRow, error:seasonErr} = await supabase
+      .from('trade_season_settings')
+      .select('active_season')
+      .eq('id', 1)
+      .maybeSingle();
+    if(seasonErr) throw seasonErr;
+    activeTradeSeason = Number(seasonRow?.active_season) || new Date().getFullYear();
+
+    const {data, error} = await supabase.from('trade_requests').select('*').order('created_at', {ascending:false});
+    if(error) throw error;
+    trades = data || [];
+
+    const {data:limits, error:limitErr} = await supabase
+      .from('franchise_trade_limits')
+      .select('*')
+      .eq('season', activeTradeSeason);
+    if(limitErr){
+      console.warn('Franchise trade limits unavailable; using 8-trade defaults:', limitErr.message);
+      tradeLimits = [];
+    }else{
+      tradeLimits = limits || [];
+    }
+  }
+
+  function tradeLimitFor(team, kind){
+    const row = tradeLimits.find(x => x.team_name === team);
+    if(!row) return 8;
+    return kind === 'freeagency' ? Math.max(0, Number(row.free_agency_trade_limit) || 0) : Math.max(0, Number(row.team_trade_limit) || 0);
+  }
+
+  function completedTradeCount(team, kind='team'){
+    return SBL.trades.consumedCount(trades, team, kind, activeTradeSeason);
+  }
+
+  function tradeAllowance(team, kind='team'){
+    const limit=tradeLimitFor(team,kind);
+    const used=completedTradeCount(team,kind);
+    // Commissioner-granted credits belong to the player account. They are
+    // shown on the player's dashboard and added to the normal allowance.
+    // For a franchise-level display we leave the franchise limit itself intact.
+    const credits = profile?.team_name === team ? Math.max(0, Number(profile?.trade_credits) || 0) : 0;
+    return {limit,used,credits,remaining:Math.max(0,limit+credits-used)};
+  }
+
+  async function refreshAll(){
+    await Promise.all([loadDashboardState(), loadProfile(), loadTrades()]);
+    const rawRosters = DASH.settings.rosters || {};
+    DASH.settings.rosters = SBL.trades.getEffectiveRosters(rawRosters, trades);
+    DASH.settings.freeAgency = DASH.settings.freeAgency || {mons:[]};
+    DASH.settings.freeAgency.mons = SBL.trades.restoreFutureFreeAgencyPool(
+      DASH.settings.freeAgency.mons || [],
+      rawRosters,
+      trades
+    );
+  }
+
+  // ---------- auth screens ----------
+  function renderAuthGate(){
+    appEl.querySelector('header .sub').textContent = 'Sign in to manage your team';
+    contentEl.innerHTML = `
+      <div class="gate">
+        <div class="panel">
+          <div class="gate-mark">SBL</div>
+          <h2>Welcome back</h2>
+          <div class="gate-sub">Sign in to manage your team, or create an account to get started.</div>
+          <label>Email</label>
+          <input id="authEmail" type="email" autocomplete="username" placeholder="you@example.com" style="margin-bottom:12px;">
+          <label>Password</label>
+          <input id="authPassword" type="password" autocomplete="current-password" placeholder="Password" style="margin-bottom:14px;">
+          <div class="foot-actions">
+            <button class="primary" id="loginBtn" style="flex:1;">Log in</button>
+            <button class="ghost" id="signupBtn" style="flex:1;">Sign up</button>
+          </div>
+          <div id="authMsg" class="note"></div>
+        </div>
+      </div>`;
+    const msgEl = document.getElementById('authMsg');
+    const setMsg = (text, danger)=>{ msgEl.className = 'note' + (danger?' danger':' ok'); msgEl.textContent = text; };
+
+    document.getElementById('loginBtn').onclick = async ()=>{
+      const email = document.getElementById('authEmail').value.trim();
+      const password = document.getElementById('authPassword').value;
+      if(!email || !password){ setMsg('Enter your email and password.', true); return; }
+      const btn = document.getElementById('loginBtn'); btn.disabled = true;
+      const {data, error} = await supabase.auth.signInWithPassword({email, password});
+      btn.disabled = false;
+      if(error){ setMsg(error.message, true); return; }
+      session = data.session;
+      await boot();
+    };
+
+    document.getElementById('signupBtn').onclick = async ()=>{
+      const email = document.getElementById('authEmail').value.trim();
+      const password = document.getElementById('authPassword').value;
+      if(!email || !password){ setMsg('Enter an email and password.', true); return; }
+      if(password.length < 6){ setMsg('Password should be at least 6 characters.', true); return; }
+      const btn = document.getElementById('signupBtn'); btn.disabled = true;
+      const {data, error} = await supabase.auth.signUp({email, password});
+      btn.disabled = false;
+      if(error){ setMsg(error.message, true); return; }
+      if(data.session){ session = data.session; await boot(); }
+      else{ setMsg('Account created — check your email to confirm, then log in.', false); }
+    };
+  }
+
+  // ---------- team claim / status gate ----------
+  function renderTeamClaim(){
+    const current = profile.team_name || '';
+    const currentUsername = profile.username || '';
+    const needsUsername = !currentUsername;
+    const title = needsUsername ? 'Choose your username' : (current ? 'Your profile' : 'Choose your franchise');
+    const intro = needsUsername
+      ? 'Choose the username you want to use in the league. Your username identifies you and will be connected to your franchise.'
+      : 'Choose the franchise you own. Your username stays connected to this franchise unless an admin changes your profile.';
+
+    contentEl.innerHTML = `
+      <div class="gate">
+        <div class="panel">
+          <h2>${title}</h2>
+          <div class="note">${intro}</div>
+          ${needsUsername ? `
+            <label style="margin-top:12px;">Username</label>
+            <input id="usernamePick" type="text" value="" maxlength="24" placeholder="e.g. Poorvansh" autocomplete="nickname">
+            <div class="note">2–24 characters. Letters, numbers, underscores and hyphens only. Usernames are unique.</div>
+            <div class="foot-actions">
+              <button class="primary" id="saveUsernameBtn">Continue</button>
+            </div>
+          ` : `
+            <div class="profile-summary" style="margin-top:14px;">
+              <div><strong>Username</strong><br>${escapeHtml(currentUsername)}</div>
+            </div>
+            <div id="teamClaimFields"><div class="note">Loading available franchises…</div></div>
+            <div class="foot-actions">
+              <button class="primary" id="claimBtn" disabled>${current ? 'Update franchise' : 'Submit franchise claim'}</button>
+            </div>
+          `}
+          <div id="claimMsg" class="note"></div>
+        </div>
+      </div>`;
+
+    const msgEl = document.getElementById('claimMsg');
+
+    // Username is deliberately a separate onboarding step. This guarantees that
+    // every account gets a league username before entering the normal dashboard,
+    // even if the account already has a pending/approved franchise claim.
+    if(needsUsername){
+      const btn = document.getElementById('saveUsernameBtn');
+      btn.onclick = async ()=>{
+        const username = document.getElementById('usernamePick').value.trim();
+        if(!/^[A-Za-z0-9_-]{2,24}$/.test(username)){
+          msgEl.className='note danger';
+          msgEl.textContent='Username must be 2–24 characters and use only letters, numbers, underscores or hyphens.';
+          return;
+        }
+        btn.disabled = true;
+        try{
+          const {error} = await supabase.from('profiles').update({username}).eq('id', session.user.id);
+          if(error) throw error;
+          await loadProfile();
+          renderTeamClaim();
+        }catch(e){
+          msgEl.className='note danger';
+          msgEl.textContent = /duplicate|unique/i.test(e.message||'') ? 'That username is already taken. Please choose another.' : e.message;
+          btn.disabled = false;
+        }
+      };
+      return;
+    }
+
+    (async ()=>{
+      const allTeams = teamsList();
+      let taken = new Set();
+      try{
+        const {data, error} = await supabase.from('profiles').select('team_name').eq('status','approved').neq('id', session.user.id);
+        if(error) throw error;
+        taken = new Set((data||[]).map(p=>p.team_name).filter(Boolean));
+      }catch(e){
+        console.warn('Could not check claimed teams:', e);
+      }
+      const teams = allTeams.filter(t => t === current || !taken.has(t));
+
+      const fieldsEl = document.getElementById('teamClaimFields');
+      if(!fieldsEl) return;
+      fieldsEl.innerHTML = teams.length ? `
+        <label style="margin-top:12px;">Franchise</label>
+        <select id="teamPick">
+          <option value="">— Select a franchise —</option>
+          ${teams.map(t=>`<option value="${escapeHtml(t)}" ${t===current?'selected':''}>${escapeHtml(t)}</option>`).join('')}
+        </select>` : `
+        <label style="margin-top:12px;">Franchise name</label>
+        <input id="teamPickText" type="text" value="${escapeHtml(current)}" placeholder="Type your franchise's exact name">
+        <div class="note">Franchises haven't been published yet, so type the exact franchise name — an admin will match it up.</div>`;
+
+      const btn = document.getElementById('claimBtn');
+      btn.disabled = false;
+      btn.onclick = async ()=>{
+        const val = teams.length ? document.getElementById('teamPick').value.trim() : document.getElementById('teamPickText').value.trim();
+        if(!val){ msgEl.className='note danger'; msgEl.textContent='Pick or type a franchise name.'; return; }
+        btn.disabled = true;
+        try{
+          const {error} = await supabase.from('profiles').update({ team_name: val, status: 'pending' }).eq('id', session.user.id);
+          if(error) throw error;
+          await loadProfile();
+          render();
+        }catch(e){
+          msgEl.className='note danger';
+          msgEl.textContent = e.message;
+          btn.disabled = false;
+        }
+      };
+    })();
+  }
+
+  function renderPendingOrRejected(){
+    const rejected = profile.status === 'rejected';
+    contentEl.innerHTML = `
+      <div class="gate">
+        <div class="panel">
+          <h2>${rejected ? 'Claim rejected' : 'Waiting for approval'}</h2>
+          <div class="note">
+            ${rejected
+              ? `Your claim for <strong>${escapeHtml(profile.team_name)}</strong> was rejected. Pick a different team below, or reach out to your commissioner if you think this is a mistake.`
+              : `Your claim for <strong>${escapeHtml(profile.team_name)}</strong> is <span class="status-pill pending">pending</span>. A commissioner needs to approve it before you can manage your roster or propose trades. You can still browse Free Agency and Rosters below.`}
+          </div>
+          <div class="foot-actions">
+            <button class="ghost" id="changeTeamBtn">${rejected ? 'Pick a different team' : 'Change team pick'}</button>
+          </div>
+        </div>
+      </div>`;
+    document.getElementById('changeTeamBtn').onclick = ()=>{ renderTeamClaim(); };
+  }
+
+  function recordAdjustKey(){ return `sbl_record_adjust_${session?.user?.id||'anonymous'}_${profile?.team_name||'team'}`; }
+  function getRecordAdjustments(){
+    try{ const x=JSON.parse(localStorage.getItem(recordAdjustKey())||'{}'); return {wins:Math.max(0,Number(x.wins)||0),losses:Math.max(0,Number(x.losses)||0)}; }catch(e){ return {wins:0,losses:0}; }
+  }
+  function saveRecordAdjustment(kind){
+    const x=getRecordAdjustments(); x[kind==='win'?'wins':'losses']++; try{localStorage.setItem(recordAdjustKey(),JSON.stringify(x));}catch(e){} return x;
+  }
+  // Pull the official W/L record from the same completed match results that feed the ladder.
+  // Replay rows may use either {p1,p2} or [player1,player2] for players.
+  function myTeamRecord(){
+    const team=String(profile?.team_name||'').trim();
+    let wins=0, losses=0, games=0;
+    const same=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
+    for(const r of Object.values(DASH.replays||{})){
+      if(!r || !r.players) continue;
+      const players=Array.isArray(r.players) ? r.players : [r.players.p1,r.players.p2];
+      let mySide=-1;
+      for(let side=0;side<2;side++){
+        if(same(teamFor(players[side]),team)){ mySide=side; break; }
+      }
+      if(mySide<0) continue;
+      const results=r.results||{};
+      const direct=results[mySide] ?? results[mySide===0?'p1':'p2'];
+      const v=typeof direct==='string' ? direct.trim().toLowerCase() : '';
+      let result=(v==='w'||v==='win'||v==='won')?'W':(v==='l'||v==='loss'||v==='lost')?'L':'';
+      if(!result && r.winner) result=same(r.winner,players[mySide])?'W':'L';
+      if(!result) continue;
+      games++;
+      if(result==='W') wins++; else losses++;
+    }
+    return {wins,losses,games};
+  }
+
+  let lastRandomTradeKey = '';
+
+  function randomTradeSuggestion(){
+    const mine=myRoster();
+    const myPts=rosterPoints(mine);
+    const candidates=[];
+    for(const team of teamsList().filter(t=>t!==profile.team_name)){
+      const theirs=DASH.settings.rosters[team]||[];
+      for(const give of mine){
+        for(const get of theirs){
+          const myAfter=myPts-(Number(give.points)||0)+(Number(get.points)||0);
+          const theirAfter=rosterPoints(theirs)-(Number(get.points)||0)+(Number(give.points)||0);
+          if(mine.length < 10 || theirs.length < 10) continue;
+          if(myAfter>ROSTER_BUDGET || theirAfter>ROSTER_BUDGET) continue;
+          candidates.push({team,give,get});
+        }
+      }
+    }
+    if(!candidates.length) return null;
+
+    // Prefer a different suggestion when the user presses Reroll. If there is
+    // only one legal trade, keep returning it rather than showing no result.
+    const fresh = candidates.filter(s => `${s.team}|${s.give.name}|${s.get.name}` !== lastRandomTradeKey);
+    const pool = fresh.length ? fresh : candidates;
+    const picked = pool[Math.floor(Math.random()*pool.length)];
+    lastRandomTradeKey = `${picked.team}|${picked.give.name}|${picked.get.name}`;
+    return picked;
+  }
+
+  function useRandomTradeSuggestion(s){
+    if(!s) return;
+    // Pre-fill the existing trade composer; nothing is submitted automatically.
+    draft.target=s.team;
+    draft.offered=new Set([s.give.name]);
+    draft.requested=new Set([s.get.name]);
+    draft.faQuery='';
+    activeTab='trades';
+    window.tradeViewFilter='pending';
+    renderTabs();
+    render();
+    requestAnimationFrame(()=>{
+      document.getElementById('proposePanel')?.scrollIntoView({behavior:'smooth',block:'start'});
+    });
+  }
+
+  // ---------- Bug reports / suggestions ----------
+  function feedbackItems(){
+    const list = Array.isArray(DASH.settings?.feedback) ? DASH.settings.feedback : [];
+    return list.slice().sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0));
+  }
+  function feedbackStatusLabel(v){
+    return v==='in-progress' ? 'In Progress' : v==='wont-fix' ? "Won't Fix" : v==='resolved' ? 'Resolved' : 'New';
+  }
+  async function submitFeedback(){
+    const type=document.getElementById('feedbackType')?.value||'bug';
+    const title=document.getElementById('feedbackTitle')?.value.trim()||'';
+    const description=document.getElementById('feedbackDescription')?.value.trim()||'';
+    const msg=document.getElementById('feedbackMsg');
+    if(!title||!description){ if(msg){msg.className='note danger';msg.textContent='Please give the submission a title and description.';} return; }
+    const btn=document.getElementById('submitFeedbackBtn'); if(btn) btn.disabled=true;
+    try{
+      DASH.settings.feedback=feedbackItems();
+      DASH.settings.feedback.unshift({
+        id:'fb-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),
+        type,title,description,
+        submittedBy:profile.username||profile.team_name||'League user',
+        team:profile.team_name||'',
+        status:'new',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()
+      });
+      await supabase.from('replays').upsert([{replay_id:SUPABASE_STATE_ID,replay_data:{teamMap:DASH.teamMap,settings:DASH.settings},updated_at:new Date().toISOString()}],{onConflict:'replay_id'});
+      if(msg){msg.className='note ok';msg.textContent='Submitted. Thanks — the commissioners can review it from the Admin Dashboard.';}
+      document.getElementById('feedbackTitle').value=''; document.getElementById('feedbackDescription').value='';
+      renderFeedback();
+    }catch(e){ if(msg){msg.className='note danger';msg.textContent='Could not submit: '+e.message;} }
+    finally{ if(btn) btn.disabled=false; }
+  }
+  function renderFeedback(){
+    const items=feedbackItems();
+    const mine=items.filter(x=>x.submittedBy===profile.username && (!x.team || x.team===profile.team_name));
+    contentEl.innerHTML=`
+      <section class="panel">
+        <div class="myteam-section-head"><div><h2>Bug Fixes & Suggestions</h2><div class="note">Found a bug or have an idea? Send it straight to the commissioners.</div></div></div>
+        <div class="feedback-form-grid" style="margin-top:14px">
+          <div><label for="feedbackType">Type</label><select id="feedbackType"><option value="bug">Bug Report</option><option value="suggestion">Suggestion</option><option value="ui">UI / Design</option><option value="league">League / Rules</option><option value="other">Other</option></select></div>
+          <div><label for="feedbackTitle">Title</label><input id="feedbackTitle" type="text" maxlength="120" placeholder="Short summary"></div>
+          <div class="full"><label for="feedbackDescription">Details</label><textarea id="feedbackDescription" rows="6" maxlength="3000" placeholder="Tell us what happened, what you expected, or what you'd like changed." style="width:100%;resize:vertical"></textarea></div>
+        </div>
+        <div class="foot-actions"><button class="primary" id="submitFeedbackBtn">Submit</button></div>
+        <div id="feedbackMsg" class="note"></div>
+      </section>
+      <section class="panel">
+        <div class="myteam-section-head"><div><h2>Your submissions</h2><div class="note">Track the status of feedback you've sent.</div></div></div>
+        <div class="feedback-list">${mine.length?mine.map(x=>`<div class="feedback-card"><div class="feedback-card-head"><div><div class="feedback-card-title">${escapeHtml(x.title)}</div><div class="feedback-meta">${escapeHtml(x.type)} · ${new Date(x.createdAt).toLocaleString()}</div></div><span class="feedback-status ${escapeHtml(x.status)}">${feedbackStatusLabel(x.status)}</span></div><div class="note" style="margin-top:9px;white-space:pre-wrap">${escapeHtml(x.description)}</div></div>`).join(''):'<div class="empty-state">You have not submitted anything yet.</div>'}</div>
+      </section>`;
+    document.getElementById('submitFeedbackBtn').onclick=submitFeedback;
+  }
+
+  // ---------- My Team tab ----------
+  function nextBattleForTeam(team){
+    const rounds = Array.isArray(DASH.settings?.fixture?.rounds) ? DASH.settings.fixture.rounds : [];
+    const key = v => String(v||'').trim().toLowerCase().replace(/[^a-z0-9]/g);
+    const target = key(team);
+    const played = (week, home, away) => Object.values(DASH.replays||{}).some(r=>{
+      if(!r || (r.week||'Unassigned') !== week || !r.players) return false;
+      const p1=teamFor(r.players.p1), p2=teamFor(r.players.p2), a=key(p1), b=key(p2);
+      return (a===key(home)&&b===key(away)) || (a===key(away)&&b===key(home));
+    });
+    for(const round of rounds){
+      for(const match of (round.matches||[])){
+        if(key(match.home)!==target && key(match.away)!==target) continue;
+        if(played(round.week,match.home,match.away)) continue;
+        return {week:round.week,opponent:key(match.home)===target?match.away:match.home};
+      }
+    }
+    return null;
+  }
+  function wireNextBattle(){
+    const card=document.getElementById('nextBattleCard'), op=document.getElementById('nextBattleOpponent'), meta=document.getElementById('nextBattleMeta');
+    if(!card||!op||!meta) return;
+    const battle=nextBattleForTeam(profile.team_name);
+    if(!battle){ op.textContent='No upcoming battle'; meta.textContent='Open Match Prep →'; card.href='team-analysis.html'; return; }
+    op.textContent=battle.opponent; meta.textContent=`${battle.week} · Open Match Prep →`;
+    card.href=`team-analysis.html?team=${encodeURIComponent(battle.opponent)}`;
+  }
+
+  function matchResultForTeam(r, team){
+    if(!r || !r.players) return '';
+    const players=Array.isArray(r.players)?r.players:[r.players.p1,r.players.p2];
+    let side=-1;
+    for(let i=0;i<2;i++){ if(String(teamFor(players[i])).trim().toLowerCase()===String(team).trim().toLowerCase()){ side=i; break; } }
+    if(side<0) return '';
+    const results=r.results||{};
+    const direct=results[side] ?? results[side===0?'p1':'p2'];
+    const v=typeof direct==='string'?direct.trim().toLowerCase():'';
+    if(v==='w'||v==='win'||v==='won') return 'W';
+    if(v==='l'||v==='loss'||v==='lost') return 'L';
+    if(r.winner) return String(r.winner).trim().toLowerCase()===String(players[side]||'').trim().toLowerCase()?'W':'L';
+    return '';
+  }
+  function myTeamMatchData(){
+    const team=profile?.team_name||'';
+    return Object.entries(DASH.replays||{}).map(([id,r])=>{
+      if(!r||!r.players) return null;
+      const players=Array.isArray(r.players)?r.players:[r.players.p1,r.players.p2];
+      const sides=players.map(p=>teamFor(p));
+      const side=sides.findIndex(t=>String(t).trim().toLowerCase()===String(team).trim().toLowerCase());
+      if(side<0) return null;
+      return {id:r.id||id,r,players,teams:sides,opponent:sides[side===0?1:0]||players[side===0?1:0]||'Unknown',result:matchResultForTeam(r,team),week:r.week||'Unassigned',format:r.format||'Replay',date:r.created_at||r.createdAt||r.timestamp||r.date||''};
+    }).filter(Boolean).sort((a,b)=>{const wa=parseInt(String(a.week).match(/\d+/)?.[0]||'-1',10);const wb=parseInt(String(b.week).match(/\d+/)?.[0]||'-1',10);if(wb!==wa)return wb-wa;const da=Date.parse(a.date)||0,db=Date.parse(b.date)||0;return db-da;});
+  }
+  function recentBattleRowHtml(x){
+    const resultClass=x.result==='W'?'win':x.result==='L'?'loss':'unknown';
+    const resultText=x.result==='W'?'Win':x.result==='L'?'Loss':'Unknown';
+    const date=x.date?new Date(x.date).toLocaleDateString():'—';
+    return `<div class="recent-battle-row"><div class="recent-battle-week">${escapeHtml(x.week)}</div><div><div class="recent-battle-match">${escapeHtml(profile.team_name)}<span class="vs">vs</span>${escapeHtml(x.opponent)}</div><div class="recent-battle-meta">${escapeHtml(x.format)} · ${escapeHtml(date)}</div></div><div class="recent-result ${resultClass}">${resultText}</div><button class="ghost small" type="button" data-myteam-match="${escapeHtml(x.id)}">Summary</button></div>`;
+  }
+  function openMyTeamReplaySummary(replayId){
+    const r=DASH.replays?.[replayId];
+    if(!r) return;
+    const p1=(r.players?.p1||'?').trim()||'?'; const p2=(r.players?.p2||'?').trim()||'?';
+    const winner=(r.winner||'').trim(); const resultText=winner?`${winner} won`:'Result unavailable';
+    const mons=Object.values(r.mons||{});
+    const sideMons=side=>{const seen={};(r.teamRoster?.[side]||[]).forEach(sp=>seen[normName(sp)]={side,species:sp,kills:0,assists:0,deaths:0,damageDealt:0,damageTaken:0,appearances:0});mons.filter(m=>m.side===side).forEach(m=>seen[normName(m.species)]=m);return Object.values(seen).sort((a,b)=>(b.kills-a.kills)||(a.deaths-b.deaths)||(b.damageDealt-a.damageDealt));};
+    const sideCard=(side,player)=>{const list=sideMons(side),team=teamFor(player),kills=list.reduce((n,m)=>n+(Number(m.kills)||0),0),deaths=list.reduce((n,m)=>n+(Number(m.deaths)||0),0),assists=list.reduce((n,m)=>n+(Number(m.assists)||0),0),dealt=list.reduce((n,m)=>n+(Number(m.damageDealt)||0),0),taken=list.reduce((n,m)=>n+(Number(m.damageTaken)||0),0);return `<div class="myteam-summary-side"><div class="myteam-summary-side-head"><div><strong>${escapeHtml(player)}</strong><div class="myteam-summary-team">${escapeHtml(team)}</div></div><div class="myteam-summary-score">${deaths} fainted</div></div><div class="myteam-summary-line"><span>${kills} kills</span><span>${assists} assists</span><span>${dealt.toFixed(1)}% damage dealt</span><span>${taken.toFixed(1)}% taken</span></div><div class="myteam-summary-mons">${list.map(m=>`<div class="myteam-summary-mon">${spriteImg(m.species,'sprite')}<div class="myteam-summary-mon-main"><strong>${escapeHtml(SBL.pokemon.displayName(m.species))}</strong><div class="myteam-summary-mon-stats">${m.kills||0} K · ${m.assists||0} A · ${m.deaths||0} D · ${(Number(m.damageDealt)||0).toFixed(1)}% dmg</div></div>${m.appearances?(m.deaths?'<span class="badge danger-badge">Fainted</span>':'<span class="badge">Survived</span>'):'<span class="badge">Not sent</span>'}</div>`).join('')||'<div class="empty-state">No Pokémon recorded.</div>'}</div></div>`;};
+    let overlay=document.getElementById('myteamReplayOverlay'); if(overlay) overlay.remove();
+    overlay=document.createElement('div'); overlay.className='myteam-replay-overlay'; overlay.id='myteamReplayOverlay';
+    overlay.innerHTML=`<div class="myteam-replay-box"><div class="myteam-summary-header"><div><div class="myteam-summary-kicker">${escapeHtml(r.week||'Unassigned')} · ${escapeHtml(r.format||'Replay')}</div><h3>${escapeHtml(p1)} <span class="myteam-summary-vs">vs</span> ${escapeHtml(p2)}</h3><div class="myteam-summary-result">${escapeHtml(resultText)}</div></div><div class="myteam-summary-meta"><span>${mons.length} Pokémon recorded</span><span>Replay ${escapeHtml(r.id||replayId)}</span></div></div><div class="myteam-summary-grid">${sideCard('p1',p1)}${sideCard('p2',p2)}</div><div class="myteam-summary-actions"><a class="primary nav-link" href="https://replay.pokemonshowdown.com/${escapeHtml(r.id||replayId)}" target="_blank" rel="noopener">Open Showdown replay</a><button class="ghost" type="button" id="myteamReplayClose">Close</button></div></div>`;
+    document.body.appendChild(overlay); document.body.style.overflow='hidden';
+    const close=()=>{overlay.remove();document.body.style.overflow='';};
+    document.getElementById('myteamReplayClose').onclick=close; overlay.addEventListener('click',e=>{if(e.target===overlay)close();});
+    overlay._close=close;
+  }
+
+  function renderMyTeam(){
+    if(profile.status !== 'approved'){
+      contentEl.innerHTML = `<div class="panel"><div class="empty-state">Your team claim needs to be approved by a commissioner before you can manage your roster.</div></div>`;
+      return;
+    }
+    const roster=myRoster();
+    const pts=rosterPoints(roster);
+    const remaining=Math.max(0,ROSTER_BUDGET-pts);
+    const pct=Math.min(100,Math.round((pts/ROSTER_BUDGET)*100));
+    const rec=myTeamRecord();
+    const stats=roster.map(m=>({m,s:myPokemonStats(m.name)}));
+    const played=stats.filter(x=>x.s?.games>0);
+    const topKills=[...played].sort((a,b)=>(b.s.kills||0)-(a.s.kills||0))[0];
+    const topDeaths=[...played].sort((a,b)=>(b.s.deaths||0)-(a.s.deaths||0))[0];
+    const mostBrought=[...played].sort((a,b)=>(b.s.games||0)-(a.s.games||0))[0];
+    const topAssists=[...played].sort((a,b)=>(b.s.assists||0)-(a.s.assists||0))[0];
+    const totalKills=played.reduce((n,x)=>n+(x.s.kills||0),0);
+    const totalDeaths=played.reduce((n,x)=>n+(x.s.deaths||0),0);
+    const totalAssists=played.reduce((n,x)=>n+(x.s.assists||0),0);
+    const suggestion=randomTradeSuggestion();
+
+    contentEl.innerHTML=`
+      <section class="myteam-hero">
+        <div class="myteam-hero-grid">
+          <div>
+            <div class="myteam-kicker">My Team</div>
+            <div class="myteam-title">${escapeHtml(profile.team_name)}</div>
+            <div class="myteam-sub">${roster.length} Pokémon on your active roster · ${rec.games} games played</div>
+            <div class="myteam-record">
+              <button type="button" class="record-box win record-adjust" data-record-adjust="win"><span class="label">Wins</span><span class="value">${rec.wins}</span></button>
+              <button type="button" class="record-box loss record-adjust" data-record-adjust="loss"><span class="label">Losses</span><span class="value">${rec.losses}</span></button>
+              <div class="record-box"><div class="label">Record</div><div class="value">${rec.wins}-${rec.losses}</div></div>
+            </div>
+            <div class="record-note">Replay results are included automatically. Use +1 for a manually recorded result that is not in the replay feed.</div>
+          </div>
+          <div class="myteam-hero-side">
+            <a class="next-battle-card" id="nextBattleCard" href="team-analysis.html">
+              <div class="next-battle-kicker">Next Battle</div>
+              <div class="next-battle-opponent" id="nextBattleOpponent">Loading…</div>
+              <div class="next-battle-meta" id="nextBattleMeta">Open Match Prep →</div>
+            </a>
+            <div class="myteam-budget">
+              <div class="myteam-budget-head"><span class="myteam-budget-label">Draft Budget</span><span class="myteam-budget-value">${pts}<span style="color:var(--text-dim);font-size:13px"> / ${ROSTER_BUDGET}</span></span></div>
+              <div class="myteam-budget-bar"><div class="myteam-budget-fill" style="width:${pct}%"></div></div>
+              <div class="myteam-budget-remaining"><span>Spent</span><span>${remaining} pts remaining</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="myteam-section-head"><div><h2>Team Display</h2><div class="note">Your active roster, with draft cost and season production.</div></div></div>
+        ${roster.length?`<div class="myteam-roster-grid">${roster.map(mon=>{
+          const st=myPokemonStats(mon.name); const has=st&&st.games>0;
+          return `<div class="myteam-mon">
+            <div class="myteam-mon-top">${spriteImg(mon.name,'sprite')}<div><div class="myteam-mon-name">${escapeHtml(SBL.pokemon.displayName(mon.name))}</div><div class="myteam-mon-points">${mon.points!=null?escapeHtml(mon.points)+' pts':'Unranked'}</div></div></div>
+            <div class="myteam-mon-stats">
+              <div class="myteam-mon-stat"><div class="v">${has?st.games:'—'}</div><div class="l">Games</div></div>
+              <div class="myteam-mon-stat"><div class="v" style="color:var(--teal)">${has?st.kills:'—'}</div><div class="l">Kills</div></div>
+              <div class="myteam-mon-stat"><div class="v" style="color:var(--red)">${has?st.deaths:'—'}</div><div class="l">Deaths</div></div>
+            </div>
+          </div>`;
+        }).join('')}</div>`:'<div class="empty-state">No roster published for your team yet.</div>'}
+      </section>
+
+      <section class="panel" id="recentBattlesPanel">
+        <div class="myteam-section-head"><div><h2>Recent Battles</h2><div class="note">Your latest completed matches. Click Summary to view the full replay-browser-style match breakdown.</div></div><button class="ghost small" type="button" id="viewAllBattlesBtn">View all</button></div>
+        <div class="recent-battles-list">${myTeamMatchData().slice(0,5).map(recentBattleRowHtml).join('') || '<div class="empty-state">No match history yet.</div>'}</div>
+      </section>
+
+      <div class="myteam-dashboard-grid">
+        <section class="panel">
+          <div class="myteam-section-head"><div><h2>Basic Stats</h2><div class="note">Quick season leaders from your roster.</div></div></div>
+          <div class="myteam-stat-grid">
+            <div class="myteam-stat-card"><div class="eyebrow">Top Kills</div><div class="big stat-mon">${topKills?spriteImg(topKills.m.name,'sprite'):''}<span>${topKills?escapeHtml(SBL.pokemon.displayName(topKills.m.name)):'—'}</span></div><div class="small">${topKills?`${topKills.s.kills} KOs`: 'No games recorded'}</div></div>
+            <div class="myteam-stat-card"><div class="eyebrow">Top Deaths</div><div class="big stat-mon">${topDeaths?spriteImg(topDeaths.m.name,'sprite'):''}<span>${topDeaths?escapeHtml(SBL.pokemon.displayName(topDeaths.m.name)):'—'}</span></div><div class="small">${topDeaths?`${topDeaths.s.deaths} deaths`: 'No games recorded'}</div></div>
+            <div class="myteam-stat-card"><div class="eyebrow">Most Brought</div><div class="big stat-mon">${mostBrought?spriteImg(mostBrought.m.name,'sprite'):''}<span>${mostBrought?escapeHtml(SBL.pokemon.displayName(mostBrought.m.name)):'—'}</span></div><div class="small">${mostBrought?`${mostBrought.s.games} games`: 'No games recorded'}</div></div>
+            <div class="myteam-stat-card"><div class="eyebrow">Top Assists</div><div class="big stat-mon">${topAssists?spriteImg(topAssists.m.name,'sprite'):''}<span>${topAssists?escapeHtml(SBL.pokemon.displayName(topAssists.m.name)):'—'}</span></div><div class="small">${topAssists?`${topAssists.s.assists} assists`: 'No games recorded'}</div></div>
+            <div class="myteam-stat-card"><div class="eyebrow">Team Kills</div><div class="big">${totalKills}</div><div class="small">Across ${rec.games} team games</div></div>
+            <div class="myteam-stat-card"><div class="eyebrow">Team Deaths</div><div class="big">${totalDeaths}</div><div class="small">${totalAssists} assists recorded</div></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="myteam-section-head"><div><h2>Random Trade Suggestions</h2><div class="note">Find a random legal 1-for-1 swap with another franchise.</div></div></div>
+          <div class="random-trade">
+            <div id="randomTradeResult">${suggestion?`<div class="random-trade-flow"><div class="random-trade-side"><div class="label">You give</div><div class="random-trade-mon stat-mon">${spriteImg(suggestion.give.name,'sprite')}<span>${escapeHtml(SBL.pokemon.displayName(suggestion.give.name))}</span></div><div class="note" style="margin:2px 0 0">${suggestion.give.points} pts</div></div><div class="random-trade-arrow">→</div><div class="random-trade-side"><div class="label">You get · ${escapeHtml(suggestion.team)}</div><div class="random-trade-mon stat-mon">${spriteImg(suggestion.get.name,'sprite')}<span>${escapeHtml(SBL.pokemon.displayName(suggestion.get.name))}</span></div><div class="note" style="margin:2px 0 0">${suggestion.get.points} pts</div></div></div>`:'<div class="empty-state" style="padding:8px 0">No legal random swap found right now.</div>'}</div>
+            <div class="foot-actions" style="margin-top:10px"><button class="ghost small" id="rerollTradeBtn">🎲 Reroll</button>${suggestion?'<button class="primary small" id="useTradeSuggestionBtn">Use suggestion</button>':''}</div>
+          </div>
+        </section>
+      </div>`;
+
+    document.getElementById('rerollTradeBtn').onclick=()=>renderMyTeam();
+    if(suggestion){ document.getElementById('useTradeSuggestionBtn').onclick=()=>useRandomTradeSuggestion(suggestion); }
+    wireNextBattle();
+}
+
+  function renderProposeTrade(){
+    const el = document.getElementById('proposePanel');
+    const roster = myRoster();
+    const otherTeams = teamsList().filter(t=>t!==profile.team_name);
+    const targetIsFA = draft.target === '';
+    const targetRoster = targetIsFA ? null : (DASH.settings.rosters[draft.target] || []);
+    const requestPool = targetIsFA ? freeAgencyMons() : (targetRoster || []);
+
+    function pickCard(m, role){
+      const set = role === 'offered' ? draft.offered : draft.requested;
+      const checked = set.has(m.name);
+      return `<div class="pick-card${checked?' checked':''}" data-role="${role}" data-name="${escapeHtml(m.name)}" role="button" tabindex="0" aria-pressed="${checked}">
+        <span class="pick-card-check">✓</span>
+        ${spriteImg(m.name,'sprite')}
+        <div class="pick-card-name">${escapeHtml(SBL.pokemon.displayName(m.name))}</div>
+        ${m.points!=null?`<div class="pick-card-pts">${escapeHtml(m.points)} pts</div>`:''}
+      </div>`;
+    }
+
+    function chipsHtml(role){
+      const set = role === 'offered' ? draft.offered : draft.requested;
+      const pool = role === 'offered' ? roster : requestPool;
+      return Array.from(set).map(name=>{
+        const m = pool.find(x=>x.name===name) || {name, points:null};
+        return `<span class="selected-chip">${spriteImg(m.name,'sprite')} ${escapeHtml(m.name)}<button type="button" data-remove="${escapeHtml(name)}" data-role="${role}" aria-label="Remove ${escapeHtml(name)}">×</button></span>`;
+      }).join('');
+    }
+
+    function faResultsHtml(){
+      const q = (draft.faQuery||'').trim().toLowerCase();
+      if(!q) return '<div class="fa-hint">Only Pokémon that are currently undrafted are available in Free Agency.</div>';
+      const matches = freeAgencyMons().filter(m=>m.name.toLowerCase().includes(q)).slice(0,30);
+      if(!matches.length) return `<div class="fa-empty">No free agents match “${escapeHtml(draft.faQuery)}”.</div>`;
+      return matches.map(m=>pickCard(m,'requested')).join('');
+    }
+
+    el.innerHTML = `
+      <h2>Propose a Trade</h2>
+      <div class="note">You can offer multiple Pokémon for multiple Pokémon. Point totals do not have to match, but after the trade neither roster may exceed 115 points or fall below 10 Pokémon. Each team gets 8 completed trades per season.</div>
+      <div class="row">
+        <div>
+          <label>Trade with</label>
+          <select id="targetSelect">
+            <option value="" ${targetIsFA?'selected':''}>— Free Agency —</option>
+            ${otherTeams.map(t=>`<option value="${escapeHtml(t)}" ${t===draft.target?'selected':''}>${escapeHtml(t)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="trade-cols">
+        <div class="trade-col">
+          <h4>You give ${targetIsFA?'(optional for a free-agency pickup)':''}</h4>
+          <div class="selected-row" id="offeredSelected">${chipsHtml('offered')}</div>
+          <div class="pick-grid" id="offeredPicks">
+            ${roster.length ? roster.map(m=>pickCard(m,'offered')).join('') : '<div class="empty-state">Your roster is empty.</div>'}
+          </div>
+        </div>
+        <div class="trade-col">
+          <h4>You get ${targetIsFA?'(undrafted only)':''}</h4>
+          <div class="selected-row" id="requestedSelected">${chipsHtml('requested')}</div>
+          ${targetIsFA ? `
+            <div class="fa-search-wrap">
+              <input type="text" id="faSearch" placeholder="Search undrafted Pokémon…" value="${escapeHtml(draft.faQuery||'')}" autocomplete="off">
+            </div>
+            <div class="pick-grid" id="requestedPicks">${faResultsHtml()}</div>
+          ` : `
+            <div class="pick-grid" id="requestedPicks">
+              ${requestPool.length ? requestPool.map(m=>pickCard(m,'requested')).join('') : '<div class="empty-state">That team has no published roster.</div>'}
+            </div>
+          `}
+        </div>
+      </div>
+      <div class="note" id="tradeSummary"></div>
+      <div class="foot-actions">
+        <button class="ghost" id="clearTradeSelectionBtn" type="button">Clear selected</button>
+        <button class="primary" id="submitTradeBtn">Send trade proposal</button>
+      </div>
+      <div id="tradeMsg" class="note"></div>`;
+
+    function totalPts(role){
+      const set = role === 'offered' ? draft.offered : draft.requested;
+      const pool = role === 'offered' ? roster : requestPool;
+      return Array.from(set).reduce((s,name)=>{ const m = pool.find(x=>x.name===name); return s + (m ? (Number(m.points)||0) : 0); }, 0);
+    }
+
+    function tradeLimitMessage(team, kind='team'){
+      const a = tradeAllowance(team, kind);
+      const label = kind === 'freeagency' ? 'Free Agency trades' : 'team-to-team trades';
+      return `${escapeHtml(team)} has used ${a.used}/${a.limit} ${label} this season (${a.remaining} remaining)`;
+    }
+
+    function updateTradeSummary(){
+      const summaryEl = document.getElementById('tradeSummary');
+      if(!summaryEl) return;
+      const offPts = totalPts('offered'), reqPts = totalPts('requested');
+      const proposerAfter = roster.length - draft.offered.size + draft.requested.size;
+      const targetAfter = targetIsFA ? null : ((targetRoster||[]).length - draft.requested.size + draft.offered.size);
+      const pointDelta = reqPts - offPts;
+      const bits = [`Give ${offPts} pts / Get ${reqPts} pts${pointDelta===0 ? ' — balanced' : pointDelta>0 ? ` — you gain ${pointDelta} pts` : ` — you lose ${Math.abs(pointDelta)} pts`}`];
+      bits.push(`Your roster after: ${proposerAfter}${proposerAfter<10?' (below 10 minimum)':''}`);
+      bits.push(`${tradeLimitMessage(profile.team_name, targetIsFA ? 'freeagency' : 'team')}`);
+      if(!targetIsFA){
+        bits.push(`${escapeHtml(draft.target)} roster after: ${targetAfter}${targetAfter<10?' (below 10 minimum)':''}`);
+        bits.push(`${tradeLimitMessage(draft.target, 'team')}`);
+      }
+      summaryEl.textContent = bits.join(' · ');
+    }
+    updateTradeSummary();
+
+    document.getElementById('targetSelect').onchange = (e)=>{
+      draft.target = e.target.value;
+      draft.requested = new Set();
+      draft.faQuery = '';
+      renderProposeTrade();
+    };
+
+    function bindPickCards(container){
+      container.querySelectorAll('.pick-card').forEach(card=>{
+        const toggle = ()=>{
+          const role = card.dataset.role, name = card.dataset.name;
+          const set = role === 'offered' ? draft.offered : draft.requested;
+          if(set.has(name)) set.delete(name); else set.add(name);
+          card.classList.toggle('checked', set.has(name));
+          card.setAttribute('aria-pressed', set.has(name));
+          const rowId = role === 'offered' ? 'offeredSelected' : 'requestedSelected';
+          document.getElementById(rowId).innerHTML = chipsHtml(role);
+          bindChipRemovers();
+          updateTradeSummary();
+        };
+        card.addEventListener('click', toggle);
+        card.addEventListener('keydown', (e)=>{
+          if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); toggle(); }
+        });
+      });
+    }
+
+    function bindChipRemovers(){
+      el.querySelectorAll('.selected-chip button[data-remove]').forEach(btn=>{
+        btn.onclick = ()=>{
+          const role = btn.dataset.role, name = btn.dataset.remove;
+          const set = role === 'offered' ? draft.offered : draft.requested;
+          set.delete(name);
+          document.getElementById(role === 'offered' ? 'offeredSelected' : 'requestedSelected').innerHTML = chipsHtml(role);
+          const grid = document.getElementById(role === 'offered' ? 'offeredPicks' : 'requestedPicks');
+          const card = grid && Array.from(grid.querySelectorAll('.pick-card')).find(c=>c.dataset.name === name);
+          if(card){ card.classList.remove('checked'); card.setAttribute('aria-pressed','false'); }
+          bindChipRemovers();
+          updateTradeSummary();
+        };
+      });
+    }
+
+    bindPickCards(el);
+    bindChipRemovers();
+
+    if(targetIsFA){
+      const searchInput = document.getElementById('faSearch');
+      searchInput.addEventListener('input', (e)=>{
+        draft.faQuery = e.target.value;
+        const grid = document.getElementById('requestedPicks');
+        grid.innerHTML = faResultsHtml();
+        bindPickCards(grid);
+      });
+    }
+
+    document.getElementById('clearTradeSelectionBtn').onclick = ()=>{
+      draft.offered = new Set();
+      draft.requested = new Set();
+      const msgEl = document.getElementById('tradeMsg');
+      if(msgEl){ msgEl.className='note'; msgEl.textContent=''; }
+      renderProposeTrade();
+    };
+
+    document.getElementById('submitTradeBtn').onclick = async ()=>{
+      const msgEl = document.getElementById('tradeMsg');
+      if(draft.offered.size < 1 || draft.requested.size < 1){ msgEl.className='note danger'; msgEl.textContent='Select at least one Pokémon on each side.'; return; }
+      const offPts = totalPts('offered'), reqPts = totalPts('requested');
+      const proposerAfter = roster.length - draft.offered.size + draft.requested.size;
+      const proposerPointsAfter = rosterPoints(roster) - offPts + reqPts;
+
+      // Each team gets 8 completed trades per season. Team trades consume a
+      // slot for both teams; Free Agency trades consume a slot for the team
+      // making the pickup. Pending trades do not consume a slot.
+      const proposerAllowance = tradeAllowance(profile.team_name, targetIsFA ? 'freeagency' : 'team');
+      if(proposerAllowance.remaining <= 0){
+        msgEl.className='note danger';
+        msgEl.textContent=`You don't have any ${targetIsFA ? 'Free Agency' : 'team-to-team'} trades remaining.`;
+        return;
+      }
+
+      if(proposerAfter < 10){
+        msgEl.className='note danger';
+        msgEl.textContent=`Invalid trade: your roster would have ${proposerAfter} Pokémon. Both sides must have at least 10.`;
+        return;
+      }
+
+      if(proposerPointsAfter > ROSTER_BUDGET){
+        msgEl.className='note danger';
+        msgEl.textContent=`Invalid trade: your roster would be ${proposerPointsAfter}/${ROSTER_BUDGET} points, which is ${proposerPointsAfter-ROSTER_BUDGET} over the limit. You give ${offPts} points and receive ${reqPts} points.`;
+        return;
+      }
+
+      if(!targetIsFA){
+        const targetAfter = (targetRoster||[]).length - draft.requested.size + draft.offered.size;
+        const targetPointsAfter = rosterPoints(targetRoster||[]) - reqPts + offPts;
+        const targetAllowance = tradeAllowance(draft.target, 'team');
+
+        if(targetAllowance.remaining <= 0){
+          msgEl.className='note danger';
+          msgEl.textContent=`${draft.target} doesn't have any team-to-team trades remaining.`;
+          return;
+        }
+
+        if(targetAfter < 10){
+          msgEl.className='note danger';
+          msgEl.textContent=`Invalid trade: ${draft.target}'s roster would have ${targetAfter} Pokémon. Both sides must have at least 10.`;
+          return;
+        }
+
+        if(targetPointsAfter > ROSTER_BUDGET){
+          msgEl.className='note danger';
+          msgEl.textContent=`Invalid trade: ${draft.target}'s roster would be ${targetPointsAfter}/${ROSTER_BUDGET} points, which is ${targetPointsAfter-ROSTER_BUDGET} over the limit. They give ${reqPts} points and receive ${offPts} points.`;
+          return;
+        }
+      }
+      const btn = document.getElementById('submitTradeBtn'); btn.disabled = true;
+      msgEl.className='note'; msgEl.textContent='Sending…';
+      try{
+        // Always submit the canonical Pokémon name used by the published
+        // roster/Free Agency data. This prevents form-name differences such
+        // as "Tauros Blaze" vs "Tauros Paldea Blaze" from breaking accept_trade.
+        const canonicalOffered = Array.from(draft.offered).map(name =>
+          canonicalTradePokemonName(name, roster, [])
+        );
+        const canonicalRequested = Array.from(draft.requested).map(name =>
+          canonicalTradePokemonName(name, targetIsFA ? [] : targetRoster, targetIsFA ? freeAgencyMons() : [])
+        );
+
+        const {error} = await supabase.from('trade_requests').insert({
+          proposer_team: profile.team_name,
+          target_team: targetIsFA ? null : draft.target,
+          mons_offered: canonicalOffered,
+          mons_requested: canonicalRequested
+        });
+        if(error) throw error;
+        draft = { target:'', offered:new Set(), requested:new Set(), faQuery:'' };
+        await loadTrades();
+        activeTab = 'trades';
+        markTradeTabSeen('all');
+        setStatus('Trade proposal sent.', false);
+        renderTabs(); render();
+      }catch(e){
+        msgEl.className='note danger'; msgEl.textContent = e.message;
+        btn.disabled = false;
+      }
+    };
+  }
+
+  // ---------- Trades tab ----------
+  function tradeCard(t, role){
+    const canRespond = role === 'incoming' && t.status === 'pending';
+    const canWithdraw = role === 'outgoing' && t.status === 'pending';
+    return `<div class="trade-card" data-id="${t.id}">
+      <div class="trade-head">
+        <div>
+          <div class="trade-teams">${escapeHtml(t.proposer_team)}<span class="arrow">→</span>${t.target_team ? escapeHtml(t.target_team) : 'Free Agency'}</div>
+          <div class="trade-sub">${new Date(t.created_at).toLocaleString()}${t.status === 'accepted' ? ` · ${SBL.trades.isScheduled(t) ? 'Effective' : 'Active'} ${SBL.trades.formatEffectiveDate(t)}` : ''}</div>
+        </div>
+        <span class="status-pill ${t.status}">${t.status === 'accepted' && SBL.trades.isScheduled(t) ? 'scheduled' : t.status}</span>
+      </div>
+      <div class="trade-cols">
+        <div class="trade-col"><h4>Offered</h4><div class="mon-list">${(t.mons_offered||[]).length ? t.mons_offered.map(n=>`<span class="mon-pill">${spriteImg(n)} ${escapeHtml(n)}</span>`).join('') : '<span class="note">Nothing</span>'}</div></div>
+        <div class="trade-col"><h4>Requested</h4><div class="mon-list">${(t.mons_requested||[]).length ? t.mons_requested.map(n=>`<span class="mon-pill">${spriteImg(n)} ${escapeHtml(n)}</span>`).join('') : '<span class="note">Nothing</span>'}</div></div>
+      </div>
+      ${canRespond ? `<div class="foot-actions">
+          <button class="teal small" data-action="accept" data-id="${t.id}">Accept</button>
+          <button class="danger small" data-action="reject" data-id="${t.id}">Reject</button>
+        </div>` : ''}
+      ${canWithdraw ? `<div class="foot-actions">
+          <button class="ghost small" data-action="withdraw" data-id="${t.id}">Withdraw</button>
+        </div>` : ''}
+      <div class="note trade-err" id="tradeErr-${t.id}"></div>
+    </div>`;
+  }
+
+  function bindTradeActions(){
+    contentEl.querySelectorAll('button[data-action]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const id = Number(btn.dataset.id);
+        const action = btn.dataset.action;
+        const errEl = document.getElementById(`tradeErr-${id}`);
+        if(errEl){ errEl.className='note'; errEl.textContent=''; }
+        btn.disabled = true;
+        try{
+          if(action === 'accept'){
+            const {error} = await supabase.rpc('accept_trade', { trade_id: id });
+            if(error) throw error;
+          } else if(action === 'reject'){
+            const {error} = await supabase.from('trade_requests')
+              .update({ status:'rejected', responded_at:new Date().toISOString(), responded_by:session.user.id })
+              .eq('id', id);
+            if(error) throw error;
+          } else if(action === 'withdraw'){
+            const {error} = await supabase.from('trade_requests')
+              .update({ status:'withdrawn', responded_at:new Date().toISOString(), responded_by:session.user.id })
+              .eq('id', id);
+            if(error) throw error;
+          }
+          await refreshAll();
+          render();
+        }catch(e){
+          if(errEl){
+            errEl.className = 'note danger';
+            errEl.textContent = e.message;
+          }
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
+  function renderTrades(){
+    if(profile.status !== 'approved'){
+      contentEl.innerHTML = `<div class="panel"><div class="empty-state">Your team claim needs to be approved by a commissioner before you can send or receive trades.</div></div>`;
+      return;
+    }
+
+    const myTeam = profile.team_name;
+    const pending = trades.filter(t =>
+      t.status === 'pending' &&
+      (t.proposer_team === myTeam || t.target_team === myTeam)
+    );
+    const completed = trades.filter(t =>
+      t.status !== 'pending' &&
+      (t.proposer_team === myTeam || t.target_team === myTeam)
+    );
+    const freeAgency = trades.filter(t =>
+      t.target_team === null &&
+      (t.proposer_team === myTeam || t.target_team === myTeam)
+    );
+
+    const selected = window.tradeViewFilter || 'pending';
+    const list = selected === 'completed' ? completed : selected === 'freeagency' ? freeAgency : pending;
+
+    const incoming = pending.filter(t => t.target_team === myTeam);
+    const outgoing = pending.filter(t => t.proposer_team === myTeam);
+
+    let body = '';
+
+    if(selected === 'pending'){
+      body = `
+        <div class="panel">
+          <h2>Incoming <span class="badge">${incoming.length}</span></h2>
+          ${incoming.length ? incoming.map(t=>tradeCard(t,'incoming')).join('') : '<div class="empty-state">No incoming trade offers.</div>'}
+        </div>
+        <div class="panel">
+          <h2>Sent by you <span class="badge">${outgoing.length}</span></h2>
+          ${outgoing.length ? outgoing.map(t=>tradeCard(t,'outgoing')).join('') : '<div class="empty-state">You have no pending sent trades.</div>'}
+        </div>`;
+    } else if(selected === 'completed'){
+      body = `
+        <div class="panel">
+          <h2>Completed Trades <span class="badge">${completed.length}</span></h2>
+          <div class="note">Accepted, rejected, withdrawn, and reverted trades involving your team.</div>
+          ${completed.length ? completed.map(t=>tradeCard(t,'history')).join('') : '<div class="empty-state">No completed trades yet.</div>'}
+        </div>`;
+    } else {
+      body = `
+        <div class="panel">
+          <h2>Free Agency Trades <span class="badge">${freeAgency.length}</span></h2>
+          <div class="note">All Free Agency requests involving your team, including pending and completed requests.</div>
+          ${freeAgency.length ? freeAgency.map(t=>tradeCard(t, t.status === 'pending' && t.target_team === myTeam ? 'incoming' : t.status === 'pending' ? 'outgoing' : 'history')).join('') : '<div class="empty-state">No Free Agency trades yet.</div>'}
+        </div>`;
+    }
+
+    contentEl.innerHTML = `
+      <div class="panel" id="proposePanel"></div>
+      <div class="panel">
+        <div class="trade-tab-head"><div><h2>Your Trade Allowance</h2><div class="note">Your franchise has two separate trade pools. The numbers below are your actual current allowance for this season. Commissioner credits are shown separately.</div></div></div>
+        <div class="trade-cols" style="margin-top:12px;">
+          <div class="trade-col">
+            <h4>Team-to-team trades</h4>
+            <div class="budget-value">${tradeAllowance(myTeam,'team').remaining > 0 ? `${tradeAllowance(myTeam,'team').remaining} remaining` : `You don't have any team-to-team trades remaining`}</div>
+            <div class="note">${tradeAllowance(myTeam,'team').used} used · ${tradeAllowance(myTeam,'team').limit} total allowance</div>
+          </div>
+          <div class="trade-col">
+            <h4>Free Agency trades</h4>
+            <div class="budget-value">${tradeAllowance(myTeam,'freeagency').remaining > 0 ? `${tradeAllowance(myTeam,'freeagency').remaining} remaining` : `You don't have any Free Agency trades remaining`}</div>
+            <div class="note">${tradeAllowance(myTeam,'freeagency').used} used · ${tradeAllowance(myTeam,'freeagency').limit} total allowance</div>
+          </div>
+          ${profile?.trade_credits ? `<div class="trade-col">
+            <h4>Commissioner credits</h4>
+            <div class="budget-value">${Number(profile.trade_credits)||0}</div>
+            <div class="note">Extra trades granted directly to your account</div>
+          </div>` : ''}
+        </div>
+      </div>
+      <div class="panel trade-filter-panel">
+        <div class="trade-tab-head">
+          <div>
+            <h2 style="margin-bottom:4px;">Trades</h2>
+            <div class="note">Keep pending, completed, and Free Agency trades separated so the page stays clean.</div>
+          </div>
+          <div>
+            <label for="tradeViewSelect">View</label>
+            <select id="tradeViewSelect" style="min-width:190px;">
+              <option value="pending" ${selected==='pending'?'selected':''}>Pending</option>
+              <option value="completed" ${selected==='completed'?'selected':''}>Completed</option>
+              <option value="freeagency" ${selected==='freeagency'?'selected':''}>Free Agency</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div id="tradeViewBody">${body}</div>`;
+
+    try{
+      renderProposeTrade();
+    }catch(e){
+      const p = document.getElementById('proposePanel');
+      if(p) p.innerHTML = `<h2>Propose a Trade</h2><div class="note danger">Couldn't load the trade builder: ${escapeHtml(e.message||String(e))}</div>`;
+    }
+
+    document.getElementById('tradeViewSelect')?.addEventListener('change', e=>{
+      window.tradeViewFilter = e.target.value;
+      if(e.target.value === 'pending') markTradeTabSeen('pending');
+      else if(e.target.value === 'completed') markTradeTabSeen('history');
+      else markTradeTabSeen('all');
+      renderTrades();
+    });
+
+    bindTradeActions();
+  }
+
+  // ---------- All Rosters tab ----------
+  function renderRosters(){
+    const rosters = DASH.settings.rosters || {};
+    const teams = Object.keys(rosters).sort();
+    contentEl.innerHTML = `
+      <div class="panel">
+        <h2>League Rosters</h2>
+        ${teams.length ? `<div class="roster-grid">${teams.map(t=>{
+          const list = rosters[t];
+          const pts = rosterPoints(list);
+          const mine = profile && t === profile.team_name;
+          return `<div class="roster-card${mine?' mine':''}">
+            <h3>${escapeHtml(t)} ${mine?'<span class="badge">You</span>':''}</h3>
+            <div class="note">${list.length} Pokémon · ${pts}/${ROSTER_BUDGET} pts</div>
+            <div class="mon-list">${list.map(m=>`<span class="mon-pill">${spriteImg(m.name)} ${escapeHtml(m.name)}</span>`).join('')}</div>
+          </div>`;
+        }).join('')}</div>` : '<div class="empty-state">No rosters published yet.</div>'}
+      </div>`;
+  }
+
+  // ---------- Account tab ----------
+
+  const THEME_FAMILIES = [
+    ['Black / Grey',['monochrome','slate','midnight2','onyx','charcoal','graphite','graphite2','smoke','silver','steel','steel2','pearl','obsidian','carbon','ink','platinum','coolgray','warmgray']],
+    ['Brown / Bronze',['coffee','cocoa','espresso','mahogany','taupe','sand','bronze','copper','rust','terracotta','mocha','parchment','copperblue']],
+    ['Red',['ruby','crimson','scarlet','cherry','wine','ember']],
+    ['Pink / Rose',['rose','blush','berry','magenta','fuchsia','mauve','raspberry']],
+    ['Orange',['orange','coral','peach','apricot','tangerine','cantaloupe']],
+    ['Yellow / Gold',['yellow','gold','honey','honeycomb','marigold','mustard','canary']],
+    ['Green',['emerald','green','lime','citrus','olive','moss','forest','jade','mint','seafoam','pine','neon','chartreuse','spring','firefly']],
+    ['Teal / Cyan',['cyan','cyan2','deepsea','teal','aqua','aqua2','lagoon','turquoise','tropical','arctic','ice','frost','frost2','aurora','glacier','northern','deepteal']],
+    ['Blue',['sky','azure','cobalt','navy','denim','sapphire','royal','ocean','denim2','marine','steelblue','smokyblue']],
+    ['Purple',['violet','lavender','plum','plum2','heather','amethyst','orchid','indigo','iris','periwinkle','cyberpunk','dusk','midnight','violet2','grape','electric','nebula']],
+    ['Light Themes',[]],
+    ['Special',[]]
+  ];
+
+  let themeFamilyFilter = 'All Themes';
+
+  function isLightTheme(t){
+    if(t?.category === 'light') return true;
+    const rgb = String(t?.bg||'').replace('#','').match(/.{2}/g)||[];
+    if(rgb.length!==3) return false;
+    const lum=(parseInt(rgb[0],16)*299 + parseInt(rgb[1],16)*587 + parseInt(rgb[2],16)*114)/1000;
+    return lum >= 160;
+  }
+
+  function themeFamilyList(label){
+    if(label==='All Themes') return THEMES.slice();
+    if(label==='Light Themes') return THEMES.filter(t=>isLightTheme(t));
+
+    const family = THEME_FAMILIES.find(([name])=>name===label);
+    if(family && family[1].length) return THEMES.filter(t=>family[1].includes(t.id));
+
+    if(label==='Special'){
+      const assigned=new Set();
+      THEME_FAMILIES.forEach(([name,ids])=>{
+        if(name!=='Light Themes' && name!=='Special') ids.forEach(id=>assigned.add(id));
+      });
+      return THEMES.filter(t=>!assigned.has(t.id) && !isLightTheme(t));
+    }
+    return [];
+  }
+
+  function renderThemeOptions(currentThemeId, filter=themeFamilyFilter){
+    const list=themeFamilyList(filter);
+    if(!list.length) return '<div class="theme-family-label">No themes in this category</div>';
+    return list.map(t=>`<button type="button" class="theme-swatch${t.id===currentThemeId?' active':''}" data-theme="${t.id}" style="--theme-accent:${t.accent}">
+      <div class="preview" style="background:${t.bg}"><span style="background:${t.panel}"></span><span style="background:${t.accent}"></span></div>
+      <div class="label-row"><span>${escapeHtml(t.name)}</span><span class="check">✓</span></div>
+    </button>`).join('');
+  }
+  function renderAccount(){
+    const currentThemeId = getSavedThemeId();
+    contentEl.innerHTML = `
+      <div class="panel">
+        <h2>Account</h2>
+        <div class="row">
+          <div><label>Username</label><div>${escapeHtml(profile.username||'—')}</div></div>
+          <div><label>Email</label><div>${escapeHtml(session.user.email||'')}</div></div>
+          <div><label>Franchise</label><div>${escapeHtml(profile.team_name||'—')} <span class="status-pill ${profile.status}">${profile.status}</span></div></div>
+        </div>
+        <div class="foot-actions">
+          <button class="ghost" id="changeTeamBtn2">Change team pick</button>
+          <button class="danger" id="logoutBtn">Log out</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Theme</h2>
+        <div class="note" style="margin-top:0">Choose a preset, or build a custom theme. Custom mode lets you decide which parts of the interface the theme controls.</div>
+        <div class="theme-category-row">
+          <label for="themeCategorySelect">Theme category</label>
+          <select id="themeCategorySelect">
+            ${['All Themes','Black / Grey','Brown / Bronze','Red','Pink / Rose','Orange','Yellow / Gold','Green','Teal / Cyan','Blue','Purple','Light Themes','Special'].map(name=>`<option value="${escapeHtml(name)}"${themeFamilyFilter===name?' selected':''}>${escapeHtml(name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="theme-grid">
+          ${renderThemeOptions(currentThemeId, themeFamilyFilter)}
+          <button type="button" class="theme-swatch${currentThemeId==='custom'?' active':''}" data-theme="custom" style="--theme-accent:${escapeHtml(getCustomTheme()?.accent||'#a78bfa')}">
+            <div class="preview" style="background:${escapeHtml(getCustomTheme()?.bg||'#0e1218')}"><span style="background:${escapeHtml(getCustomTheme()?.panel||'#161c26')}"></span><span style="background:${escapeHtml(getCustomTheme()?.accent||'#a78bfa')}"></span></div>
+            <div class="label-row"><span>Custom</span><span class="check">✓</span></div>
+          </button>
+        </div>
+        <div class="custom-theme-panel" id="customThemePanel">
+          <div class="custom-theme-title">Custom theme settings</div>
+          <div class="custom-theme-help">Enable a setting to let your custom theme control it. Disabled settings keep the current preset value.</div>
+          <div class="custom-theme-grid">
+            ${[['bg','Background'],['panel','Panels'],['panelAlt','Panel accents'],['border','Borders'],['text','Main text'],['textDim','Muted text'],['accent','Accent'],['accentText','Accent text']].map(([key,label])=>`<label class="custom-color-row"><input type="checkbox" data-custom-enable="${key}"><span>${label}</span><input type="color" data-custom-color="${key}" value="${escapeHtml(getCustomTheme()?.[key]||({bg:'#0e1218',panel:'#161c26',panelAlt:'#1c2430',border:'#303b49',text:'#edf2f7',textDim:'#9ba9b8',accent:'#a78bfa',accentText:'#160d26'}[key]||'#161c26'))}"></label>`).join('')}
+          </div>
+          <div class="foot-actions"><button class="primary" id="saveCustomTheme">Save custom theme</button><button class="ghost" id="resetCustomTheme">Reset custom theme</button></div>
+        </div>      </div>`;
+    document.getElementById('changeTeamBtn2').onclick = renderTeamClaim;
+    document.getElementById('logoutBtn').onclick = async ()=>{
+      await supabase.auth.signOut();
+      session = null; profile = null; trades = [];
+      renderAuthGate();
+    };
+    const custom=getCustomTheme()||{};
+    contentEl.querySelectorAll('[data-custom-enable]').forEach(cb=>{ cb.checked=custom.enabled?.[cb.dataset.customEnable]!==false; });
+    const customPanel=document.getElementById('customThemePanel');
+    const syncCustomPanel=()=>{ customPanel.style.display=contentEl.querySelector('[data-theme="custom"]')?.classList.contains('active')?'block':'none'; };
+    syncCustomPanel();
+
+    const themeCategorySelect=document.getElementById('themeCategorySelect');
+    if(themeCategorySelect){
+      themeCategorySelect.onchange=()=>{
+        themeFamilyFilter=themeCategorySelect.value;
+        renderAccount();
+      };
+    }
+
+    contentEl.querySelectorAll('[data-theme]').forEach(btn=>btn.onclick=()=>{ applyTheme(btn.dataset.theme); renderAccount(); });
+    document.getElementById('saveCustomTheme').onclick=()=>{
+      const base=getCustomTheme()||Object.assign({},THEMES[0]); base.enabled={}; base.base=getSavedThemeId()==='custom'?(base.base||'amber'):getSavedThemeId();
+      contentEl.querySelectorAll('[data-custom-enable]').forEach(cb=>base.enabled[cb.dataset.customEnable]=cb.checked);
+      contentEl.querySelectorAll('[data-custom-color]').forEach(inp=>{ if(base.enabled[inp.dataset.customColor]) base[inp.dataset.customColor]=inp.value; });
+      base.id='custom'; base.name='Custom';
+      try{localStorage.setItem(CUSTOM_THEME_KEY,JSON.stringify(base));}catch(e){}
+      applyTheme('custom'); renderAccount();
+    };
+    document.getElementById('resetCustomTheme').onclick=()=>{try{localStorage.removeItem(CUSTOM_THEME_KEY);}catch(e){};applyTheme('amber');renderAccount();};
+  }
+
+  // ---------- shell ----------
+  function setStatus(msg, danger){ statusMsg = msg; }
+
+  // ---------- trade notification / seen state ----------
+  // Notifications are local to the signed-in user. Opening the Trades tab clears
+  // the relevant notification bucket; switching between Pending/Completed/Free
+  // Agency also marks the corresponding records as seen.
+  function tradeSeenKey(){
+    return `sbl_trade_seen_${session?.user?.id || 'anonymous'}`;
+  }
+
+  function getTradeSeen(){
+    try{
+      const raw = localStorage.getItem(tradeSeenKey());
+      const parsed = raw ? JSON.parse(raw) : {};
+      return {
+        pending: new Set(Array.isArray(parsed.pending) ? parsed.pending.map(Number) : []),
+        history: new Set(Array.isArray(parsed.history) ? parsed.history.map(Number) : [])
+      };
+    }catch(e){
+      return {pending:new Set(), history:new Set()};
+    }
+  }
+
+  function saveTradeSeen(seen){
+    try{
+      localStorage.setItem(tradeSeenKey(), JSON.stringify({
+        pending: Array.from(seen.pending),
+        history: Array.from(seen.history)
+      }));
+    }catch(e){}
+  }
+
+  function markTradeTabSeen(tab){
+    if(!profile?.team_name) return;
+    const seen = getTradeSeen();
+    const mine = profile.team_name;
+
+    if(tab === 'pending' || tab === 'all'){
+      trades.filter(t => t.target_team === mine && t.status === 'pending')
+        .forEach(t => seen.pending.add(Number(t.id)));
+    }
+    if(tab === 'history' || tab === 'all'){
+      trades.filter(t => t.status !== 'pending' && (t.proposer_team === mine || t.target_team === mine))
+        .forEach(t => seen.history.add(Number(t.id)));
+    }
+    saveTradeSeen(seen);
+  }
+
+  function unreadTradeCounts(){
+    const seen = getTradeSeen();
+    const myTeam = profile?.team_name;
+    if(!myTeam) return {incoming:0, history:0};
+    return {
+      incoming: trades.filter(t => t.target_team === myTeam && t.status === 'pending' && !seen.pending.has(Number(t.id))).length,
+      history: trades.filter(t => t.status !== 'pending' && (t.proposer_team === myTeam || t.target_team === myTeam) && !seen.history.has(Number(t.id))).length
+    };
+  }
+
+  function renderTabs(){
+    let nav = document.getElementById('tabs');
+    if(!nav){
+      nav = document.createElement('nav');
+      nav.className = 'tabs';
+      nav.id = 'tabs';
+      contentEl.before(nav);
+    }
+    const unread = unreadTradeCounts();
+    const totalUnread = unread.incoming + unread.history;
+    const tabs = [
+      ['myteam','Dashboard'],
+      ['trades',`Trades${totalUnread ? ` <span class="tab-badge">${totalUnread}</span>` : ''}`],
+      ['matches','Match History'],
+      ['rosters','All Rosters'],
+      ['feedback','Bug Fixes / Suggestions'],
+      ['account','Account']
+    ];
+    nav.innerHTML = tabs.map(([id,label])=>`<button data-tab="${id}" class="${activeTab===id?'active':''}">${label}</button>`).join('');
+    nav.querySelectorAll('button').forEach(b=>{
+      b.onclick = ()=>{
+        activeTab = b.dataset.tab;
+        if(activeTab === 'trades') markTradeTabSeen('all');
+        renderTabs();
+        render();
+      };
+    });
+  }
+
+  function renderMatches(){
+    if(profile.status!=='approved'){contentEl.innerHTML='<div class="panel"><div class="empty-state">Your team claim needs to be approved before viewing match history.</div></div>';return;}
+    const rows=myTeamMatchData();
+    contentEl.innerHTML=`<div class="panel"><div class="myteam-section-head"><div><h2>Match History</h2><div class="note">Every processed replay involving ${escapeHtml(profile.team_name)}.</div></div></div><div class="recent-battles-list">${rows.length?rows.map(recentBattleRowHtml).join(''):'<div class="empty-state">No match history yet.</div>'}</div></div>`;
+  }
+
+  function render(){
+    if(!session){ document.getElementById('tabs')?.remove(); renderAuthGate(); return; }
+    if(!profile){ document.getElementById('tabs')?.remove(); contentEl.innerHTML = '<div class="empty-state">Loading…</div>'; return; }
+
+    if(!profile.username || !profile.team_name){ document.getElementById('tabs')?.remove(); renderTeamClaim(); return; }
+    if(profile.status === 'pending' || profile.status === 'rejected'){
+      renderTabs();
+      if(activeTab === 'rosters') return renderRosters();
+      if(activeTab === 'account') return renderAccount();
+      return renderPendingOrRejected();
+    }
+
+    renderTabs();
+    if(activeTab === 'myteam') return renderMyTeam();
+    if(activeTab === 'matches') return renderMatches();
+    if(activeTab === 'trades') return renderTrades();
+    if(activeTab === 'rosters') return renderRosters();
+    if(activeTab === 'feedback') return renderFeedback();
+    if(activeTab === 'account') return renderAccount();
+  }
+
+  async function boot(){
+    contentEl.innerHTML = '<div class="empty-state">Loading…</div>';
+    try{
+      await refreshAll();
+      render();
+    }catch(e){
+      contentEl.innerHTML = `<div class="panel"><div class="note danger">Could not load your dashboard: ${escapeHtml(e.message)}</div></div>`;
+    }
+  }
+
+  contentEl.addEventListener('click',e=>{
+    const matchBtn=e.target.closest('[data-myteam-match]');
+    if(matchBtn){e.preventDefault();openMyTeamReplaySummary(matchBtn.dataset.myteamMatch);return;}
+    const recordBtn=e.target.closest('[data-record-adjust]');
+    if(recordBtn){e.preventDefault();openRecordGamesPopup(recordBtn.dataset.recordAdjust);return;}
+  });
+  function openRecordGamesPopup(kind){
+    const matches=myTeamMatchData().filter(x=>x.result===(kind==='win'?'W':'L'));
+    let overlay=document.getElementById('myteamRecordOverlay'); if(overlay) overlay.remove();
+    overlay=document.createElement('div'); overlay.className='myteam-replay-overlay'; overlay.id='myteamRecordOverlay';
+    overlay.innerHTML=`<div class="myteam-replay-box" style="max-width:760px"><div class="myteam-summary-header"><div><div class="myteam-summary-kicker">${kind==='win'?'Wins':'Losses'}</div><h3>${kind==='win'?'Games you won':'Games you lost'}</h3><div class="myteam-summary-result">${matches.length} ${kind==='win'?'win':'loss'}${matches.length===1?'':'s'}</div></div><div class="myteam-summary-meta"><span>${escapeHtml(profile.team_name)}</span></div></div><div class="recent-battles-list">${matches.length?matches.map(recentBattleRowHtml).join(''):'<div class="empty-state">No recorded games in this category.</div>'}</div><div class="myteam-summary-actions"><button class="ghost" type="button" id="recordGamesClose">Close</button></div></div>`;
+    document.body.appendChild(overlay);document.body.style.overflow='hidden';
+    const close=()=>{overlay.remove();document.body.style.overflow='';};
+    document.getElementById('recordGamesClose').onclick=close;overlay.addEventListener('click',e=>{if(e.target===overlay)close();});
+  }
+
+  (async function init(){
+    const {data} = await supabase.auth.getSession();
+    session = data.session;
+    if(session){ await boot(); }
+    else{ renderAuthGate(); }
+
+    supabase.auth.onAuthStateChange((event, newSession)=>{
+      if(event === 'SIGNED_OUT'){ session=null; profile=null; trades=[]; render(); }
+    });
+  })();
+})();
+</script>
+<style id="season-nav-unified">
+.page-nav{width:100%;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;padding:10px 16px;margin:0;border-bottom:1px solid var(--border,#ddd);background:var(--panel,#fff);box-sizing:border-box;position:fixed;top:0;left:0;right:0;height:58px;z-index:1000;box-shadow:0 6px 18px rgba(0,0,0,.18);transform:translateY(0);transition:transform .22s ease,box-shadow .22s ease;}
+.page-nav a{display:inline-flex;align-items:center;justify-content:center;padding:8px 13px;border-radius:8px;color:var(--text,#222);text-decoration:none;font-size:12px;font-weight:700;white-space:nowrap;transition:background .15s,border-color .15s,color .15s;border:1px solid transparent;flex:0 0 auto;}
+.page-nav a:hover{background:var(--panel-alt,#f4f4f4);border-color:var(--border,#ddd)}
+.page-nav a.active{background:var(--panel-alt,#f4f4f4);border-color:var(--border,#ddd);color:var(--amber,var(--accent,#c98b2e))}
+.page-nav.locked a{opacity:.45;cursor:not-allowed}
+.page-nav.locked a:hover{background:transparent;border-color:transparent}
+.page-nav .nav-lock-hint{font-size:11px;color:var(--text-dim,#777);font-weight:600;margin-left:6px}
+.page-nav.nav-hidden{transform:translateY(-100%);box-shadow:none}
+.nav-hover-zone{position:fixed;top:0;left:0;right:0;height:9px;z-index:1001}
+body{padding-top:58px;}
+@media(max-width:700px){body{padding-top:52px}.page-nav{height:52px;padding:7px 10px;justify-content:flex-start;overflow-x:auto;flex-wrap:nowrap}.page-nav a{flex:0 0 auto;padding:8px 11px;font-size:12px}.nav-hover-zone{height:8px}}
+@media(max-width:480px){.page-nav a{padding:7px 10px;font-size:11px}}
+</style>
+
+  <script src="js/sbl-supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/services/rosters.js"></script>
+    <script src="js/sbl-site.js"></script>
+</body>
+</html>

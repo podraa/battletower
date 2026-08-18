@@ -1,0 +1,113 @@
+
+/*
+ * SBL SITE-WIDE UI
+ * The shared theme engine supplies the palette variables.
+ * This file owns the shared navigation and shell behavior.
+ */
+
+html, body {
+  overflow-x: hidden;
+}
+
+.page-nav {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
+  min-height: 58px;
+  margin: 0 !important;
+  padding: 9px 16px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+  flex-wrap: nowrap !important;
+  overflow-x: auto !important;
+  z-index: 10000 !important;
+
+  background: var(--panel, #161c26) !important;
+  border-bottom: 1px solid var(--border, #2a3444) !important;
+  color: var(--text, #e8edf5) !important;
+  box-shadow: 0 6px 18px rgba(0,0,0,.18);
+  transform: translateY(0);
+  transition: transform .22s ease, box-shadow .22s ease;
+}
+
+.page-nav.nav-hidden {
+  transform: translateY(-100%) !important;
+  box-shadow: none !important;
+}
+
+.page-nav a {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 8px 13px;
+  border: 1px solid transparent !important;
+  border-radius: 8px;
+  background: transparent !important;
+  color: var(--text-dim, #8996a8) !important;
+  text-decoration: none !important;
+  font: 700 12px/1 var(--sans, system-ui, sans-serif);
+  white-space: nowrap;
+  transition: background .15s ease, border-color .15s ease, color .15s ease, transform .12s ease;
+}
+
+.page-nav a:hover {
+  color: var(--text, #fff) !important;
+  background: var(--panel-alt, #1c2432) !important;
+  border-color: var(--border, #2a3444) !important;
+  transform: translateY(-1px);
+}
+
+.page-nav a.active {
+  color: var(--amber, var(--accent, #ffb454)) !important;
+  background: var(--panel-alt, #1c2432) !important;
+  border-color: var(--border, #2a3444) !important;
+}
+
+.page-nav a[hidden] {
+  display: none !important;
+}
+
+.nav-hover-zone {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  height: 9px !important;
+  z-index: 10001 !important;
+}
+
+body {
+  padding-top: 58px !important;
+}
+
+@media (max-width: 700px) {
+  .page-nav {
+    min-height: 52px;
+    padding: 7px 10px !important;
+    justify-content: flex-start !important;
+  }
+
+  .page-nav a {
+    min-height: 34px;
+    padding: 7px 10px;
+    font-size: 11px;
+  }
+
+  .nav-hover-zone {
+    height: 8px !important;
+  }
+
+  body {
+    padding-top: 52px !important;
+  }
+}
+
+/* Phase 4F.3: deterministic remote Showdown HOME sprites (modern Gen 9-era assets). */
+.sbl-remote-sprite{object-fit:contain;image-rendering:auto;display:inline-block;vertical-align:middle;flex:0 0 auto;}
+.sbl-remote-sprite.missing{display:inline-block;background:var(--panel-alt);border-radius:8px;}
