@@ -14,6 +14,10 @@
 (function () {
   'use strict';
 
+  // The shared site shell loads before page-specific controllers, so it must
+  // establish the global namespace itself rather than relying on app.js.
+  window.SBL = window.SBL || {};
+
   /*
    * This is the only place navigation labels/order should be edited.
    * `file` is the real HTML filename.
