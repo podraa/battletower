@@ -1,0 +1,380 @@
+/* Phase 7 — shared responsive/UI polish.  Behavior-neutral by design. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+img, svg, canvas, video { max-width: 100%; }
+
+button, input, select, textarea { max-width: 100%; }
+
+button,
+.btn,
+.button,
+.btn-primary,
+.btn-secondary,
+.btn-danger,
+.btn-ghost,
+[role="button"] {
+  min-height: 36px;
+}
+
+button:disabled,
+.btn:disabled,
+.button:disabled,
+select:disabled,
+input:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: .58;
+}
+
+/* Keep dense data views usable without forcing the whole page wider. */
+.table-wrap,
+.table-container,
+.data-table-wrap,
+.matrix-wrap,
+.matrix-container,
+.roster-table-wrap,
+.stats-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+table { max-width: 100%; }
+
+/* Shared modal guardrails. Page-specific modal dimensions still win. */
+.modal,
+.modal-overlay,
+.dialog-overlay,
+.popup-overlay,
+.overlay {
+  overscroll-behavior: contain;
+}
+
+.modal-card,
+.profile-modal,
+.summary-modal,
+.overview-modal,
+.scout-popup-card,
+.prep-detail-dialog,
+.damage-calc-card {
+  max-width: min(96vw, 1100px);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Better tap targets while preserving the site's compact desktop density. */
+@media (max-width: 700px) {
+  .page-nav { scrollbar-width: none; }
+  .page-nav::-webkit-scrollbar { display: none; }
+
+  .page-nav a,
+  button,
+  .btn,
+  .button,
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger,
+  .btn-ghost,
+  select {
+    min-height: 40px;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  .modal-card,
+  .profile-modal,
+  .summary-modal,
+  .overview-modal,
+  .scout-popup-card,
+  .prep-detail-dialog,
+  .damage-calc-card {
+    max-width: calc(100vw - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+
+  .account-panel { width: 100%; }
+
+  .account-preferences-head,
+  .toolbar,
+  .controls-row,
+  .filter-row,
+  .search-row {
+    gap: 8px;
+  }
+
+  .toolbar,
+  .controls-row,
+  .filter-row,
+  .search-row {
+    flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}
+
+/* Phase 7 Pass 2 — shared visual hierarchy. Kept theme-neutral and token-driven. */
+
+body > header,
+#app > header,
+main > header,
+body > main > header {
+  position: relative;
+}
+
+h1, h2, h3 {
+  text-wrap: balance;
+}
+
+h1 {
+  letter-spacing: -0.025em;
+}
+
+.sub {
+  color: var(--text-dim, rgba(255,255,255,.62));
+  line-height: 1.5;
+}
+
+.panel {
+  border: 1px solid var(--border, rgba(255,255,255,.12));
+  border-radius: 12px;
+  background: var(--panel, rgba(255,255,255,.035));
+}
+
+.page-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 42px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,.10));
+}
+
+.page-nav a {
+  border-radius: 7px;
+  transition: background .14s ease, color .14s ease, border-color .14s ease;
+}
+
+.page-nav a:hover,
+.page-nav a[aria-current="page"] {
+  background: var(--panel-alt, rgba(255,255,255,.06));
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.tabs > button,
+.tabs > a,
+.tab,
+.admin-nav-item,
+.admin-nav-group-toggle {
+  border-radius: 7px;
+  transition: background .14s ease, color .14s ease, border-color .14s ease, transform .14s ease;
+}
+
+.tabs > button:hover,
+.tabs > a:hover,
+.tab:hover,
+.admin-nav-item:hover,
+.admin-nav-group-toggle:hover {
+  transform: translateY(-1px);
+}
+
+.toolbar,
+.roster-toolbar,
+.controls-row,
+.filter-row,
+.search-row {
+  align-items: center;
+}
+
+button,
+.btn,
+.button,
+select {
+  border-radius: 7px;
+}
+
+input,
+select,
+textarea {
+  border-color: var(--border, rgba(255,255,255,.14));
+  transition: border-color .14s ease, box-shadow .14s ease, background .14s ease;
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--text-dim, rgba(255,255,255,.30));
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent, #7c8cff);
+}
+
+table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+tbody tr {
+  transition: background .12s ease;
+}
+
+.empty,
+.empty-state,
+.loading,
+.loading-state,
+.error-state {
+  min-height: 120px;
+  padding: 24px;
+  border-radius: 10px;
+  color: var(--text-dim, rgba(255,255,255,.62));
+  text-align: center;
+}
+
+.badge {
+  vertical-align: middle;
+}
+
+.admin-nav {
+  gap: 6px;
+}
+
+.admin-nav-group {
+  border-radius: 9px;
+}
+
+.admin-nav-submenu {
+  border-radius: 8px;
+}
+
+@media (max-width: 700px) {
+  .page-nav {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar { display: none; }
+
+  .tabs > button,
+  .tabs > a,
+  .tab,
+  .admin-nav-item,
+  .admin-nav-group-toggle {
+    flex: 0 0 auto;
+  }
+}
+
+/* Phase 7 UI Pass 3: accessibility + interaction hardening */
+button:disabled,
+.btn:disabled,
+.button:disabled,
+select:disabled,
+input:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: .58;
+}
+
+button,
+a,
+select,
+input[type="checkbox"],
+input[type="radio"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:active:not(:disabled),
+.btn:active:not(:disabled),
+.button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.table-wrap,
+.table-container,
+.data-table-wrap,
+.matrix-wrap,
+.matrix-container {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.table-wrap table,
+.table-container table,
+.data-table-wrap table {
+  min-width: max-content;
+}
+
+img {
+  max-width: 100%;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 700px) {
+  .toolbar,
+  .roster-toolbar,
+  .controls-row,
+  .filter-row,
+  .search-row {
+    flex-wrap: wrap;
+  }
+
+  .toolbar > input,
+  .toolbar > select,
+  .controls-row > input,
+  .controls-row > select,
+  .filter-row > input,
+  .filter-row > select,
+  .search-row > input,
+  .search-row > select {
+    min-width: min(100%, 220px);
+  }
+
+  .modal,
+  .modal-content,
+  .dialog,
+  .dialog-content {
+    max-width: calc(100vw - 24px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .001ms !important;
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

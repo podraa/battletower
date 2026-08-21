@@ -1,0 +1,119 @@
+
+
+/* Phase 6F: shared UI primitives */
+.btn,
+.button,
+.btn-primary,
+.btn-secondary,
+.btn-danger,
+.btn-ghost {
+  font: inherit;
+  cursor: pointer;
+}
+
+.loading,
+.loading-state,
+.spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.empty-state,
+.error-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Shared Pokémon type badge primitives */
+.type-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,.12);
+  font: 600 9px/1.1 var(--sans);
+  letter-spacing: .03em;
+  color: #fff;
+  text-transform: uppercase;
+  background: #555;
+}
+
+.type-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-left: 7px;
+  vertical-align: middle;
+}
+
+/* Shared keyboard focus primitive */
+:where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent, #7c8cff);
+  outline-offset: 2px;
+}
+
+/* Pokémon type color modifiers */
+.type-normal{background:#777;}
+.type-fire{background:#b84b3e;}
+.type-water{background:#3f78a8;}
+.type-electric{background:#9a7a18;}
+.type-grass{background:#4f7f4d;}
+.type-ice{background:#5f9aa2;}
+.type-fighting{background:#8d4b42;}
+.type-poison{background:#744c83;}
+.type-ground{background:#8b6a43;}
+.type-flying{background:#687f9e;}
+.type-psychic{background:#a65378;}
+.type-bug{background:#71813d;}
+.type-rock{background:#81704c;}
+.type-ghost{background:#625d82;}
+.type-dragon{background:#5f55a0;}
+.type-dark{background:#5c554f;}
+.type-steel{background:#6f7782;}
+.type-fairy{background:#a87891;}
+
+/* Shared compact pill primitive */
+.ui-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 20px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font: 600 11px/1.2 var(--sans);
+  white-space: nowrap;
+}
+
+/* Shared divider primitive */
+.ui-divider {
+  width: 100%;
+  height: 1px;
+  margin: 12px 0;
+  background: var(--border, rgba(255,255,255,.12));
+  border: 0;
+}
+
+/* Shared inline alignment primitive */
+.ui-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* My Team Account preferences */
+.account-panel{max-width:1100px;margin:0 auto;}
+.account-preferences{padding:2px 0;}
+.account-preferences-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:12px;}
+.account-theme-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;}
+.account-theme-swatch{display:flex;align-items:center;gap:9px;min-width:0;padding:8px 9px;border:1px solid var(--border);border-radius:9px;background:var(--panel-alt);color:var(--text);cursor:pointer;text-align:left;}
+.account-theme-swatch:hover{border-color:var(--text-dim);}
+.account-theme-swatch.active{border-color:var(--teal);box-shadow:0 0 0 1px var(--teal) inset;}
+.theme-swatch-preview{width:38px;height:28px;flex:0 0 38px;border:1px solid;border-radius:7px;position:relative;overflow:hidden;display:block;}
+.theme-swatch-preview i{position:absolute;left:5px;right:5px;top:5px;height:4px;border-radius:4px;display:block;}
+.theme-swatch-preview b{position:absolute;left:7px;right:7px;bottom:5px;height:9px;border-radius:4px;display:block;}
+@media(max-width:700px){.account-theme-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.account-preferences-head{flex-direction:column;}.account-theme-swatch{font-size:11px;}}

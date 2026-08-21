@@ -1,205 +1,138 @@
-/* Phase 4G — global Gen 9 sprite layout
-   The sprite source is shared; this file makes every common Pokémon cell/card
-   reserve enough space for the larger Gen 9 sprites without changing the
-   underlying sprite identity or loading behaviour. */
-:root{
-  --sbl-sprite-xs:32px;
-  --sbl-sprite-sm:48px;
-  --sbl-sprite-md:64px;
-  --sbl-sprite-lg:88px;
-  --sbl-sprite-xl:104px;
-  --sbl-sprite-cell-gap:10px;
+
+/*
+ * SBL SITE-WIDE UI
+ * The shared theme engine supplies the palette variables.
+ * This file owns the shared navigation and shell behavior.
+ */
+
+html, body {
+  overflow-x: hidden;
 }
 
-.sbl-remote-sprite{
-  object-fit:contain !important;
-  object-position:center !important;
-  max-width:none;
-  max-height:none;
-  flex:0 0 auto;
-  vertical-align:middle;
+.page-nav {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
+  min-height: 58px;
+  margin: 0 !important;
+  padding: 9px 16px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+  flex-wrap: nowrap !important;
+  overflow-x: auto !important;
+  z-index: 10000 !important;
+
+  background: var(--panel, #161c26) !important;
+  border-bottom: 1px solid var(--border, #2a3444) !important;
+  color: var(--text, #e8edf5) !important;
+  box-shadow: 0 6px 18px rgba(0,0,0,.18);
+  transform: translateY(0);
+  transition: transform .22s ease, box-shadow .22s ease;
 }
 
-/* Main Pokémon cards / roster cells */
-.mon-card .sbl-remote-sprite,
-.pokemon-card .sbl-remote-sprite,
-.pokemon-cell .sbl-remote-sprite,
-.roster-card .sbl-remote-sprite,
-.roster-mon .sbl-remote-sprite,
-.pick-card .sbl-remote-sprite,
-.free-agency-card .sbl-remote-sprite,
-.draft-card .sbl-remote-sprite{
-  width:var(--sbl-sprite-lg) !important;
-  height:var(--sbl-sprite-lg) !important;
+.page-nav.nav-hidden {
+  transform: translateY(-100%) !important;
+  box-shadow: none !important;
 }
 
-.mon-card,
-.pokemon-card,
-.roster-card,
-.roster-mon,
-.free-agency-card,
-.draft-card{
-  min-height:calc(var(--sbl-sprite-lg) + 34px);
+.page-nav a {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 8px 13px;
+  border: 1px solid transparent !important;
+  border-radius: 8px;
+  background: transparent !important;
+  color: var(--text-dim, #8996a8) !important;
+  text-decoration: none !important;
+  font: 700 12px/1 var(--sans, system-ui, sans-serif);
+  white-space: nowrap;
+  transition: background .15s ease, border-color .15s ease, color .15s ease, transform .12s ease;
 }
 
-.pick-card{
-  min-height:calc(var(--sbl-sprite-lg) + 24px);
+.page-nav a:hover {
+  color: var(--text, #fff) !important;
+  background: var(--panel-alt, #1c2432) !important;
+  border-color: var(--border, #2a3444) !important;
+  transform: translateY(-1px);
 }
 
-/* Common Pokémon header / profile cells */
-.pokemon-head,
-.mon-head,
-.prep-card-head,
-.prep-popout-trigger .mon-head,
-.team-card-top,
-.profile-card-head{
-  min-height:var(--sbl-sprite-lg);
+.page-nav a.active {
+  color: var(--amber, var(--accent, #ffb454)) !important;
+  background: var(--panel-alt, #1c2432) !important;
+  border-color: var(--border, #2a3444) !important;
 }
 
-.pokemon-head .sbl-remote-sprite,
-.mon-head .sbl-remote-sprite,
-.prep-card-head .sbl-remote-sprite,
-.profile-card-head .sbl-remote-sprite{
-  width:var(--sbl-sprite-lg) !important;
-  height:var(--sbl-sprite-lg) !important;
-  max-width:var(--sbl-sprite-lg) !important;
-  max-height:var(--sbl-sprite-lg) !important;
+.page-nav a[hidden] {
+  display: none !important;
 }
 
-/* Larger hero/team sprites get a little more breathing room. */
-.team-card-top .sbl-remote-sprite,
-.team-card .team-card-top-sprite.sbl-remote-sprite,
-.league-card-sprite .sbl-remote-sprite{
-  width:var(--sbl-sprite-xl) !important;
-  height:var(--sbl-sprite-xl) !important;
-  max-width:var(--sbl-sprite-xl) !important;
-  max-height:var(--sbl-sprite-xl) !important;
+.nav-hover-zone {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  height: 9px !important;
+  z-index: 10001 !important;
 }
 
-.team-card-top,
-.league-card-sprite{
-  min-width:var(--sbl-sprite-xl);
-  min-height:var(--sbl-sprite-xl);
+body {
+  padding-top: 58px !important;
 }
 
-/* Medium list/table cells. These remain compact but have enough height for
-   the Gen 9 sprite rather than letting it push text into neighbouring rows. */
-.stat-mon,
-.myteam-stat-card .stat-mon,
-.myteam-mon,
-.prep-speed-mon,
-.prep-switch-head,
-.switch-card-top,
-.opponent-card,
-.defensive-matrix .sprite-small,
-.speed-matrix-sprite{
-  min-height:var(--sbl-sprite-md);
-}
-
-.stat-mon .sbl-remote-sprite,
-.myteam-stat-card .stat-mon .sbl-remote-sprite,
-.myteam-mon .sbl-remote-sprite,
-.prep-speed-mon .sbl-remote-sprite,
-.prep-switch-head .sbl-remote-sprite,
-.switch-card-top .sbl-remote-sprite,
-.opponent-card .sbl-remote-sprite,
-.speed-matrix-sprite.sbl-remote-sprite{
-  width:var(--sbl-sprite-md) !important;
-  height:var(--sbl-sprite-md) !important;
-  max-width:var(--sbl-sprite-md) !important;
-  max-height:var(--sbl-sprite-md) !important;
-}
-
-/* Speed/type matrices and dense tables intentionally stay compact. */
-.tc-row-sprite.sbl-remote-sprite,
-.tc2-mon-sprite.sbl-remote-sprite,
-.tc2-opp-sprite.sbl-remote-sprite,
-.death-cause-sprite.sbl-remote-sprite,
-.league-card-sprite .league-rank + .sbl-remote-sprite{
-  width:var(--sbl-sprite-sm) !important;
-  height:var(--sbl-sprite-sm) !important;
-  max-width:var(--sbl-sprite-sm) !important;
-  max-height:var(--sbl-sprite-sm) !important;
-}
-
-.tc-row-mon,
-.tc2-mon,
-.tc2-opp,
-.death-cause-entry{
-  min-height:var(--sbl-sprite-sm);
-}
-
-/* Trade chips / selected Pokémon are deliberately compact. */
-#proposePanel .selected-chip,
-#tradeViewBody .mon-pill,
-.selected-chip,
-.mon-pill,
-.random-trade-mon{
-  min-height:var(--sbl-sprite-sm);
-}
-
-#proposePanel .selected-chip .sbl-remote-sprite,
-#tradeViewBody .mon-pill .sbl-remote-sprite,
-.selected-chip .sbl-remote-sprite,
-.mon-pill .sbl-remote-sprite,
-.random-trade-mon .sbl-remote-sprite{
-  width:var(--sbl-sprite-sm) !important;
-  height:var(--sbl-sprite-sm) !important;
-  max-width:var(--sbl-sprite-sm) !important;
-  max-height:var(--sbl-sprite-sm) !important;
-}
-
-/* Small inline Pokémon references should never inherit a large card size. */
-.pokemon-name-line .sbl-remote-sprite,
-.type-pill .sbl-remote-sprite,
-.pokemon-inline .sbl-remote-sprite,
-.chip .sbl-remote-sprite{
-  width:var(--sbl-sprite-xs) !important;
-  height:var(--sbl-sprite-xs) !important;
-  max-width:var(--sbl-sprite-xs) !important;
-  max-height:var(--sbl-sprite-xs) !important;
-}
-
-/* Popup/modal cards need a fixed sprite area so different forms cannot change
-   the popup dimensions unexpectedly. */
-.modal-card .pokemon-head,
-.profile-modal .pokemon-head,
-.summary-modal .pokemon-head,
-.overview-modal .pokemon-head,
-.scout-popup-card .pokemon-head,
-.prep-detail-dialog .pokemon-head,
-.damage-calc-card .pokemon-head{
-  min-height:var(--sbl-sprite-lg);
-}
-
-/* Prevent enlarged sprites from ever forcing horizontal overflow. */
-.mon-card,
-.pokemon-card,
-.pick-card,
-.roster-card,
-.free-agency-card,
-.draft-card,
-.modal-card,
-.profile-modal,
-.summary-modal,
-.overview-modal,
-.scout-popup-card,
-.prep-detail-dialog,
-.damage-calc-card{
-  overflow:hidden;
-}
-
-@media (max-width:700px){
-  :root{
-    --sbl-sprite-lg:76px;
-    --sbl-sprite-xl:88px;
+@media (max-width: 700px) {
+  .page-nav {
+    min-height: 52px;
+    padding: 7px 10px !important;
+    justify-content: flex-start !important;
   }
-  .mon-card,
-  .pokemon-card,
-  .roster-card,
-  .roster-mon,
-  .free-agency-card,
-  .draft-card{
-    min-height:calc(var(--sbl-sprite-lg) + 30px);
+
+  .page-nav a {
+    min-height: 34px;
+    padding: 7px 10px;
+    font-size: 11px;
   }
+
+  .nav-hover-zone {
+    height: 8px !important;
+  }
+
+  body {
+    padding-top: 52px !important;
+  }
+}
+
+/* Phase 4F.3: deterministic remote Showdown HOME sprites (modern Gen 9-era assets). */
+.sbl-remote-sprite{object-fit:contain;image-rendering:auto;display:inline-block;vertical-align:middle;flex:0 0 auto;}
+.sbl-remote-sprite.missing{display:inline-block;background:var(--panel-alt);border-radius:8px;}
+
+
+/* Phase 6G: shared authenticated navigation action.
+   Keep this in the shared shell instead of injecting page-local <style> tags. */
+.sbl-global-logout {
+  flex: 0 0 auto;
+  min-height: 36px;
+  border: 1px solid var(--border, #ccc);
+  background: var(--panel-alt, #f4f4f4);
+  color: var(--text, #222);
+  border-radius: 8px;
+  padding: 8px 11px;
+  font: 700 12px/1.2 var(--sans, system-ui, sans-serif);
+  cursor: pointer;
+  transition: opacity .15s, background .15s, border-color .15s;
+}
+
+.sbl-global-logout:hover {
+  background: var(--panel, #fff);
+}
+
+.sbl-global-logout:disabled {
+  opacity: .55;
+  cursor: wait;
 }
