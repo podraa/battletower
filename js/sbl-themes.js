@@ -214,6 +214,12 @@
     document.documentElement.dataset.sblTheme=id;
   }
 
+  function applyTheme(id, persist){
+    if(persist !== false){ try{ localStorage.setItem(THEME_KEY,id); }catch(e){} }
+    apply();
+    return themeFor(id);
+  }
+
   function applyGlobalThemeStyle(){
     const styleId='sbl-global-theme-polish';
     let style=document.getElementById(styleId);
@@ -448,6 +454,25 @@
       }
     `;
   }
+
+  // Public site-wide theme API. Pages should use this instead of maintaining
+  // their own theme state/apply functions.
+  window.SBLTheme = {
+    list: () => THEMES.slice(),
+    getSavedId: () => read(THEME_KEY,'amber'),
+    getCustom: () => custom(),
+    resolve: (id) => themeFor(id),
+    apply: (id, persist=true) => {
+      const target = id || read(THEME_KEY,'amber');
+      applyTheme(target, persist);
+      return themeFor(target);
+    },
+    reset: () => {
+      try{ localStorage.removeItem(CUSTOM_KEY); }catch(e){}
+      applyTheme('amber', true);
+      return themeFor('amber');
+    }
+  };
 
   apply();
   window.addEventListener('storage',e=>{

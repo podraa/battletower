@@ -24,7 +24,6 @@
     }
 
     client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-    window.SBL.supabase = client;
     return client;
   }
 

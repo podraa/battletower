@@ -14,9 +14,6 @@
 (function () {
   'use strict';
 
-  const SUPABASE_URL = 'https://dfxdkkemltukxaklhcpo.supabase.co';
-  const SUPABASE_KEY = 'sb_publishable_H7iIBiJTxY77lBAcpJn2VQ_u2hAG2CN';
-
   /*
    * This is the only place navigation labels/order should be edited.
    * `file` is the real HTML filename.
@@ -26,7 +23,7 @@
     { file: 'stats.html',         label: 'Stats' },
     { file: 'season.html',        label: 'Season' },
     { file: 'rosters.html',       label: 'Rosters' },
-    { file: 'team-analysis.html', label: 'Team Analysis' },
+    { file: 'match-prep.html', label: 'Match Prep' },
     { file: 'free-agency.html',   label: 'Free Agency' },
     { file: 'draft.html',         label: 'Draft Room', draftLiveOnly: true },
     { file: 'admin.html',         label: 'Admin Dashboard', adminOnly: true }
@@ -40,9 +37,7 @@
 
   function getClient() {
     try {
-      return window.SBL?.getSupabase?.() ||
-        window.supabase?.createClient(SUPABASE_URL, SUPABASE_KEY) ||
-        null;
+      return window.SBL?.getSupabase?.() || null;
     } catch (e) {
       console.warn('SBL navigation: Supabase client unavailable.', e);
       return null;
@@ -150,10 +145,22 @@
   }
 
   function hidePrivilegedLinks() {
+    hideAdminLink();
+    hideDraftLink();
+  }
+
+  function hideAdminLink() {
     const nav = getNav();
     if (!nav) return;
+    nav.querySelectorAll('[data-admin-only]').forEach(link => {
+      link.hidden = true;
+    });
+  }
 
-    nav.querySelectorAll('[data-admin-only],[data-draft-live-only]').forEach(link => {
+  function hideDraftLink() {
+    const nav = getNav();
+    if (!nav) return;
+    nav.querySelectorAll('[data-draft-live-only]').forEach(link => {
       link.hidden = true;
     });
   }
@@ -258,7 +265,7 @@
 
       /*
        * Draft Room is intentionally independent of commissioner status:
-       * any logged-in team owner sees it only while the draft is live.
+       * any logged-in team owner sees it while the Draft Room lobby is open or the draft is live.
        */
       try {
         const { data: stateRow } = await client
@@ -267,8 +274,10 @@
           .eq('replay_id', '__dashboard_state__')
           .maybeSingle();
 
-        permissions.draftLive =
-          stateRow?.replay_data?.settings?.draft?.status === 'live';
+        const draftStatus = stateRow?.replay_data?.settings?.draft?.status;
+        // The Draft Room must become visible as soon as the commissioner
+        // opens the lobby, not only after the first pick/start action.
+        permissions.draftLive = draftStatus === 'lobby' || draftStatus === 'live';
       } catch (draftError) {
         console.warn('SBL navigation: draft status check failed.', draftError);
       }
@@ -281,6 +290,40 @@
       hidePrivilegedLinks();
     }
   }
+
+  function setActive(file) {
+    const target = String(file || '').toLowerCase();
+    const nav = getNav();
+    if (!nav) return;
+    nav.querySelectorAll('a[data-page]').forEach(link => {
+      const active = String(link.dataset.page || '').toLowerCase() === target;
+      link.classList.toggle('active', active);
+      if (active) link.setAttribute('aria-current', 'page');
+      else link.removeAttribute('aria-current');
+    });
+  }
+
+  function go(file) {
+    if (!file) return;
+    location.href = String(file);
+  }
+
+  // Shared UI primitives used by page controllers. Define these before the
+  // site-ready event can fire so every page listener sees a complete SBL.ui API.
+  SBL.ui = SBL.ui || {};
+  SBL.ui.qs = (selector, root = document) => root?.querySelector?.(selector) || null;
+  SBL.ui.qsa = (selector, root = document) => Array.from(root?.querySelectorAll?.(selector) || []);
+  SBL.ui.on = (target, event, handler, options) => {
+    if (!target || typeof target.addEventListener !== 'function') return () => {};
+    target.addEventListener(event, handler, options);
+    return () => target.removeEventListener(event, handler, options);
+  };
+  SBL.ui.replace = (target, html) => {
+    const node = typeof target === 'string' ? SBL.ui.qs(target) : target;
+    if (!node) return false;
+    node.innerHTML = html;
+    return true;
+  };
 
   function boot() {
     const nav = renderNav();
@@ -330,8 +373,14 @@
       refresh: renderNav,
       setAdminVisible: visible => {
         if (visible) showAdminLink();
-        else hidePrivilegedLinks();
-      }
+        else hideAdminLink();
+      },
+      setDraftVisible: visible => {
+        if (visible) showDraftLink();
+        else hideDraftLink();
+      },
+      setActive,
+      go
     };
 
     document.dispatchEvent(new CustomEvent('sbl:site-ready'));
@@ -342,4 +391,5 @@
   } else {
     boot();
   }
+
 })();

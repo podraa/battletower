@@ -10,6 +10,7 @@
   const STORE='payloads';
   const TTL=2*60*1000;
   const memory=new Map();
+  const inFlight=new Map();
   let dbPromise=null;
 
   function openDb(){
@@ -61,26 +62,29 @@
   async function cached(key, loader, options={}){
     const mem=memory.get(key);
     if(fresh(mem)) return mem.value;
-    const persisted=await idbGet(key);
-    if(fresh(persisted)){
-      memory.set(key,persisted);
-      return persisted.value;
-    }
-    const value=await loader();
-    const entry={ts:Date.now(),value};
-    memory.set(key,entry);
-    // Do not make the first page render wait for IndexedDB serialization.
-    // Large replay payloads can take noticeable time to clone/write, which
-    // used to make the dashboard feel frozen even though the live Supabase
-    // request had already completed. Cache persistence is deliberately
-    // fire-and-forget; the live result is returned immediately.
-    idbPut(key,entry).catch(()=>{});
-    return value;
+    if(inFlight.has(key)) return inFlight.get(key);
+    const promise=(async()=>{
+      const persisted=await idbGet(key);
+      if(fresh(persisted)){
+        memory.set(key,persisted);
+        return persisted.value;
+      }
+      const value=await loader();
+      const entry={ts:Date.now(),value};
+      memory.set(key,entry);
+      // Do not make the first page render wait for IndexedDB serialization.
+      idbPut(key,entry).catch(()=>{});
+      return value;
+    })();
+    inFlight.set(key,promise);
+    try{ return await promise; }
+    finally{ if(inFlight.get(key)===promise) inFlight.delete(key); }
   }
 
   async function invalidate(key){
-    if(key){ memory.delete(key); await idbDelete(key); return; }
+    if(key){ memory.delete(key); inFlight.delete(key); await idbDelete(key); return; }
     memory.clear();
+    inFlight.clear();
     const db=await openDb();
     if(!db) return;
     return new Promise(resolve=>{
@@ -93,6 +97,11 @@
     if(!window.SBL) return;
     const perf=window.SBL.performance=window.SBL.performance||{};
     perf.cached=cached; perf.invalidate=invalidate; perf.clear=invalidate;
+    perf.idle=(fn, timeout=1200)=>{
+      if('requestIdleCallback' in window) return window.requestIdleCallback(fn,{timeout});
+      return window.setTimeout(fn,0);
+    };
+    perf.preload=(key,loader)=>cached(key,loader).catch(()=>null);
 
     if(window.SBL.replays && !window.SBL.replays.__phase4fPatched){
       const original=window.SBL.replays.load;
@@ -118,4 +127,15 @@
   setTimeout(patch,0);
   setTimeout(patch,50);
   setTimeout(patch,250);
+})();
+
+(function(){
+  const api=window.SBL=window.SBL||{};
+  api.performance=api.performance||{};
+  api.performance.warm=function(task){
+    if(typeof task!=="function") return;
+    const run=()=>{try{const r=task(); if(r&&typeof r.catch==="function") r.catch(()=>{});}catch(e){}};
+    if('requestIdleCallback' in window) window.requestIdleCallback(run,{timeout:1500});
+    else setTimeout(run,250);
+  };
 })();

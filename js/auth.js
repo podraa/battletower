@@ -40,6 +40,23 @@
     return data || null;
   }
 
+  async function signOut() {
+    const { error } = await client().auth.signOut();
+    if (error) throw error;
+    try {
+      Object.keys(sessionStorage).forEach(key => {
+        if (/^(navPerms:|navLastUid$)/.test(key)) sessionStorage.removeItem(key);
+      });
+    } catch (e) {}
+    window.SBL.currentSession = null;
+    window.SBL.currentUser = null;
+    return true;
+  }
+
+  function announceError(error) {
+    console.error('SBL authentication error:', error);
+  }
+
   async function requireLogin() {
     const session = await getSession();
     if (!session?.user) {
@@ -62,6 +79,8 @@
     getUser,
     getProfile,
     requireLogin,
+    signOut,
+    announceError,
     isCommissioner,
     onAuthStateChange
   };
