@@ -1,11 +1,11 @@
 
-<!doctype html>
+<!DOCTYPE html>
+
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1" name="viewport"/>
 <title>Current Rosters</title>
-
 <style>
 :root{
   --bg:#071426;
@@ -237,27 +237,13 @@ h1{
   background:var(--panel);
 }
 </style>
-
 <style>
-.page-nav{width:100%;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;padding:10px 16px;margin:0 0 20px;border-bottom:1px solid var(--border,#ddd);background:var(--panel,#fff);box-sizing:border-box;position:relative;z-index:50}
-.page-nav a{display:inline-flex;align-items:center;justify-content:center;padding:8px 13px;border-radius:8px;color:var(--text,#222);text-decoration:none;font-size:12px;font-weight:700;white-space:nowrap;transition:background .15s,border-color .15s,color .15s; border:1px solid transparent}
-.page-nav a:hover{background:var(--panel-alt,#f4f4f4);border-color:var(--border,#ddd)}
-.page-nav a.active{background:var(--panel-alt,#f4f4f4);border-color:var(--border,#ddd);color:var(--amber,var(--accent,#c98b2e))}
-.page-nav.locked a{opacity:.45;cursor:not-allowed}
-.page-nav.locked a:hover{background:transparent;border-color:transparent}
-.page-nav .nav-lock-hint{font-size:11px;color:var(--text-dim,#777);font-weight:600;margin-left:6px}
-@media(max-width:700px){.page-nav{justify-content:flex-start;overflow-x:auto;flex-wrap:nowrap;padding:8px 10px}.page-nav a{flex:0 0 auto}}
 </style>
 <style>
 /* Auto-hiding site navigation */
 body{padding-top:58px;}
-.page-nav{position:fixed;top:0;left:0;right:0;width:100%;height:58px;margin:0;padding:9px 16px;box-shadow:0 6px 18px rgba(0,0,0,.18);transform:translateY(0);transition:transform .22s ease,box-shadow .22s ease;z-index:1000;}
-.page-nav.nav-hidden{transform:translateY(-100%);box-shadow:none;}
-.page-nav a{flex:0 0 auto;}
-.nav-hover-zone{position:fixed;top:0;left:0;right:0;height:9px;z-index:1001;}
-@media(max-width:700px){body{padding-top:52px}.page-nav{height:52px;padding:7px 10px;overflow-x:auto;flex-wrap:nowrap}.nav-hover-zone{height:8px}}
+@media(max-width:700px){body{padding-top:52px}}
 </style>
-
 <style id="mobile-friendly-overrides">
 /* Site-wide mobile usability pass */
 html{overflow-x:hidden;-webkit-text-size-adjust:100%;}
@@ -274,15 +260,6 @@ button{touch-action:manipulation;}
   h2{font-size:clamp(18px,5.5vw,24px);}
   h3{font-size:17px;}
   .sub,.note,.panel-desc{overflow-wrap:anywhere;}
-
-  /* Public header navigation */
-  .page-nav{max-width:100vw;box-sizing:border-box;}
-  .page-nav a{min-height:36px;padding:8px 11px;font-size:12px;}
-  .page-nav::-webkit-scrollbar{height:3px;}
-
-  /* Admin's dropdown navigation */
-  body[data-admin="true"] .page-nav{max-width:calc(100vw - 16px);}
-  body[data-admin="true"] .page-nav select{max-width:calc(100vw - 32px);}
 
   /* Stacked controls instead of cramped horizontal rows */
   .toolbar,.toolbar-wide,.banner-controls,.section-head-row,.trade-tab-head,.summary-header,
@@ -344,7 +321,6 @@ button{touch-action:manipulation;}
 
 @media (max-width: 480px){
   #app{padding-left:9px !important;padding-right:9px !important;}
-  .page-nav a{padding:7px 10px;font-size:11px;}
   .panel{padding:12px !important;}
   .pick-grid{grid-template-columns:repeat(2,minmax(0,1fr)) !important;}
   .theme-grid{grid-template-columns:1fr 1fr !important;}
@@ -354,9 +330,7 @@ button{touch-action:manipulation;}
   .section-head-row{align-items:flex-start !important;}
 }
 </style>
-
 <style>[hidden]{display:none!important}</style>
-
 <style id="sitewide-hidden-scrollbars">
 /* Site-wide: keep every scroll area usable while never showing a scrollbar. */
 html, body, *, *::before, *::after {
@@ -420,7 +394,7 @@ html,body{background:var(--sbl-page-bg) !important;color:var(--sbl-text);}
 .roster-team,
 .free-agent-card,
 .fa-card,
-.team-analysis-card,
+.match-prep-card,
 .switch-card,
 .switch-card-detail,
 .damage-calc-card,
@@ -464,17 +438,6 @@ html,body{background:var(--sbl-page-bg) !important;color:var(--sbl-text);}
 input,textarea,select{
   background:var(--sbl-card-alt) !important;
   border-color:var(--sbl-card-border) !important;
-  color:var(--sbl-text) !important;
-}
-
-/* Theme-aware headings and ordinary text. */
-.panel h1,.panel h2,.panel h3,.panel h4,
-.card h1,.card h2,.card h3,.card h4,
-.team-card-name,.team-card-sub,
-.team-name,.team-record,.death-cause-title,
-.franchise-name,.franchise-sub,
-.standings-team-name,.pokemon-name,.pick-card-name,
-.section-title,.page-title,.card-title{
   color:var(--sbl-text) !important;
 }
 
@@ -524,7 +487,8 @@ td{border-color:var(--sbl-card-border) !important;}
 
 /* Keep Pokémon type badges readable; their white text is intentional. */
 .type-badge,[class^="type-"],[class*=" type-"]{color:#fff !important;}
-</style>\n
+</style>
+
 <style id="site-nav-flush-top">
 html,body{
   margin:0 !important;
@@ -532,272 +496,46 @@ html,body{
 body{
   padding-top:58px !important;
 }
-.page-nav{
-  position:fixed !important;
-  top:0 !important;
-  left:0 !important;
-  right:0 !important;
-  width:100% !important;
-  height:58px !important;
-  min-height:58px !important;
-  margin:0 !important;
-  padding:10px 16px !important;
-  box-sizing:border-box !important;
-  z-index:10000 !important;
-}
-.page-nav.nav-hidden{
-  transform:translateY(-100%) !important;
-}
 </style>
-
-  <link rel="stylesheet" href="css/sbl-site.css">
-  <link rel="stylesheet" href="css/sbl-sprites-layout.css">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://unpkg.com" crossorigin>
+<link href="css/sbl-site.css" rel="stylesheet"/>
+<link href="css/sbl-components.css" rel="stylesheet"/>
+<link href="css/sbl-sprites-layout.css" rel="stylesheet"/>
+<link href="css/sbl-phase7.css" rel="stylesheet"/>
 </head>
-
 <body>
-
 <style>
-.page-nav{position:fixed;top:14px;right:18px;z-index:1000;display:flex;align-items:center;gap:7px}
-.page-nav label{font-size:11px;color:var(--text-dim);font-weight:700}
-.page-nav select{font:inherit;font-size:12px;padding:7px 30px 7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text);box-shadow:0 2px 8px rgba(0,0,0,.08)}
-.page-nav select:disabled{opacity:.45;cursor:not-allowed}
-.page-nav .lock-hint{font-size:10.5px;color:var(--text-dim);opacity:.85}
-@media(max-width:700px){.page-nav{top:8px;right:8px}.page-nav label{display:none}.page-nav .lock-hint{display:none}}
 </style>
-<nav id="pageNav" class="page-nav" aria-label="Site navigation"></nav>
+<nav aria-label="Site navigation" class="page-nav" id="pageNav"></nav>
 <div id="app" style="display:none">
-  <h1>Current Rosters</h1>
-  <p class="sub">Select a franchise to view its currently published Pokémon roster.</p>
-
-  <div id="toolbar" class="roster-toolbar" style="display:none">
-    <div>
-      <label for="rosterSelect">Select roster</label>
-      <select id="rosterSelect" aria-label="Select roster"></select>
-    </div>
-    <div id="rosterSummary" class="roster-summary"></div>
-  </div>
-
-  <main id="content">
-    <div class="empty">Loading rosters…</div>
-  </main>
+<h1>Current Rosters</h1>
+<p class="sub">Select a franchise to view its currently published Pokémon roster.</p>
+<div class="roster-toolbar" id="toolbar" style="display:none">
+<div>
+<label for="rosterSelect">Select roster</label>
+<select aria-label="Select roster" id="rosterSelect"></select>
 </div>
-
-<script src="js/sbl-site.js" defer></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="js/pokemon-dex-ids.js"></script>
-<script src="js/services/pokemon.js"></script>
-<script src="js/services/seasons.js"></script>
-<script src="js/services/replays.js"></script>
-<script>
-const SUPABASE_URL = 'https://dfxdkkemltukxaklhcpo.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_H7iIBiJTxY77lBAcpJn2VQ_u2hAG2CN';
-const DEFAULT_SEASON='Season 15';
-function seasonKey(name){return String(name||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'season';}
-function selectedSeasonSnapshot(shared){
-  const settings=shared?.settings||{},archives=settings.seasonArchives||{},requested=new URLSearchParams(location.search).get('season');
-  if(requested&&archives[requested]){const a=archives[requested];return{name:a.name||requested,key:requested,settings:a.settings||{},teamMap:a.teamMap||{},replays:a.replays||{},archived:true,archives};}
-  return{name:settings.activeSeason||DEFAULT_SEASON,key:'',settings,teamMap:shared?.teamMap||{},replays:null,archived:false,archives};
-}
-function installSeasonPicker(shared){
-  // Season picker UI removed; still resolve which season's data to use.
-  return selectedSeasonSnapshot(shared);
-}
-
-
-const content = document.getElementById('content');
-const toolbar = document.getElementById('toolbar');
-const rosterSelect = document.getElementById('rosterSelect');
-const rosterSummary = document.getElementById('rosterSummary');
-let allRosters = {};
-const esc = s => String(s ?? '').replace(/[&<>'"]/g, c => ({
-  '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'
-}[c]));
-
-// Pokémon Showdown sprite filenames preserve hyphens for forme/name separators.
-// Keep the hyphen so names such as Ho-Oh, Porygon-Z, Landorus-Therian and
-// Necrozma-Dusk-Mane resolve to their actual sprite files.
-function toShowdownId(name){ return SBL.pokemon.normalizeName(name); }
-function sprite(name){ return SBL.pokemon.spriteMarkup(name, 'sprite'); }
-
-function normalizeRosters(raw){
-  const out = {};
-  for(const [team, list] of Object.entries(raw || {})){
-    if(!Array.isArray(list)) continue;
-    const mons = list.map(mon => typeof mon === 'string'
-      ? {name: SBL.pokemon.displayNameWithForm ? SBL.pokemon.displayNameWithForm(mon) : SBL.pokemon.displayName(mon), points: null}
-      : {name: SBL.pokemon.displayNameWithForm ? SBL.pokemon.displayNameWithForm(String(mon?.name ?? '')) : SBL.pokemon.displayName(String(mon?.name ?? '')), points: mon?.points ?? null}
-    ).filter(mon => mon.name);
-    if(mons.length) out[String(team)] = mons;
-  }
-  return out;
-}
-
-const FALLBACK_BUDGET = 115;
-let DRAFT_BUDGETS = {defaultBudget: FALLBACK_BUDGET, budgets: {}};
-
-function teamBudget(team){
-  const override = DRAFT_BUDGETS.budgets?.[team];
-  return Number.isFinite(Number(override)) ? Number(override) : (Number(DRAFT_BUDGETS.defaultBudget) || FALLBACK_BUDGET);
-}
-
-function rosterPoints(list){
-  return (Array.isArray(list) ? list : []).reduce((sum, mon) => {
-    const points = Number(mon?.points);
-    return sum + (Number.isFinite(points) ? points : 0);
-  }, 0);
-}
-
-function budgetMarkup(team, list){
-  const spent = rosterPoints(list);
-  const remaining = teamBudget(team) - spent;
-  const cls = remaining < 0 ? 'negative' : 'good';
-  return `<div class="budget-wrap"><div class="budget-label">Budget remaining</div><div class="budget-value ${cls}">${remaining} pts</div></div>`;
-}
-
-function renderPokemon(team, mon){
-  const points = mon.points == null || mon.points === '' ? '' : `<div class="mon-points">${esc(mon.points)} pts</div>`;
-  return `<div class="mon">${sprite(mon.name)}<div class="mon-info"><div class="mon-name">${esc(SBL.pokemon.displayNameWithForm ? SBL.pokemon.displayNameWithForm(mon.name) : SBL.pokemon.displayName(mon.name))}</div><div class="mon-team">${esc(team)}</div>${points}</div></div>`;
-}
-
-function showError(message){
-  content.innerHTML = `<div class="empty">${esc(message)}</div>`;
-}
-
-async function withTimeout(promise, ms, label){
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(label + ' timed out. Check that Supabase is reachable and try refreshing.')), ms);
-  });
-  try { return await Promise.race([promise, timeout]); }
-  finally { clearTimeout(timer); }
-}
-
-async function loadRosters(){
-  if(!window.supabase){
-    showError('Roster service could not start because the Supabase library did not load.');
-    return;
-  }
-
-  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
-  // ---- access gate: must be logged in AND have a claimed team, or bounce to login ----
-  const {data:{session}} = await supabase.auth.getSession();
-  if(!session){ location.replace('index.html'); return; }
-  const {data:gateProfile, error:gateErr} = await supabase.from('profiles').select('team_name').eq('id', session.user.id).maybeSingle();
-  if(gateErr || !gateProfile?.team_name){ location.replace('index.html'); return; }
-  document.getElementById('app').style.display = '';
-
-  try{
-    // Read dashboard state first. Admin publishes the roster there as part of
-    // normal settings, so this is the most reliable source. __rosters__ remains
-    // supported for compatibility with older published data.
-    let rosters = {};
-
-    const replayResult = await withTimeout(
-      SBL.replays.load(supabase),
-      8000,
-      'Loading the roster data'
-    );
-    if(replayResult.error) throw replayResult.error;
-    const {sharedState, publishedRosters} = SBL.replays.partition(replayResult.data);
-    const shared=sharedState||{};
-    const snap=SBL.seasons.getSnapshot(shared);
-    rosters = normalizeRosters(snap.settings?.rosters || {});
-    const draftSettings = snap.settings?.draft;
-    if(draftSettings && typeof draftSettings === 'object'){
-      DRAFT_BUDGETS = {
-        defaultBudget: Number(draftSettings.defaultBudget) || FALLBACK_BUDGET,
-        budgets: (draftSettings.budgets && typeof draftSettings.budgets === 'object') ? draftSettings.budgets : {}
-      };
-    }
-
-    if(!snap.archived && !Object.keys(rosters).length){
-      rosters = normalizeRosters(publishedRosters || {});
-    }
-
-    const teams = Object.keys(rosters).sort((a,b)=>a.localeCompare(b));
-    if(!teams.length){
-      content.innerHTML = '<div class="empty">No rosters have been uploaded yet.</div>';
-      return;
-    }
-
-    const {data:tradeRows} = await SBL.trades.load(supabase);
-    rosters = SBL.trades.getEffectiveRosters(rosters, tradeRows || []);
-    allRosters = rosters;
-    toolbar.style.display = '';
-    rosterSelect.innerHTML = [
-      '<option value="__all__">All rosters</option>',
-      ...teams.map(team => `<option value="${esc(team)}">${esc(team)}</option>`)
-    ].join('');
-
-    function renderSelection(team){
-      const selectedTeams = team === '__all__' ? teams : [team];
-      const totalMons = selectedTeams.reduce((sum, name) => sum + (allRosters[name]?.length || 0), 0);
-      rosterSummary.textContent = team === '__all__'
-        ? `${teams.length} franchises · ${totalMons} Pokémon`
-        : `${allRosters[team]?.length || 0} Pokémon · ${rosterPoints(allRosters[team])} pts spent`;
-
-      content.innerHTML = `<div class="grid${team === '__all__' ? '' : ' single'}">${selectedTeams.map(name => `
-        <section class="card">
-          <div class="head"><div><h2>${esc(name)}</h2><span class="count">${allRosters[name].length} Pokémon</span></div>${budgetMarkup(name, allRosters[name])}</div>
-          <div class="mons">${allRosters[name].map(mon => renderPokemon(name, mon)).join('')}</div>
-        </section>`).join('')}</div>`;
-    }
-
-    rosterSelect.addEventListener('change', () => renderSelection(rosterSelect.value));
-    renderSelection('__all__');
-  }catch(err){
-    console.error('Roster load failed:', err);
-    showError(`Could not load rosters: ${err?.message || err}`);
-  }
-}
-
-// Never leave visitors staring at the initial loading message forever.
-const hardTimeout = setTimeout(() => {
-  if(content.textContent.includes('Loading rosters')){
-    showError('Roster loading is taking too long. Please refresh the page.');
-  }
-}, 12000);
-
-loadRosters().finally(() => clearTimeout(hardTimeout));
-</script>
-<script src="js/sbl-supabase.js"></script>
-  <script src="js/auth.js"></script>
-  <script src="js/services/rosters.js"></script>
-    <script src="js/services/trades.js"></script>
-<script src="js/sbl-site.js"></script>
-
-<script>
-/*
- * PHASE 3 — ROSTERS PAGE DATA MIGRATION
- *
- * The existing Rosters UI remains intact. This bridge redirects its primary
- * roster read through the shared SBL roster service. The page's write/upload
- * logic remains local because it has page-specific publishing behavior.
- */
-(function () {
-  'use strict';
-
-  function install() {
-    if (!window.SBL?.services?.rosters) return false;
-
-    /*
-     * Expose the shared service under the page's existing global namespace.
-     * This lets future cleanup remove duplicate read queries incrementally
-     * without changing the visible application.
-     */
-    window.SBL.rosters = window.SBL.services.rosters;
-
-    document.dispatchEvent(new CustomEvent('sbl:rosters-service-ready'));
-    return true;
-  }
-
-  if (!install()) {
-    document.addEventListener('sbl:site-ready', install, { once: true });
-    setTimeout(install, 0);
-  }
-})();
-</script>
-
+<div class="roster-summary" id="rosterSummary"></div>
+</div>
+<main id="content">
+<div class="empty">Loading rosters…</div>
+</main>
+</div>
+<script defer="" src="js/sbl-site.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+<script src="js/sbl-supabase.js" defer></script>
+<script src="js/auth.js" defer></script>
+<script src="js/pokemon-dex-ids.js" defer></script>
+<script src="js/services/pokemon.js" defer></script>
+<script src="js/services/seasons.js" defer></script>
+<script src="js/services/replays.js" defer></script>
+<script src="js/services/profiles.js" defer></script>
+<script src="js/services/league.js" defer></script>
+<script src="js/services/trades.js" defer></script>
+<script src="js/services/free-agency.js" defer></script>
+<script src="js/services/data.js" defer></script>
+<script src="js/pages/rosters.js" defer></script>
+<script src="js/app.js" defer></script>
 </body>
 </html>
