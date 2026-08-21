@@ -133,6 +133,46 @@
     return out;
   }
 
+  // Non-blocking variant for large dashboards. The synchronous `pokemon()` API
+  // remains available for existing views, while search/autocomplete surfaces can
+  // build the same canonical data in small chunks so typing never competes with
+  // a full-replay aggregation on the main thread.
+  function pokemonAsync(replays,options={},chunkSize=12){
+    const source=Array.isArray(replays)?replays:[];
+    const out=new Map();
+    const includeForms=options.includeForms!==false;
+    const teamFor=options.teamFor;
+    return new Promise(resolve=>{
+      let index=0;
+      const step=()=>{
+        const end=Math.min(index+Math.max(1,Number(chunkSize)||12),source.length);
+        for(;index<end;index++){
+          const replay=source[index];
+          for(const mon of Object.values(replay?.mons||{})){
+            if(!mon?.species) continue;
+            const key=includeForms ? identity(mon.species) : identity(display(mon.species));
+            if(!key) continue;
+            let row=out.get(key);
+            if(!row){ row=empty(display(mon.species)); out.set(key,row); }
+            row.species=display(mon.species)||row.species;
+            mergeMon(row,mon,replay,{...options,teamFor});
+          }
+        }
+        if(index<source.length){
+          if('requestIdleCallback' in window) window.requestIdleCallback(step,{timeout:80});
+          else setTimeout(step,0);
+          return;
+        }
+        resolve([...out.values()]
+          .map(x=>({...x,coaches:new Set(x.coaches),replays:new Set(x.replays)}))
+          .sort((a,b)=>Number(b.dealt||0)-Number(a.dealt||0)
+            ||Number(b.kills||0)-Number(a.kills||0)
+            ||String(a.species).localeCompare(String(b.species))));
+      };
+      step();
+    });
+  }
+
   function pokemon(replays,options={}){
     return [...pokemonStats(replays,options).values()]
       .map(x=>({...x,coaches:new Set(x.coaches),replays:new Set(x.replays)}))
@@ -203,5 +243,5 @@
     return {kills,deaths,assists,ratio:deaths?((kills+assists)/deaths):((kills+assists)?Infinity:0),kd:deaths?(kills/deaths):((kills)?Infinity:0)};
   }
 
-  SBL.stats={identity,pokemon,pokemonStats,getPokemonStats,pokemonProfile,team,kda};
+  SBL.stats={identity,pokemon,pokemonAsync,pokemonStats,getPokemonStats,pokemonProfile,team,kda};
 })();

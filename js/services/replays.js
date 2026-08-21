@@ -22,17 +22,41 @@
   const STATE_ID = '__dashboard_state__';
   const ROSTERS_ID = '__rosters__';
   const FREE_AGENCY_ID = '__free_agency__';
+  let loadCache = null;
+  let loadPromise = null;
 
-  async function load(client) {
+  function invalidateLoadCache() {
+    loadCache = null;
+    loadPromise = null;
+  }
+
+  // Backward-compatible global hook for older admin/page code.
+  // New code should use SBL.replays.invalidateCache().
+  window.invalidateLoadCache = invalidateLoadCache;
+
+  async function load(client, options = {}) {
     const db = client || (SBL.getSupabase ? SBL.getSupabase() : null);
     if (!db) throw new Error('Supabase client is not available.');
-
-    const { data, error } = await db
-      .from('replays')
-      .select('replay_id,replay_data');
-
-    if (error) throw error;
-    return { data: data || [], error: null };
+    if (options?.force) invalidateLoadCache();
+    if (loadCache) return { data: loadCache, error: null };
+    if (loadPromise) {
+      const data = await loadPromise;
+      return { data, error: null };
+    }
+    loadPromise = (async () => {
+      const { data, error } = await db
+        .from('replays')
+        .select('replay_id,replay_data');
+      if (error) throw error;
+      loadCache = data || [];
+      return loadCache;
+    })();
+    try {
+      const data = await loadPromise;
+      return { data, error: null };
+    } finally {
+      loadPromise = null;
+    }
   }
 
   function partition(rows) {
@@ -103,7 +127,9 @@
     load,
     partition,
     isReplayId,
-    getSpecialIds
+    getSpecialIds,
+    invalidateCache: invalidateLoadCache,
+    clearCache: invalidateLoadCache
   };
 })();
 
@@ -1395,7 +1421,76 @@
       players, mons:aggregatedMons, winner, teamRoster, luck, luckPokemon:aggregatedLuckPokemon,
       };
   }
+  // Shared replay persistence API. Page UIs should not reach directly into
+  // the `replays` table; these helpers preserve the existing row contract
+  // while giving all pages one data-access path.
+  async function upsertRows(rows, client){
+    const db = client || SBL.getSupabase();
+    const payload = Array.isArray(rows) ? rows : [];
+    if(!payload.length) return { data: [], error: null };
+    const { data, error } = await db.from('replays')
+      .upsert(payload, { onConflict:'replay_id' })
+      .select('replay_id,replay_data');
+    if(error) throw error;
+    invalidateLoadCache();
+    await SBL.performance?.invalidate?.('replays:all');
+    return { data: data || [], error: null };
+  }
+
+  async function deleteIds(ids, client){
+    const db = client || SBL.getSupabase();
+    const values = (Array.isArray(ids) ? ids : []).filter(Boolean);
+    if(!values.length) return { data: [], error: null };
+    const { data, error } = await db.from('replays')
+      .delete().in('replay_id', values).select('replay_id');
+    if(error) throw error;
+    await SBL.performance?.invalidate?.('replays:all');
+    return { data: data || [], error: null };
+  }
+
+  async function listIds(client){
+    const db = client || SBL.getSupabase();
+    const { data, error } = await db.from('replays').select('replay_id');
+    if(error) throw error;
+    return data || [];
+  }
+
+  async function deleteAllExcept(excludedIds = [], client){
+    const db = client || SBL.getSupabase();
+    const excluded = new Set((Array.isArray(excludedIds) ? excludedIds : []).filter(Boolean));
+    const rows = await listIds(db);
+    const ids = rows.map(r => r.replay_id).filter(id => id && !excluded.has(id));
+    return deleteIds(ids, db);
+  }
+
+  async function saveSharedState(state, client){
+    const db = client || SBL.getSupabase();
+    return upsertRows([{
+      replay_id: '__dashboard_state__',
+      replay_data: {
+        teamMap: state?.teamMap || {},
+        settings: state?.settings || {}
+      },
+      updated_at: new Date().toISOString()
+    }], db);
+  }
+
+  async function savePublishedRosters(rosters, client){
+    const db = client || SBL.getSupabase();
+    return upsertRows([{
+      replay_id: '__rosters__',
+      replay_data: { rosters: rosters || {} },
+      updated_at: new Date().toISOString()
+    }], db);
+  }
+
   SBL.replays.parseLog=parseLog;
+  SBL.replays.upsertRows=upsertRows;
+  SBL.replays.deleteIds=deleteIds;
+  SBL.replays.listIds=listIds;
+  SBL.replays.deleteAllExcept=deleteAllExcept;
+  SBL.replays.saveSharedState=saveSharedState;
+  SBL.replays.savePublishedRosters=savePublishedRosters;
   SBL.replays.ensureMoveAccuracyData=ensureMoveAccuracyData;
   // Test-only hook: regression tests can inject a small Showdown move-data map
   // without depending on the network. Production code never calls this.

@@ -10,24 +10,14 @@
 
   async function saveSharedState(state, user){
     requireUser(user);
-    const {error} = await client().from('replays').upsert([{
-      replay_id: STATE_ID,
-      replay_data: {teamMap: state.teamMap || {}, settings: state.settings || {}},
-      updated_at: new Date().toISOString()
-    }], {onConflict:'replay_id'});
-    if(error) throw error;
-    await SBL.performance?.invalidate?.('replays:all');
+    if(!SBL.replays?.saveSharedState) throw new Error('Shared replay service is not available.');
+    return SBL.replays.saveSharedState(state, client());
   }
 
   async function savePublishedRosters(rosters, user){
     requireUser(user);
-    const {error} = await client().from('replays').upsert([{
-      replay_id: ROSTER_ID,
-      replay_data: {rosters: rosters || {}},
-      updated_at: new Date().toISOString()
-    }], {onConflict:'replay_id'});
-    if(error) throw error;
-    await SBL.performance?.invalidate?.('replays:all');
+    if(!SBL.replays?.savePublishedRosters) throw new Error('Shared replay service is not available.');
+    return SBL.replays.savePublishedRosters(rosters, client());
   }
 
   async function persistDraft(state, user){

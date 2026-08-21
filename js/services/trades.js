@@ -12,6 +12,9 @@
   'use strict';
   window.SBL = window.SBL || {};
   const SBL = window.SBL;
+  let tradeCache = null;
+  let tradePromise = null;
+  function invalidateTradeCache(){ tradeCache = null; tradePromise = null; }
 
   function acceptedAt(trade) {
     const raw = trade?.responded_at || trade?.accepted_at || trade?.updated_at || trade?.created_at;
@@ -163,14 +166,88 @@
   }
 
   async function load(client, options = {}) {
-    const { data, error } = await client.from('trade_requests').select('*').order('created_at', { ascending: false });
+    const db = client || SBL.getSupabase();
+    if (options?.force) invalidateTradeCache();
+    if (tradeCache) return { data: tradeCache, error: null };
+    if (tradePromise) return { data: await tradePromise, error: null };
+    tradePromise = (async () => {
+      const { data, error } = await db.from('trade_requests').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      tradeCache = data || [];
+      return tradeCache;
+    })();
+    try { return { data: await tradePromise, error: null }; } finally { tradePromise = null; }
+  }
+
+  async function create(payload, client) {
+    const db = client || SBL.getSupabase();
+    const { data, error } = await db.from('trade_requests').insert(payload).select('*').maybeSingle();
     if (error) throw error;
-    return { data: data || [], error: null };
+    invalidateTradeCache();
+    return data || null;
+  }
+
+  async function respond(id, status, userId, client) {
+    const db = client || SBL.getSupabase();
+    const { data, error } = await db.from('trade_requests')
+      .update({
+        status,
+        responded_at: new Date().toISOString(),
+        responded_by: userId || null
+      })
+      .eq('id', id)
+      .select('*')
+      .maybeSingle();
+    if (error) throw error;
+    invalidateTradeCache();
+    return data || null;
+  }
+
+  async function accept(id, client) {
+    const db = client || SBL.getSupabase();
+    const { data, error } = await db.rpc('accept_trade', { trade_id: id });
+    if (error) throw error;
+    invalidateTradeCache();
+    return data;
+  }
+
+  async function acceptFreeAgency(id, client) {
+    const db = client || SBL.getSupabase();
+    const { data, error } = await db.rpc('commissioner_accept_free_agency_trade', { trade_id: id });
+    if (error) throw error;
+    invalidateTradeCache();
+    return data;
+  }
+
+  async function revert(id, client) {
+    const db = client || SBL.getSupabase();
+    const { data, error } = await db.rpc('commissioner_revert_trade', { trade_id: id });
+    if (error) throw error;
+    invalidateTradeCache();
+    return data;
+  }
+
+  async function setLimits(teamName, teamLimit, freeAgencyLimit, client) {
+    const db = client || SBL.getSupabase();
+    const { data, error } = await db.rpc('commissioner_set_trade_limits', {
+      p_team_name: teamName,
+      p_team_trade_limit: teamLimit,
+      p_free_agency_trade_limit: freeAgencyLimit
+    });
+    if (error) throw error;
+    invalidateTradeCache();
+    return data;
   }
 
   SBL.services = SBL.services || {};
   SBL.services.trades = {
     load,
+    create,
+    respond,
+    accept,
+    acceptFreeAgency,
+    revert,
+    setLimits,
     acceptedAt,
     effectiveAt,
     isAccepted,
@@ -181,7 +258,9 @@
     restoreFutureFreeAgencyPool,
     futureAcceptedTrades,
     consumedCount,
-    allowance
+    allowance,
+    invalidateCache: invalidateTradeCache,
+    clearCache: invalidateTradeCache
   };
   SBL.trades = SBL.services.trades;
 })();

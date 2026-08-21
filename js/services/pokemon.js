@@ -18,11 +18,14 @@
 
   const ALIASES={
     'chiyu':'chi-yu',
-    'scovilalian':'scovillain','scovillian':'scovillain','scovilion':'scovillain',
-    'landorus-incarnate':'landorus','landorus-t':'landorus-therian',
-    'tornadus-incarnate':'tornadus','tornadus-t':'tornadus-therian',
-    'thundurus-incarnate':'thundurus','thundurus-t':'thundurus-therian',
-    'enamorus-incarnate':'enamorus','enamorus-t':'enamorus-therian',
+    'scovilalian':'scovillain','scovillian':'scovillain','scovilion':'scovillain','cincinno':'cinccino','daschbun':'dachsbun',
+    'landorus-incarnate':'landorus','landorus-i':'landorus','landorus-t':'landorus-therian',
+    'tornadus-incarnate':'tornadus','tornadus-i':'tornadus','tornadus-t':'tornadus-therian',
+    'thundurus-incarnate':'thundurus','thundurus-i':'thundurus','thundurs':'thundurus','thundurs-incarnate':'thundurus','thundurus-t':'thundurus-therian',
+    'terapagos':'terapagos','terapogos':'terapagos','teraagos':'terapagos','terapagos-middle':'terapagos','terapagos-mid':'terapagos','meowstic-male':'meowstic','meowstic-m':'meowstic','meowstic-m':'meowstic','tauros-blaze':'tauros-paldeablaze','tauros-combat':'tauros-paldeacombat',
+    'tauros-blaze':'tauros-paldeablaze','tauros-combat':'tauros-paldeacombat','taurus-blaze':'tauros-paldeablaze','taurus-combat':'tauros-paldeacombat',
+    'cinccinno':'cinccino','cincinno':'cinccino','daschbun':'dachsbun',
+    'enamorus-incarnate':'enamorus','enamorus-i':'enamorus','enamorus-t':'enamorus-therian',
     'hoopa-u':'hoopa-unbound','urshifu-r':'urshifu-rapid-strike','urshifu-s':'urshifu-single-strike',
     'necrozma-dm':'necrozma-dusk-mane','necrozma-dw':'necrozma-dawn-wings',
     'calyrex-ice':'calyrex-ice-rider','calyrex-shadow':'calyrex-shadow-rider',
@@ -93,7 +96,7 @@
     'toxtricity-amped':'toxtricity-amped',
     'indeedee-male':'indeedee-m',
     'indeedee-female':'indeedee-f',
-    'meowstic-male':'meowstic-m',
+    'meowstic-male':'meowstic',
     'meowstic-female':'meowstic-f',
     'frillish-male':'frillish-m',
     'frillish-female':'frillish-f',
@@ -162,7 +165,7 @@
   ]);
 
   const TYPO_CANONICAL={
-    'scovilalian':'scovillain',
+    'scovilalian':'scovillain','cincinno':'cinccino','cinccinno':'cinccino','daschbun':'dachsbun','taurus-blaze':'tauros-paldeablaze','taurus-combat':'tauros-paldeacombat',
     'scovillian':'scovillain',
     'scovilion':'scovillain'
   };
@@ -177,7 +180,7 @@
   ]);
 
   const DISPLAY_CANONICAL={
-    'scovillain':'Scovillain',
+    'scovillain':'Scovillain','terapagos':'Terapagos','meowstic':'Meowstic Male','meowstic-m':'Meowstic Male','tauros-paldeablaze':'Tauros Blaze','tauros-paldeacombat':'Tauros Combat','cinccino':'Cinccino','dachsbun':'Dachsbun',
     'aegislash-blade':'Aegislash','aegislash-shield':'Aegislash',
     'mimikyu-busted':'Mimikyu','mimikyu-busted-totem':'Mimikyu',
     'eiscue-noice':'Eiscue','morpeko-hangry':'Morpeko','wishiwashi-school':'Wishiwashi',
@@ -208,7 +211,20 @@
     return TYPO_CANONICAL[raw] || raw;
   }
 
-  function toShowdownId(id){ return id.replace(/[^a-z0-9]/g,''); }
+  function toShowdownId(id){ return normalizeName(id); }
+
+  // Shared roster/trade comparison helpers. These intentionally normalize the
+  // optional Paldea token while preserving form identity for everything else.
+  function matchKey(name){
+    return normalizeName(name)
+      .replace(/(^|-)paldea(?=-|$)/g,'')
+      .replace(/-+/g,'-')
+      .replace(/^-|-$/g,'');
+  }
+  function sameSpeciesForm(a,b){
+    const left=matchKey(a), right=matchKey(b);
+    return !!left && !!right && left===right;
+  }
 
   function displayNameWithForm(name){
     const id=normalizeName(name);
@@ -241,7 +257,7 @@
     for(const id of ids){
       if(EXTRA_FORM_FILES[id]) return EXTRA_FORM_FILES[id];
       if(FORM_FILES[id]) return FORM_FILES[id];
-      if(COMPACT_BASES.has(id)) return toShowdownId(id);
+      if(COMPACT_BASES.has(id)) return id.replace(/[^a-z0-9]/g,'');
       /* Form names keep their separator in Showdown's HOME directory. */
       return id;
     }
@@ -272,6 +288,9 @@
   function scanSprites(){}
 
   window.SBL.pokemon.normalizeName=normalizeName;
+  window.SBL.pokemon.toShowdownId=toShowdownId;
+  window.SBL.pokemon.matchKey=matchKey;
+  window.SBL.pokemon.sameSpeciesForm=sameSpeciesForm;
   window.SBL.pokemon.displayName=displayName;
   window.SBL.pokemon.displayNameWithForm=displayNameWithForm;
   window.SBL.pokemon.candidateIds=candidateIds;
@@ -279,6 +298,7 @@
   window.SBL.pokemon.spriteCandidates=spriteCandidates;
   window.SBL.pokemon.spriteUrl=spriteUrl;
   window.SBL.pokemon.spriteMarkup=spriteMarkup;
+  window.SBL.pokemon.escapeHtml=escapeHtml;
   window.SBL.pokemon.installSprite=installSprite;
   window.SBL.pokemon.scanSprites=scanSprites;
   window.SBL.pokemon.aliases=ALIASES;
