@@ -42,6 +42,11 @@ textarea:disabled {
 
 table { max-width: 100%; }
 
+/* Nested popup stacking: a Pokémon profile opened from a league/summary modal
+   must render above its parent overlay rather than disappearing behind it. */
+.pokemon-overlay { z-index: 12000 !important; }
+.audit-overlay { z-index: 11000 !important; }
+
 /* Shared modal guardrails. Page-specific modal dimensions still win. */
 .modal,
 .modal-overlay,
@@ -386,3 +391,152 @@ img {
   .myteam-section-head h2,.myteam-section-head h3) {
   color: var(--text, #111827) !important;
 }
+
+/* Match Prep analysis: always-visible usage breakdown */
+.prep-analysis-summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:10px}
+.prep-analysis-summary-grid .prep-card-section{display:flex;flex-direction:column;gap:5px}
+.prep-analysis-summary-grid strong{font-size:20px;line-height:1}
+.prep-analysis-list{display:grid;gap:6px;margin-top:8px}
+.prep-analysis-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2)}
+.prep-analysis-row strong{font-variant-numeric:tabular-nums}
+.prep-analysis-weeks{display:grid;gap:10px;margin-top:8px}
+.prep-analysis-week{padding:10px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2)}
+.prep-analysis-week-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+.prep-analysis-week-head span{font-size:11px;color:var(--text-dim)}
+.prep-analysis-columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.prep-analysis-columns>div{min-width:0}
+@media(max-width:700px){.prep-analysis-summary-grid,.prep-analysis-columns{grid-template-columns:1fr}}
+
+/* Match Prep Analysis — season-first overview */
+.prep-detail-dialog .matchprep-analysis-overview{display:flex;flex-direction:column;gap:14px;width:100%;min-width:0}
+.prep-detail-dialog .prep-analysis-season,.prep-detail-dialog .prep-analysis-weeks-section{padding:16px;border:1px solid var(--border);border-radius:16px;background:linear-gradient(145deg,var(--panel-alt),var(--panel));box-shadow:0 8px 24px rgba(0,0,0,.10)}
+.prep-detail-dialog .prep-analysis-section-head{display:flex;justify-content:space-between;gap:16px;margin-bottom:14px}
+.prep-detail-dialog .prep-analysis-section-head h3{margin:3px 0 4px;color:var(--text);font-size:18px;line-height:1.2}
+.prep-detail-dialog .prep-analysis-section-head p{margin:0;color:var(--text-dim);font-size:11px;line-height:1.5;max-width:760px}
+.prep-detail-dialog .prep-analysis-eyebrow{display:block;color:var(--accent,#8b5cf6);font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.12em}
+.prep-detail-dialog .prep-analysis-summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.prep-detail-dialog .prep-analysis-stat{min-width:0;padding:14px 15px;border:1px solid var(--border);border-radius:12px;background:var(--panel);display:flex;flex-direction:column;gap:3px}
+.prep-detail-dialog .prep-analysis-stat span{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.07em;color:var(--text-dim)}
+.prep-detail-dialog .prep-analysis-stat strong{font-size:27px;line-height:1;color:var(--text)}
+.prep-detail-dialog .prep-analysis-stat small{font-size:9px;color:var(--text-dim)}
+.prep-detail-dialog .prep-analysis-overview-grid{display:grid;grid-template-columns:1fr;gap:12px}
+.prep-detail-dialog .prep-analysis-table-card{min-width:0;border:1px solid var(--border);border-radius:12px;background:var(--panel);overflow:hidden}
+.prep-detail-dialog .prep-analysis-card-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:13px 14px;border-bottom:1px solid var(--border)}
+.prep-detail-dialog .prep-analysis-card-head h4{margin:0;color:var(--text);font-size:13px}
+.prep-detail-dialog .prep-analysis-card-head small{display:block;margin-top:2px;color:var(--text-dim);font-size:9px}
+.prep-detail-dialog .prep-analysis-card-head>strong{font-size:18px;color:var(--text)}
+.prep-detail-dialog .prep-analysis-list{padding:4px 12px 10px;max-height:240px;overflow:auto}
+.prep-detail-dialog .prep-analysis-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 2px;border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);font-size:11px}
+.prep-detail-dialog .prep-analysis-row:last-child{border-bottom:0}
+.prep-detail-dialog .prep-analysis-row>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.prep-detail-dialog .prep-analysis-row-value{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.prep-detail-dialog .prep-analysis-row-value strong{min-width:24px;text-align:right;color:var(--text)}
+.prep-detail-dialog .prep-analysis-row-value small{width:34px;text-align:right;color:var(--text-dim);font-variant-numeric:tabular-nums}
+.prep-detail-dialog .prep-analysis-extra-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.prep-detail-dialog .prep-analysis-mini-card{min-width:0;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--panel)}
+.prep-detail-dialog .prep-analysis-mini-card>span{display:block;margin-bottom:8px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)}
+.prep-detail-dialog .prep-analysis-weeks-section .prep-analysis-section-head{margin-bottom:10px}
+.prep-detail-dialog .prep-analysis-weeks{display:flex;flex-direction:column;gap:9px}
+/* Match Prep weekly selector: compact, wrapping week buttons; never require horizontal scrolling. */
+.prep-detail-dialog .prep-analysis-week-buttons{display:flex;flex-wrap:wrap;align-items:center;gap:6px;width:100%;margin-top:8px}
+.prep-detail-dialog .prep-analysis-week-btn{flex:1 1 clamp(52px, calc((100% - 42px) / 8), 110px);min-width:52px;max-width:110px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text-dim);font:inherit;font-size:11px;font-weight:800;line-height:1.1;white-space:nowrap;cursor:pointer;transition:background .15s ease,color .15s ease,border-color .15s ease,transform .15s ease}
+.prep-detail-dialog .prep-analysis-week-btn:hover{color:var(--text);border-color:color-mix(in srgb,var(--accent,#8b5cf6) 55%,var(--border));transform:translateY(-1px)}
+.prep-detail-dialog .prep-analysis-week-btn.active{background:color-mix(in srgb,var(--accent,#8b5cf6) 18%,var(--panel));color:var(--text);border-color:var(--accent,#8b5cf6);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent,#8b5cf6) 25%,transparent)}
+@media(max-width:700px){.prep-detail-dialog .prep-analysis-week-btn{flex-basis:calc((100% - 18px) / 4);max-width:none;padding:6px 7px;font-size:10px}}
+
+.prep-detail-dialog .prep-analysis-week{border:1px solid var(--border);border-radius:12px;background:var(--panel);overflow:hidden}
+.prep-detail-dialog .prep-analysis-week-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 13px;border-bottom:1px solid var(--border)}
+.prep-detail-dialog .prep-analysis-week-head>div{display:flex;align-items:center;gap:9px;min-width:0}
+.prep-detail-dialog .prep-analysis-week-head strong{font-size:12px;color:var(--text)}
+.prep-detail-dialog .prep-analysis-week-head small{font-size:9px;color:var(--text-dim);padding:3px 7px;border:1px solid var(--border);border-radius:999px}
+.prep-detail-dialog .prep-week-status-dot{width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0}
+.prep-detail-dialog .prep-week-status-dot.is-led{background:var(--accent,#8b5cf6)}
+.prep-detail-dialog .prep-week-status-dot.is-sent{background:var(--teal,#2dd4bf)}
+.prep-detail-dialog .prep-week-status-dot.is-brought{background:var(--text-dim)}
+.prep-detail-dialog .prep-analysis-week-stats{display:flex;gap:14px;padding:8px 13px;color:var(--text-dim);font-size:9px;border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent)}
+.prep-detail-dialog .prep-analysis-week-stats b{color:var(--text);font-size:10px}
+.prep-detail-dialog .prep-analysis-week .prep-analysis-columns{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:10px 13px 12px}
+.prep-detail-dialog .prep-analysis-subhead{margin-bottom:4px;color:var(--text-dim);font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.06em}
+.prep-detail-dialog .prep-analysis-week .prep-analysis-list{padding:0;max-height:180px}
+@media(max-width:760px){.prep-detail-dialog .prep-analysis-summary-grid,.prep-detail-dialog .prep-analysis-overview-grid,.prep-detail-dialog .prep-analysis-extra-grid,.prep-detail-dialog .prep-analysis-week .prep-analysis-columns{grid-template-columns:1fr}.prep-detail-dialog .prep-analysis-list{max-height:200px}}
+
+/* Match Prep Analysis: stack every analysis section vertically. */
+.prep-detail-dialog .prep-analysis-overview-grid,
+.prep-detail-dialog .prep-analysis-extra-grid,
+.prep-detail-dialog .prep-analysis-week .prep-analysis-columns {
+  grid-template-columns: 1fr !important;
+}
+
+/* Keep every analysis block full width; no side-by-side move/item columns. */
+.prep-detail-dialog .prep-analysis-table-card,
+.prep-detail-dialog .prep-analysis-mini-card,
+.prep-detail-dialog .prep-analysis-week .prep-analysis-columns > div {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Hide scrollbars sitewide while preserving scrolling. */
+html,
+body,
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* Final Match Prep Analysis layout: every analysis section stacks vertically. */
+.prep-detail-dialog .prep-analysis-overview-grid,
+.prep-detail-dialog .prep-analysis-extra-grid,
+.prep-detail-dialog .prep-analysis-week .prep-analysis-columns {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  width: 100% !important;
+  gap: 12px !important;
+}
+.prep-detail-dialog .prep-analysis-overview-grid > *,
+.prep-detail-dialog .prep-analysis-extra-grid > *,
+.prep-detail-dialog .prep-analysis-week .prep-analysis-columns > * {
+  display: block !important;
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+}
+
+/* Final Match Prep Analysis order: season overview first, weekly breakdown below. */
+.prep-detail-dialog .prep-analysis-grid { display:flex !important; flex-direction:column !important; align-items:stretch !important; width:100% !important; gap:14px !important; }
+.prep-detail-dialog .matchprep-analysis-overview { display:flex !important; flex-direction:column !important; width:100% !important; min-width:0 !important; gap:14px !important; }
+.prep-detail-dialog .matchprep-analysis-overview > .prep-analysis-season,
+.prep-detail-dialog .matchprep-analysis-overview > .prep-analysis-weeks-section { width:100% !important; max-width:none !important; min-width:0 !important; }
+.prep-detail-dialog .prep-analysis-overview-grid,
+.prep-detail-dialog .prep-analysis-extra-grid,
+.prep-detail-dialog .prep-analysis-week .prep-analysis-columns { display:flex !important; flex-direction:column !important; width:100% !important; align-items:stretch !important; }
+.prep-detail-dialog .prep-analysis-overview-grid > *,
+.prep-detail-dialog .prep-analysis-extra-grid > *,
+.prep-detail-dialog .prep-analysis-week .prep-analysis-columns > * { width:100% !important; max-width:none !important; }
+
+/* Match Prep Analysis: season overview and weekly selector are intentionally single-column. */
+.prep-detail-dialog .prep-analysis-overview-grid,
+.prep-detail-dialog .prep-analysis-extra-grid,
+.prep-detail-dialog .prep-analysis-week .prep-analysis-columns {
+  display:flex !important; flex-direction:column !important; width:100% !important; gap:12px !important;
+}
+.prep-detail-dialog .prep-analysis-overview-grid > *,
+.prep-detail-dialog .prep-analysis-extra-grid > *,
+.prep-detail-dialog .prep-analysis-week .prep-analysis-columns > * {
+  width:100% !important; max-width:none !important;
+}
+.prep-analysis-week-select {display:flex;align-items:center;gap:8px;margin-top:8px;min-width:180px;}
+.prep-analysis-week-select span {font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:var(--text-dim);}
+.prep-analysis-week-select select {min-width:150px;padding:8px 30px 8px 10px;border:1px solid var(--border);border-radius:9px;background:var(--panel-alt);color:var(--text);font-weight:750;}
+.prep-analysis-week[hidden] {display:none !important;}
+
+/* Match Prep item evidence */
+.prep-analysis-inferred{display:inline-block;margin-left:.45rem;font-size:.68rem;line-height:1;padding:.18rem .38rem;border-radius:999px;opacity:.72;text-transform:uppercase;letter-spacing:.04em;vertical-align:middle}
