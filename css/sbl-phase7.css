@@ -378,3 +378,11 @@ img {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* Theme-safe headings: never force headings to white on light palettes. */
+:where(h1,h2,h3,h4,h5,h6,
+  .section-title,.page-title,.card-title,.panel-title,.modal-title,
+  .section-heading,.page-heading,.card-heading,.account-card-head h3,
+  .myteam-section-head h2,.myteam-section-head h3) {
+  color: var(--text, #111827) !important;
+}
