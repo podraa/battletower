@@ -338,7 +338,7 @@
 
   /* Pokémon profile modal */
   .pokemon-overlay{
-    position:fixed; inset:0; z-index:10000; display:flex; align-items:center; justify-content:center;
+    position:fixed; inset:0; z-index:12000; display:flex; align-items:center; justify-content:center;
     padding:24px; overflow:hidden; overscroll-behavior:contain; background:rgba(4,7,12,.62);
     backdrop-filter:blur(9px); -webkit-backdrop-filter:blur(9px);
     animation:pokemonOverlayIn .16s ease-out;
@@ -429,16 +429,6 @@
   .audit-list a:hover{text-decoration:underline;}
   .audit-cause{color:var(--text-dim);}
 
-  .death-cause-list{display:flex;flex-direction:column;gap:10px;width:100%;}
-  .death-cause-entry{display:grid;grid-template-columns:34px minmax(0,1fr);align-items:center;gap:12px;width:100%;min-width:0;padding:12px 14px;background:var(--panel-alt);border:1px solid var(--border);border-radius:8px;}
-  .death-cause-rank{font-family:var(--mono);color:var(--text-dim);text-align:center;font-size:12px;}
-  .death-cause-title{display:flex;align-items:center;gap:8px;font-weight:650;color:#fff;font-size:14px;margin-bottom:9px;}
-  .death-cause-mons{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;}
-  .death-cause-mon{display:inline-flex;align-items:center;gap:6px;min-width:145px;padding:5px 8px;background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:7px;}
-  .death-cause-sprite{width:36px;height:36px;object-fit:contain;image-rendering:pixelated;background:transparent;border-radius:4px;margin-right:0;}
-  .death-cause-mon .pokemon-click{gap:4px;padding:0;}
-  .death-cause-mon .pokemon-click .sprite{display:none;}
-  @media(max-width:700px){.death-cause-entry{grid-template-columns:26px minmax(0,1fr);padding:10px;gap:8px}.death-cause-mon{min-width:125px}.death-cause-sprite{width:32px;height:32px;}}
 
   /* replays by player */
   .player-group{
@@ -723,7 +713,6 @@ button{touch-action:manipulation;}
 
   /* Stat/analysis rows stack cleanly */
   .gf-row{max-width:100%;}
-  .death-cause-entry{max-width:100%;box-sizing:border-box;}
   .statbox{min-width:0 !important;}
   .speed-row{min-width:560px;}
 
@@ -1080,7 +1069,6 @@ body{
     <button data-tab="assists">Assist Leaderboard</button>
     <button data-tab="goldenfist">Golden Fist</button>
     <button data-tab="luckiest">Luckiest Team</button>
-    <button data-tab="causes">Fallen Stats</button>
     <button data-tab="misc">Misc</button>
     <button data-tab="teams">Franchise Stats</button>
     <button data-tab="replays">Replay Browser</button>
