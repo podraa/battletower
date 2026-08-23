@@ -1278,6 +1278,7 @@
     const savedTheme = window.SBLTheme?.getSavedId?.() || document.documentElement.dataset.sblTheme || 'amber';
     const currentTheme = themes.find(t => t.id === savedTheme) || themes[0];
     const themeGroup = theme => {
+      if(String(theme?.group || '').toLowerCase() === 'pokemon') return 'Pokemon';
       if(theme?.group) return theme.group;
       const hex = String(theme?.accent || '').replace('#','');
       if(hex.length !== 6) return 'Other';

@@ -75,7 +75,7 @@
   function clearLastCalcSession(){ try{ localStorage.removeItem(DC_LAST_SESSION_KEY); }catch(e){} }
   function saveCalcState(host){
     if(!host) return;
-    const ids=['dcAtkTeam','dcAtkSet','dcAtk','dcAtkLevel','dcAtkItem','dcAtkAbility','dcAtkNature','dcAtkStatus','dcAtkBoostHp','dcAtkBoostAtk','dcAtkBoostDef','dcAtkBoostSpa','dcAtkBoostSpd','dcAtkBoostSpe','dcAtkEvHp','dcAtkEvAtk','dcAtkEvDef','dcAtkEvSpa','dcAtkEvSpd','dcAtkEvSpe','dcDefTeam','dcDefSet','dcDef','dcDefLevel','dcDefItem','dcDefAbility','dcDefNature','dcDefStatus','dcDefBoostHp','dcDefBoostAtk','dcDefBoostDef','dcDefBoostSpa','dcDefBoostSpd','dcDefBoostSpe','dcDefEvHp','dcDefEvAtk','dcDefEvDef','dcDefEvSpa','dcDefEvSpd','dcDefEvSpe','dcMove1','dcMove2','dcMove3','dcMove4','dcBP1','dcBP2','dcBP3','dcBP4','dcHits1','dcHits2','dcHits3','dcHits4','dcWeather','dcTerrain','dcReflect','dcLightScreen','dcAuroraVeil'];
+    const ids=['dcAtkTeam','dcAtkSet','dcAtk','dcAtkLevel','dcAtkItem','dcAtkAbility','dcAtkNature','dcAtkStatus','dcAtkBoostHp','dcAtkBoostAtk','dcAtkBoostDef','dcAtkBoostSpa','dcAtkBoostSpd','dcAtkBoostSpe','dcAtkEvHp','dcAtkEvAtk','dcAtkEvDef','dcAtkEvSpa','dcAtkEvSpd','dcAtkEvSpe','dcDefTeam','dcDefSet','dcDef','dcDefLevel','dcDefItem','dcDefAbility','dcDefNature','dcDefStatus','dcDefBoostHp','dcDefBoostAtk','dcDefBoostDef','dcDefBoostSpa','dcDefBoostSpd','dcDefBoostSpe','dcDefEvHp','dcDefEvAtk','dcDefEvDef','dcDefEvSpa','dcDefEvSpd','dcDefEvSpe','dcMove1','dcMove2','dcMove3','dcMove4','dcBP1','dcBP2','dcBP3','dcBP4','dcHits1','dcHits2','dcHits3','dcHits4','dcWeather','dcTerrain','dcReflect','dcLightScreen','dcAuroraVeil','dcRuinBeads','dcRuinTablets','dcRuinSword','dcRuinVessel'];
     const state={}; ids.forEach(id=>{const el=host.querySelector('#'+id); if(el) state[id]=el.type==='checkbox' ? String(!!el.checked) : el.value;});
     try{localStorage.setItem(DC_STORAGE_KEY,JSON.stringify(state));}catch(e){}
   }
@@ -186,7 +186,7 @@
                 <option value="">Healthy</option><option value="brn">Burned</option><option value="par">Paralyzed</option>
                 <option value="psn">Poisoned</option><option value="tox">Badly Poisoned</option><option value="slp">Asleep</option><option value="frz">Frozen</option>
               </select></label>
-              <label>Nature<select id="dcAtkNature"></select><span id="dcAtkNatureInfo" class="nature-info"></span></label><div class="dc-stage-panel"><span class="dc-stage-title">Stat stages</span><div class="dc-stage-grid"><label>HP<select id="dcAtkBoostHp"><option value="-6">-6</option><option value="-5">-5</option><option value="-4">-4</option><option value="-3">-3</option><option value="-2">-2</option><option value="-1">-1</option><option value="0">+0</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Atk<select id="dcAtkBoostAtk"><option value="-6">-6</option><option value="-5">-5</option><option value="-4">-4</option><option value="-3">-3</option><option value="-2">-2</option><option value="-1">-1</option><option value="0">+0</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Def<select id="dcAtkBoostDef"><option value="-6">-6</option><option value="-5">-5</option><option value="-4">-4</option><option value="-3">-3</option><option value="-2">-2</option><option value="-1">-1</option><option value="0">+0</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>SpA<select id="dcAtkBoostSpa"><option value="-6">-6</option><option value="-5">-5</option><option value="-4">-4</option><option value="-3">-3</option><option value="-2">-2</option><option value="-1">-1</option><option value="0">+0</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>SpD<select id="dcAtkBoostSpd"><option value="-6">-6</option><option value="-5">-5</option><option value="-4">-4</option><option value="-3">-3</option><option value="-2">-2</option><option value="-1">-1</option><option value="0">+0</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Spe<select id="dcAtkBoostSpe"><option value="-6">-6</option><option value="-5">-5</option><option value="-4">-4</option><option value="-3">-3</option><option value="-2">-2</option><option value="-1">-1</option><option value="0">+0</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label></div></div>
+              <label>Nature<select id="dcAtkNature"></select><span id="dcAtkNatureInfo" class="nature-info"></span></label><div class="dc-stage-panel"><span class="dc-stage-title">Stat stages</span><div class="dc-stage-grid"><label>HP<select id="dcAtkBoostHp"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Atk<select id="dcAtkBoostAtk"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Def<select id="dcAtkBoostDef"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>SpA<select id="dcAtkBoostSpa"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>SpD<select id="dcAtkBoostSpd"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Spe<select id="dcAtkBoostSpe"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label></div></div>
             </div>
           </div>
           <div class="dc-ev-panel">
@@ -246,7 +246,7 @@
                 <option value="">Healthy</option><option value="brn">Burned</option><option value="par">Paralyzed</option>
                 <option value="psn">Poisoned</option><option value="tox">Badly Poisoned</option><option value="slp">Asleep</option><option value="frz">Frozen</option>
               </select></label>
-              <label>Nature<select id="dcDefNature"></select><span id="dcDefNatureInfo" class="nature-info"></span></label><div class="dc-stage-panel"><span class="dc-stage-title">Stat stages</span><div class="dc-stage-grid"><label>HP<select id="dcDefBoostHp"><option value="-6">-6</option><option value="-5">-5</option><option value="-4">-4</option><option value="-3">-3</option><option value="-2">-2</option><option value="-1">-1</option><option value="0">+0</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Atk<select id="dcDefBoostAtk"><option value="-6">-6</option><option value="-5">-5</option><option value="-4">-4</option><option value="-3">-3</option><option value="-2">-2</option><option value="-1">-1</option><option value="0">+0</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Def<select id="dcDefBoostDef"><option value="-6">-6</option><option value="-5">-5</option><option value="-4">-4</option><option value="-3">-3</option><option value="-2">-2</option><option value="-1">-1</option><option value="0">+0</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>SpA<select id="dcDefBoostSpa"><option value="-6">-6</option><option value="-5">-5</option><option value="-4">-4</option><option value="-3">-3</option><option value="-2">-2</option><option value="-1">-1</option><option value="0">+0</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>SpD<select id="dcDefBoostSpd"><option value="-6">-6</option><option value="-5">-5</option><option value="-4">-4</option><option value="-3">-3</option><option value="-2">-2</option><option value="-1">-1</option><option value="0">+0</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Spe<select id="dcDefBoostSpe"><option value="-6">-6</option><option value="-5">-5</option><option value="-4">-4</option><option value="-3">-3</option><option value="-2">-2</option><option value="-1">-1</option><option value="0">+0</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label></div></div>
+              <label>Nature<select id="dcDefNature"></select><span id="dcDefNatureInfo" class="nature-info"></span></label><div class="dc-stage-panel"><span class="dc-stage-title">Stat stages</span><div class="dc-stage-grid"><label>HP<select id="dcDefBoostHp"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Atk<select id="dcDefBoostAtk"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Def<select id="dcDefBoostDef"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>SpA<select id="dcDefBoostSpa"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>SpD<select id="dcDefBoostSpd"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Spe<select id="dcDefBoostSpe"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label></div></div>
             </div>
           </div>
           <div class="dc-ev-panel">
@@ -286,6 +286,7 @@
         <div class="wide dc-field-group"><span class="dc-field-group-label">Weather</span><input type="hidden" id="dcWeather" value=""><div class="dc-toggle-row dc-weather-row"><button type="button" class="dc-condition-toggle active" data-input="dcWeather" data-value="">Clear</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Rain">Rain</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Sun">Sun</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Sand">Sand</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Snow">Snow</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Hail">Hail</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Strong Winds">Strong Winds</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Heavy Rain">Heavy Rain</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Harsh Sunshine">Harsh Sunshine</button></div></div>
         <div class="wide dc-field-group"><span class="dc-field-group-label">Terrain</span><input type="hidden" id="dcTerrain" value=""><div class="dc-toggle-row dc-terrain-row"><button type="button" class="dc-condition-toggle active" data-input="dcTerrain" data-value="">None</button><button type="button" class="dc-condition-toggle" data-input="dcTerrain" data-value="Electric">Electric</button><button type="button" class="dc-condition-toggle" data-input="dcTerrain" data-value="Grassy">Grassy</button><button type="button" class="dc-condition-toggle" data-input="dcTerrain" data-value="Misty">Misty</button><button type="button" class="dc-condition-toggle" data-input="dcTerrain" data-value="Psychic">Psychic</button></div></div>
         <div class="wide dc-field-group"><span class="dc-field-group-label">Defender screens</span><div class="dc-toggle-row dc-screen-row"><label class="dc-screen-toggle"><input id="dcReflect" type="checkbox"> Reflect</label><label class="dc-screen-toggle"><input id="dcLightScreen" type="checkbox"> Light Screen</label><label class="dc-screen-toggle"><input id="dcAuroraVeil" type="checkbox"> Aurora Veil</label></div></div>
+        <div class="wide dc-field-group"><span class="dc-field-group-label">Active Ruin abilities</span><div class="dc-toggle-row dc-screen-row"><label class="dc-screen-toggle"><input id="dcRuinBeads" type="checkbox"> Beads of Ruin</label><label class="dc-screen-toggle"><input id="dcRuinTablets" type="checkbox"> Tablets of Ruin</label><label class="dc-screen-toggle"><input id="dcRuinSword" type="checkbox"> Sword of Ruin</label><label class="dc-screen-toggle"><input id="dcRuinVessel" type="checkbox"> Vessel of Ruin</label></div><span class="muted">These are field effects from other Pokémon on the field.</span></div>
       </div><div class="damage-calc-actions"><button id="dcResetAll" class="dc-reset-btn">Clear All</button><span class="dc-auto-status" aria-live="polite">Auto-calculates as you edit</span></div><div class="damage-calc-help">Pokémon choices come directly from the published rosters for the selected teams.</div></section>
       <div id="dcResult" class="damage-calc-result"><div class="dc-results-heading">Results</div><div class="muted">Choose both Pokémon and add at least one move.</div></div>
     </div>`;
@@ -504,7 +505,7 @@
     fillNature('dcDefNature','dcDefNatureInfo',preset.defenderNature || getSaved(saved,'dcDefNature',''));
     const savedAtkSet=importedSetForIndex(getSaved(saved,'dcAtkSet','')); const savedDefSet=importedSetForIndex(getSaved(saved,'dcDefSet',''));
     if(savedAtkSet)applyImportedSet('atk',savedAtkSet); if(savedDefSet)applyImportedSet('def',savedDefSet);
-    ['dcReflect','dcLightScreen','dcAuroraVeil'].forEach(id=>{const el=host.querySelector('#'+id); if(el) el.checked=getSaved(saved,id,'false')==='true';});
+    ['dcReflect','dcLightScreen','dcAuroraVeil','dcRuinBeads','dcRuinTablets','dcRuinSword','dcRuinVessel'].forEach(id=>{const el=host.querySelector('#'+id); if(el) el.checked=getSaved(saved,id,'false')==='true';});
     const syncConditionButtons=(inputId)=>{const input=host.querySelector('#'+inputId); if(!input)return; host.querySelectorAll(`.dc-condition-toggle[data-input="${inputId}"]`).forEach(btn=>btn.classList.toggle('active',btn.dataset.value===String(input.value||'')));};
     host.querySelectorAll('.dc-condition-toggle').forEach(btn=>btn.addEventListener('click',()=>{const input=host.querySelector('#'+btn.dataset.input); if(!input)return; input.value=btn.dataset.value||''; host.querySelectorAll(`.dc-condition-toggle[data-input="${btn.dataset.input}"]`).forEach(b=>b.classList.toggle('active',b===btn)); input.dispatchEvent(new Event('input',{bubbles:true}));}));
     host.querySelectorAll('.dc-crit-btn').forEach(btn=>btn.addEventListener('click',()=>{
@@ -553,7 +554,7 @@
 
     const close=()=>{
       const closingState={};
-      const ids=['dcAtkTeam','dcAtkSet','dcAtk','dcAtkLevel','dcAtkItem','dcAtkAbility','dcAtkNature','dcAtkStatus','dcAtkEvHp','dcAtkEvAtk','dcAtkEvDef','dcAtkEvSpa','dcAtkEvSpd','dcAtkEvSpe','dcDefTeam','dcDefSet','dcDef','dcDefLevel','dcDefItem','dcDefAbility','dcDefNature','dcDefStatus','dcDefBoostHp','dcDefBoostAtk','dcDefBoostDef','dcDefBoostSpa','dcDefBoostSpd','dcDefBoostSpe','dcDefEvHp','dcDefEvAtk','dcDefEvDef','dcDefEvSpa','dcDefEvSpd','dcDefEvSpe','dcMove1','dcMove2','dcMove3','dcMove4','dcWeather','dcTerrain','dcReflect','dcLightScreen','dcAuroraVeil'];
+      const ids=['dcAtkTeam','dcAtkSet','dcAtk','dcAtkLevel','dcAtkItem','dcAtkAbility','dcAtkNature','dcAtkStatus','dcAtkEvHp','dcAtkEvAtk','dcAtkEvDef','dcAtkEvSpa','dcAtkEvSpd','dcAtkEvSpe','dcDefTeam','dcDefSet','dcDef','dcDefLevel','dcDefItem','dcDefAbility','dcDefNature','dcDefStatus','dcDefBoostHp','dcDefBoostAtk','dcDefBoostDef','dcDefBoostSpa','dcDefBoostSpd','dcDefBoostSpe','dcDefEvHp','dcDefEvAtk','dcDefEvDef','dcDefEvSpa','dcDefEvSpd','dcDefEvSpe','dcMove1','dcMove2','dcMove3','dcMove4','dcWeather','dcTerrain','dcReflect','dcLightScreen','dcAuroraVeil','dcRuinBeads','dcRuinTablets','dcRuinSword','dcRuinVessel'];
       ids.forEach(id=>{const el=host.querySelector('#'+id);if(el) closingState[id]=el.type==='checkbox'?String(!!el.checked):el.value;});
       clearLastCalcSession();
       window.clearDamageCalcSavedState();
@@ -591,7 +592,7 @@
     host.querySelector('#dcAtkAbility')?.addEventListener('change',()=>{host.querySelector('#dcAtkAbility')?.setAttribute('data-manual-selection','true');saveCalcState(host);scheduleDamageCalculation(0);});
     host.querySelector('#dcDefAbility')?.addEventListener('change',()=>{host.querySelector('#dcDefAbility')?.setAttribute('data-manual-selection','true');saveCalcState(host);scheduleDamageCalculation(0);});
 
-    const persistedIds=['dcAtkTeam','dcAtk','dcAtkLevel','dcAtkItem','dcAtkAbility','dcAtkNature','dcAtkStatus','dcAtkEvHp','dcAtkEvAtk','dcAtkEvDef','dcAtkEvSpa','dcAtkEvSpd','dcAtkEvSpe','dcDefTeam','dcDef','dcDefLevel','dcDefItem','dcDefAbility','dcDefNature','dcDefStatus','dcDefEvHp','dcDefEvAtk','dcDefEvDef','dcDefEvSpa','dcDefEvSpd','dcDefEvSpe','dcMove1','dcMove2','dcMove3','dcMove4','dcWeather','dcTerrain','dcReflect','dcLightScreen','dcAuroraVeil'];
+    const persistedIds=['dcAtkTeam','dcAtk','dcAtkLevel','dcAtkItem','dcAtkAbility','dcAtkNature','dcAtkStatus','dcAtkEvHp','dcAtkEvAtk','dcAtkEvDef','dcAtkEvSpa','dcAtkEvSpd','dcAtkEvSpe','dcDefTeam','dcDef','dcDefLevel','dcDefItem','dcDefAbility','dcDefNature','dcDefStatus','dcDefEvHp','dcDefEvAtk','dcDefEvDef','dcDefEvSpa','dcDefEvSpd','dcDefEvSpe','dcMove1','dcMove2','dcMove3','dcMove4','dcWeather','dcTerrain','dcReflect','dcLightScreen','dcAuroraVeil','dcRuinBeads','dcRuinTablets','dcRuinSword','dcRuinVessel'];
     persistedIds.forEach(id=>{const el=host.querySelector('#'+id); if(el){el.addEventListener('input',()=>saveCalcState(host));el.addEventListener('change',()=>saveCalcState(host));}});
     const adjustEv=(btn)=>{ const el=host.querySelector('#'+btn.dataset.ev); if(!el)return; const delta=Number(btn.dataset.delta)||0; const raw=String(el.value??'').trim(); const current=raw===''?0:Math.max(0,Math.min(252,Number(raw)||0)); const next=Math.max(0,Math.min(252,current+delta)); el.value=String(next); el.dispatchEvent(new Event('input',{bubbles:true})); };
     host.querySelectorAll('.ev-step').forEach(btn=>{
@@ -613,7 +614,7 @@
       host.querySelector('#dcDefTeam').value=defaultDefTeam;
       syncMons('dcAtkTeam','dcAtk','');
       syncMons('dcDefTeam','dcDef','');
-      const defaults={dcAtkSet:'',dcDefSet:'',dcAtkLevel:'100',dcDefLevel:'100',dcAtkItem:'',dcDefItem:'',dcAtkAbility:'',dcDefAbility:'',dcAtkNature:'',dcDefNature:'',dcAtkStatus:'',dcDefStatus:'',dcAtkBoostHp:'0',dcAtkBoostAtk:'0',dcAtkBoostDef:'0',dcAtkBoostSpa:'0',dcAtkBoostSpd:'0',dcAtkBoostSpe:'0',dcDefBoostHp:'0',dcDefBoostAtk:'0',dcDefBoostDef:'0',dcDefBoostSpa:'0',dcDefBoostSpd:'0',dcDefBoostSpe:'0',dcMove1:'',dcMove2:'',dcMove3:'',dcMove4:'',dcBP1:'',dcBP2:'',dcBP3:'',dcBP4:'',dcHits1:'',dcHits2:'',dcHits3:'',dcHits4:'',dcWeather:'',dcTerrain:'',dcReflect:'false',dcLightScreen:'false',dcAuroraVeil:'false',dcAtkEvHp:'',dcAtkEvAtk:'',dcAtkEvDef:'',dcAtkEvSpa:'',dcAtkEvSpd:'',dcAtkEvSpe:'',dcDefEvHp:'',dcDefEvAtk:'',dcDefEvDef:'',dcDefEvSpa:'',dcDefEvSpd:'',dcDefEvSpe:''};
+      const defaults={dcAtkSet:'',dcDefSet:'',dcAtkLevel:'100',dcDefLevel:'100',dcAtkItem:'',dcDefItem:'',dcAtkAbility:'',dcDefAbility:'',dcAtkNature:'',dcDefNature:'',dcAtkStatus:'',dcDefStatus:'',dcAtkBoostHp:'0',dcAtkBoostAtk:'0',dcAtkBoostDef:'0',dcAtkBoostSpa:'0',dcAtkBoostSpd:'0',dcAtkBoostSpe:'0',dcDefBoostHp:'0',dcDefBoostAtk:'0',dcDefBoostDef:'0',dcDefBoostSpa:'0',dcDefBoostSpd:'0',dcDefBoostSpe:'0',dcMove1:'',dcMove2:'',dcMove3:'',dcMove4:'',dcBP1:'',dcBP2:'',dcBP3:'',dcBP4:'',dcHits1:'',dcHits2:'',dcHits3:'',dcHits4:'',dcWeather:'',dcTerrain:'',dcReflect:'false',dcLightScreen:'false',dcAuroraVeil:'false',dcRuinBeads:'false',dcRuinTablets:'false',dcRuinSword:'false',dcRuinVessel:'false',dcAtkEvHp:'',dcAtkEvAtk:'',dcAtkEvDef:'',dcAtkEvSpa:'',dcAtkEvSpd:'',dcAtkEvSpe:'',dcDefEvHp:'',dcDefEvAtk:'',dcDefEvDef:'',dcDefEvSpa:'',dcDefEvSpd:'',dcDefEvSpe:''};
       Object.entries(defaults).forEach(([id,value])=>{const el=host.querySelector('#'+id);if(el){if(el.type==='checkbox')el.checked=value==='true';else el.value=value;}});
       fillPokemonAbilities('dcAtkAbility',host.querySelector('#dcAtk')?.value);
       fillPokemonAbilities('dcDefAbility',host.querySelector('#dcDef')?.value);
@@ -679,6 +680,10 @@
         if(weather) fieldOptions.weather=weather;
         if(terrain) fieldOptions.terrain=terrain;
         if(Object.keys(defenderSide).length) fieldOptions.defenderSide=defenderSide;
+        if(host.querySelector('#dcRuinBeads')?.checked) fieldOptions.isBeadsOfRuin=true;
+        if(host.querySelector('#dcRuinTablets')?.checked) fieldOptions.isTabletsOfRuin=true;
+        if(host.querySelector('#dcRuinSword')?.checked) fieldOptions.isSwordOfRuin=true;
+        if(host.querySelector('#dcRuinVessel')?.checked) fieldOptions.isVesselOfRuin=true;
         const field=typeof C.Field==='function' ? new C.Field(fieldOptions) : undefined;
         // Use the calculator engine's own HP value. Do not call the page-level
         // fetchPokemonData helper here: that helper lives inside the main dashboard
@@ -693,6 +698,23 @@
         const atkItemName=host.querySelector('#dcAtkItem')?.value.trim()||'';
         const atkBaseOptions={level:Number(host.querySelector('#dcAtkLevel')?.value)||100,item:atkItemName||undefined,ability:host.querySelector('#dcAtkAbility')?.value.trim()||undefined,nature:host.querySelector('#dcAtkNature')?.value.trim()||undefined,status:host.querySelector('#dcAtkStatus')?.value.trim()||undefined,evs:readEVs('dcAtkEv'),ivs:atkSet?.ivs||undefined,teraType:atkSet?.teraType||undefined,boosts:attackerBoosts};
         const rows=[];
+        const flattenDamageRolls=value=>{
+          const out=[];
+          const walk=v=>{ if(Array.isArray(v)){v.forEach(walk);} else if(Number.isFinite(Number(v))) out.push(Number(v)); };
+          walk(value); return out;
+        };
+        const totalDamageRolls=value=>{
+          if(!Array.isArray(value)) return Number.isFinite(Number(value))?[Number(value)]:[];
+          if(value.length && Array.isArray(value[0])){
+            const perHit=value.map(hit=>flattenDamageRolls(hit));
+            if(perHit.some(a=>!a.length)) return flattenDamageRolls(value);
+            const totals=[];
+            const maxLen=Math.max(...perHit.map(a=>a.length));
+            for(let i=0;i<maxLen;i++) totals.push(perHit.reduce((sum,a)=>sum+(a[i]??a[a.length-1]??0),0));
+            return totals;
+          }
+          return flattenDamageRolls(value);
+        };
         for(const entry of selectedMoves){
           if(requestId!==dcCalcRequest)return;
           try{
@@ -732,12 +754,12 @@
                 if(Object.keys(overrides).length) oneHitOptions.overrides=overrides;
                 const oneHitMove=new C.Move(gen,entry.name,oneHitOptions);
                 const oneHitRes=field?C.calculate(gen,entryAttacker,defender,oneHitMove,field):C.calculate(gen,entryAttacker,defender,oneHitMove);
-                perHitRolls=(Array.isArray(oneHitRes.damage)?oneHitRes.damage:[oneHitRes.damage]).map(Number).filter(Number.isFinite);
+                perHitRolls=flattenDamageRolls(oneHitRes.damage);
               }catch(e){}
             }
             let ko='';
             try{ko=res.kochance().text||'';}catch(e){}
-            const rolls=(Array.isArray(res.damage)?res.damage:[res.damage]).map(Number).filter(Number.isFinite);
+            const rolls=totalDamageRolls(res.damage);
             let pctText='—', minPct=NaN, maxPct=NaN, koChance=null;
             if(rolls.length){
               const minDamage=Math.min(...rolls), maxDamage=Math.max(...rolls);
@@ -759,10 +781,17 @@
           }
         }
         if(requestId!==dcCalcRequest)return;
-        const statValue=(p,key)=>{const a=p?.stats||p?.rawStats||{};const v=a?.[key];return Number.isFinite(Number(v))?Number(v):'—';};
-        const actualStatsText=(p)=>`HP ${statValue(p,'hp')} · Atk ${statValue(p,'atk')} · Def ${statValue(p,'def')} · SpA ${statValue(p,'spa')} · SpD ${statValue(p,'spd')} · Spe ${statValue(p,'spe')}`;
-        host.querySelector('#dcAtkActualStats').innerHTML=`<span>Actual stats</span><div>${actualStatsText(attacker)}</div>`;
-        host.querySelector('#dcDefActualStats').innerHTML=`<span>Actual stats</span><div>${actualStatsText(defender)}</div>`;
+        const stageMultiplier=stage=>{const n=Math.max(-6,Math.min(6,Number(stage)||0));return n<0?2/(2+Math.abs(n)):(2+n)/2;};
+        const statValue=(p,key,boosts)=>{
+          const raw=Number(p?.rawStats?.[key]??p?.stats?.[key]);
+          if(!Number.isFinite(raw)) return '—';
+          if(key==='hp') return raw;
+          const stage=Number(boosts?.[key])||0;
+          return Math.floor(raw*stageMultiplier(stage));
+        };
+        const actualStatsText=(p,boosts)=>`HP ${statValue(p,'hp',boosts)} · Atk ${statValue(p,'atk',boosts)} · Def ${statValue(p,'def',boosts)} · SpA ${statValue(p,'spa',boosts)} · SpD ${statValue(p,'spd',boosts)} · Spe ${statValue(p,'spe',boosts)}`;
+        host.querySelector('#dcAtkActualStats').innerHTML=`<span>Actual stats</span><div>${actualStatsText(attacker,attackerBoosts)}</div>`;
+        host.querySelector('#dcDefActualStats').innerHTML=`<span>Actual stats</span><div>${actualStatsText(defender,defenderBoosts)}</div>`;
         result.innerHTML=`<div class="dc-results-heading">Damage calculations</div><div class="dc-results-subheading">${escCalc(atkName)} → ${escCalc(defName)}</div><div class="dc-results-list">${rows.join('')}</div>`;
       }catch(err){
         if(requestId!==dcCalcRequest)return;
@@ -771,7 +800,7 @@
     };
 
     // Recalculate automatically whenever anything relevant changes.
-    const autoCalcIds=['dcAtkTeam','dcAtk','dcAtkLevel','dcAtkItem','dcAtkAbility','dcAtkNature','dcAtkStatus','dcDefTeam','dcDef','dcDefLevel','dcDefItem','dcDefAbility','dcDefNature','dcDefStatus','dcMove1','dcMove2','dcMove3','dcMove4','dcBP1','dcBP2','dcBP3','dcBP4','dcHits1','dcHits2','dcHits3','dcHits4','dcAtkBoostHp','dcAtkBoostAtk','dcAtkBoostDef','dcAtkBoostSpa','dcAtkBoostSpd','dcAtkBoostSpe','dcDefBoostHp','dcDefBoostAtk','dcDefBoostDef','dcDefBoostSpa','dcDefBoostSpd','dcDefBoostSpe','dcWeather','dcTerrain','dcReflect','dcLightScreen','dcAuroraVeil','dcAtkEvHp','dcAtkEvAtk','dcAtkEvDef','dcAtkEvSpa','dcAtkEvSpd','dcAtkEvSpe','dcDefEvHp','dcDefEvAtk','dcDefEvDef','dcDefEvSpa','dcDefEvSpd','dcDefEvSpe'];
+    const autoCalcIds=['dcAtkTeam','dcAtk','dcAtkLevel','dcAtkItem','dcAtkAbility','dcAtkNature','dcAtkStatus','dcDefTeam','dcDef','dcDefLevel','dcDefItem','dcDefAbility','dcDefNature','dcDefStatus','dcMove1','dcMove2','dcMove3','dcMove4','dcBP1','dcBP2','dcBP3','dcBP4','dcHits1','dcHits2','dcHits3','dcHits4','dcAtkBoostHp','dcAtkBoostAtk','dcAtkBoostDef','dcAtkBoostSpa','dcAtkBoostSpd','dcAtkBoostSpe','dcDefBoostHp','dcDefBoostAtk','dcDefBoostDef','dcDefBoostSpa','dcDefBoostSpd','dcDefBoostSpe','dcWeather','dcTerrain','dcReflect','dcLightScreen','dcAuroraVeil','dcRuinBeads','dcRuinTablets','dcRuinSword','dcRuinVessel','dcAtkEvHp','dcAtkEvAtk','dcAtkEvDef','dcAtkEvSpa','dcAtkEvSpd','dcAtkEvSpe','dcDefEvHp','dcDefEvAtk','dcDefEvDef','dcDefEvSpa','dcDefEvSpd','dcDefEvSpe'];
     autoCalcIds.forEach(id=>{
       const el=host.querySelector('#'+id);
       if(!el)return;
@@ -2356,8 +2385,9 @@ async function render(){
   {
     if(!STATE.prepYourTeam || !teamNames().some(n=>sameTeam(n,STATE.prepYourTeam))) STATE.prepYourTeam=STATE.profileTeam||team;
     const yourTeam=STATE.prepYourTeam;
-    let opponent=STATE.prepOpponent||teamNames().find(n=>!sameTeam(n,yourTeam))||'';
-    if(!opponent || sameTeam(opponent,yourTeam)) opponent=teamNames().find(n=>!sameTeam(n,yourTeam))||'';
+    const scheduledOpponent=nextScheduledOpponent(yourTeam);
+    let opponent=(STATE.prepOpponent && !sameTeam(STATE.prepOpponent,yourTeam)) ? STATE.prepOpponent : scheduledOpponent || teamNames().find(n=>!sameTeam(n,yourTeam))||'';
+    if(!opponent || sameTeam(opponent,yourTeam)) opponent=scheduledOpponent || teamNames().find(n=>!sameTeam(n,yourTeam))||'';
     STATE.prepOpponent=opponent;
     // Switch-In Analyser role swapping: mirror the same attacker/defender side
     // logic used inside renderMatchPrep so the event handlers below (which run
@@ -2532,7 +2562,7 @@ async function render(){
 $('prepYourTeam')?.addEventListener('change',async e=>{
       STATE.prepSection=$('prepSectionSelect')?.value||STATE.prepSection||'overview';
       STATE.prepYourTeam=e.target.value;
-      if(sameTeam(STATE.prepOpponent,STATE.prepYourTeam)) STATE.prepOpponent=teamNames().find(n=>!sameTeam(n,STATE.prepYourTeam))||'';
+      STATE.prepOpponent=nextScheduledOpponent(STATE.prepYourTeam)||teamNames().find(n=>!sameTeam(n,STATE.prepYourTeam))||'';
       STATE.prepSwitchMon='';STATE.prepSwitchMove='';STATE.prepSwitchHits='';STATE.prepSwitchAtkItem='';STATE.prepSwitchDefItem='';STATE.prepSwitchEVsByMon={};STATE.prepCoverageMon='';
       await render();
     });
@@ -3006,12 +3036,25 @@ requestAnimationFrame(()=>host.classList.add('open'));
               rows.push({target,min:0,max:0,pctMin:0,pctMax:0,ko:null,immune:true,ability:defenderAbility,desc:''});
               continue;
             }
-            const atk=new C.Pokemon(gen,switchCalcSpecies(mon),{level:100,item:atkItem||undefined,ability:attackerAbility||undefined,evs:STATE.prepSwitchAtkEVs||{hp:0,atk:0,def:0,spa:0,spd:0,spe:0},boosts:chargeBoost||undefined});
+            const makeCalcPokemon=(species,opts)=>{
+              const raw=canonicalSpecies(species);
+              const candidates=[raw, ...spriteCandidates(raw).map(x=>String(x).replace(/-/g,' '))].filter(Boolean);
+              let lastErr;
+              for(const candidate of candidates){ try{return new C.Pokemon(gen,candidate,opts);}catch(e){lastErr=e;} }
+              throw lastErr||new Error('Unsupported Pokémon: '+raw);
+            };
+            const atk=makeCalcPokemon(mon,{level:100,item:atkItem||undefined,ability:attackerAbility||undefined,evs:STATE.prepSwitchAtkEVs||{hp:0,atk:0,def:0,spa:0,spd:0,spe:0},boosts:chargeBoost||undefined});
             const evs=(STATE.prepSwitchEVsByMon||{})[target.species]||{hp:0,atk:0,def:0,spa:0,spd:0,spe:0};
-            const def=new C.Pokemon(gen,switchCalcSpecies(target.species),{level:100,item:STATE.prepSwitchDefItem||undefined,ability:defenderAbility||undefined,evs});
+            const def=makeCalcPokemon(target.species,{level:100,item:STATE.prepSwitchDefItem||undefined,ability:defenderAbility||undefined,evs});
             const res=switchField?C.calculate(gen,atk,def,mv,switchField):C.calculate(gen,atk,def,mv);
-            const dmg=Array.isArray(res.damage)?res.damage:[res.damage];
-            let numericDmg=dmg.map(Number).filter(Number.isFinite);
+            const flattenSwitch=v=>{const out=[];const walk=x=>{if(Array.isArray(x))x.forEach(walk);else if(Number.isFinite(Number(x)))out.push(Number(x));};walk(v);return out;};
+            const dmg=res.damage;
+            let numericDmg;
+            if(Array.isArray(dmg)&&dmg.length&&Array.isArray(dmg[0])){
+              const hitsMatrix=dmg.map(hit=>flattenSwitch(hit));
+              const count=Math.max(...hitsMatrix.map(a=>a.length));
+              numericDmg=Array.from({length:count},(_,i)=>hitsMatrix.reduce((sum,a)=>sum+(a[i]??a[a.length-1]??0),0));
+            }else numericDmg=flattenSwitch(dmg);
             if(!numericDmg.length) throw new Error('No numeric damage result was returned for this move.');
             let max=Math.max(...numericDmg);
             let min=Math.min(...numericDmg);
