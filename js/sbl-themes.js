@@ -88,6 +88,7 @@
   // window.SBL_THEMES instead of keeping their own copy, so a theme only
   // ever needs to be added in one place.
   window.SBL_THEMES = THEMES;
+  window.SBL_THEMES_VERSION = '2026-08-23-pokemon';
   const THEME_KEY='sbl_dashboard_theme';
   const CUSTOM_KEY='sbl_dashboard_custom_theme';
   const TEAL='#5eead4', RED='#ff7a7a';
