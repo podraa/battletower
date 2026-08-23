@@ -7,6 +7,19 @@
 (function(){
   const SHARED = true; // league data shared with anyone viewing this dashboard (cloud mode only)
   const escapeHtml = (...args) => window.SBL.pokemon.escapeHtml(...args);
+
+  function battleLabel(replayId, fallback = 'Battle') {
+    const id = String(replayId || '');
+    const r = STATE?.replays?.[id];
+    if (r?.players?.p1 || r?.players?.p2) {
+      const p1 = teamFor(r.players.p1) || r.players.p1 || 'P1';
+      const p2 = teamFor(r.players.p2) || r.players.p2 || 'P2';
+      return `${p1} vs ${p2}`;
+    }
+    if (r?.team1 || r?.team2) return `${r.team1 || 'P1'} vs ${r.team2 || 'P2'}`;
+    return fallback;
+  }
+
   let STATE = { replays:{}, teamMap:{}, settings:{ caseInsensitiveNames:true, teamLogos:{}, bannerMode:'top', bannerTeam:'', rosters:{}, conferences:{} } };
   let PUBLISHED_ROSTERS = {};
   let loaded = false;
@@ -791,7 +804,7 @@
             <div class="summary-meta"><span>${mons.length} Pokémon recorded</span><span>Replay ${SBL.pokemon.escapeHtml(r.id)}</span></div>
           </div>
           <div class="summary-grid">${sideCard('p1',p1)}${sideCard('p2',p2)}</div>
-          <div class="summary-actions"><a class="primary nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(r.id)}" target="_blank" rel="noopener">Open Showdown replay</a><button class="ghost" id="summaryClose">Close</button></div>
+          <div class="summary-actions"><span class="note">${SBL.pokemon.escapeHtml(battleLabel(r.id))}</span><button class="ghost" id="summaryClose">Close</button></div>
         </div>
       </div>`;
     document.getElementById('summaryClose').addEventListener('click', closeAudit);
@@ -885,7 +898,7 @@
           ${rows.length===0 ? `<div class="empty-state">No entries.</div>` : `<ul class="audit-list">
             ${rows.map(r=>`<li>
               <span><strong>${SBL.pokemon.escapeHtml(replayContext(r.replayId).week)}</strong> · ${SBL.pokemon.escapeHtml(replayContext(r.replayId).matchup)} · Turn ${r.turn} — ${type==='kills' ? 'vs ' + (r.victim ? pokemonLink(r.victim, SBL.pokemon.escapeHtml(r.victim), '', false) : '?') : (type==='assists' ? 'helped finish ' + (r.victim ? pokemonLink(r.victim, SBL.pokemon.escapeHtml(r.victim), '', false) : '?') + ' — ' + Number(r.percent||0).toFixed(1) + '% damage (' + Number(r.damage||0).toFixed(1) + ')' + (r.killer ? ' · killer: ' + pokemonLink(r.killer, SBL.pokemon.escapeHtml(r.killer), '', false) : '') : (r.killer ? 'by ' + pokemonLink(r.killer, SBL.pokemon.escapeHtml(r.killer), '', false) : 'unattributed'))} <span class="audit-cause">(${SBL.pokemon.escapeHtml(displayCause(r.cause))})</span></span>
-              ${showLink ? `<a href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(r.replayId)}" target="_blank" rel="noopener">${SBL.pokemon.escapeHtml(r.replayId)}</a>` : ''}
+              ${showLink ? `<span class="note">${SBL.pokemon.escapeHtml(battleLabel(r.replayId))}</span>` : ''}
             </li>`).join('')}
           </ul>`}
           <div class="foot-actions"><button class="ghost" id="auditClose">Close</button></div>
@@ -904,7 +917,7 @@
     root.innerHTML=`<div class="pokemon-overlay" id="assistProfileModal"><div class="pokemon-modal" role="dialog" aria-modal="true" aria-label="${SBL.pokemon.escapeHtml(species)} assists">
       <div class="pokemon-modal-head"><strong>${SBL.pokemon.escapeHtml(species)} — Assists (${rows.length})</strong><button class="ghost small" id="assistProfileClose" type="button">Close ✕</button></div>
       <div class="pokemon-modal-body"><h3 class="mini-heading">Assist record</h3>
-      ${rows.length ? `<table><thead><tr><th>Week</th><th>Matchup</th><th>Turn</th><th>Victim</th><th>Damage</th><th>Share</th><th>Reason</th><th>Killer</th><th>Replay</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${SBL.pokemon.escapeHtml(safeReplayContext(x.replayId).week)}</td><td>${SBL.pokemon.escapeHtml(safeReplayContext(x.replayId).matchup)}</td><td>${x.turn}</td><td>${x.victim ? pokemonLink(x.victim,SBL.pokemon.escapeHtml(x.victim),'',false) : '?'}</td><td class="num dealt">${Number(x.damage||0).toFixed(1)}</td><td class="num">${Number(x.percent||0).toFixed(1)}%</td><td>${SBL.pokemon.escapeHtml(safeCause(x.cause||'damage'))}</td><td>${x.killer ? pokemonLink(x.killer,SBL.pokemon.escapeHtml(x.killer),'',false) : '?'}</td><td>${x.replayId ? `<a class="nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(x.replayId)}${Number.isFinite(Number(x.turn)) && Number(x.turn) >= 0 ? `?turn=${encodeURIComponent(Number(x.turn))}` : ''}" target="_blank" rel="noopener">View</a>` : '<span class="note">Unavailable</span>'}</td></tr>`).join('')}</tbody></table>` : '<div class="empty-state">No assists recorded.</div>'}
+      ${rows.length ? `<table><thead><tr><th>Week</th><th>Matchup</th><th>Turn</th><th>Victim</th><th>Damage</th><th>Share</th><th>Reason</th><th>Killer</th><th>Replay</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${SBL.pokemon.escapeHtml(safeReplayContext(x.replayId).week)}</td><td>${SBL.pokemon.escapeHtml(safeReplayContext(x.replayId).matchup)}</td><td>${x.turn}</td><td>${x.victim ? pokemonLink(x.victim,SBL.pokemon.escapeHtml(x.victim),'',false) : '?'}</td><td class="num dealt">${Number(x.damage||0).toFixed(1)}</td><td class="num">${Number(x.percent||0).toFixed(1)}%</td><td>${SBL.pokemon.escapeHtml(safeCause(x.cause||'damage'))}</td><td>${x.killer ? pokemonLink(x.killer,SBL.pokemon.escapeHtml(x.killer),'',false) : '?'}</td><td>${x.replayId ? `<span class="note">${SBL.pokemon.escapeHtml(battleLabel(x.replayId))}</span>` : '<span class="note">Unavailable</span>'}</td></tr>`).join('')}</tbody></table>` : '<div class="empty-state">No assists recorded.</div>'}
       </div></div></div>`;
     document.body.appendChild(root.firstElementChild);
     const modal=document.getElementById('assistProfileModal');
@@ -913,7 +926,7 @@
   }
 
   function render(){
-    document.getElementById('app').classList.toggle('wide', activeTab === 'teams' || activeTab === 'global' || activeTab === 'assists' || activeTab === 'goldenfist' || activeTab === 'luckiest' || activeTab === 'pokemonsearch' || activeTab === 'causes' || activeTab === 'season' || activeTab === 'replays' || activeTab === 'overview');
+    document.getElementById('app').classList.toggle('wide', activeTab === 'teams' || activeTab === 'global' || activeTab === 'assists' || activeTab === 'goldenfist' || activeTab === 'luckiest' || activeTab === 'pokemonsearch' || activeTab === 'causes' || activeTab === 'misc' || activeTab === 'season' || activeTab === 'replays' || activeTab === 'overview');
     if(!loaded){ contentEl.innerHTML = `<div class="empty-state">Loading…</div>`; return; }
     if(activeTab === 'overview') return renderLeagueOverview();
     if(activeTab === 'process') return renderProcess();
@@ -923,6 +936,7 @@
     if(activeTab === 'goldenfist') return renderGoldenFist();
     if(activeTab === 'luckiest') return renderLuckiestTeam();
     if(activeTab === 'causes') return renderDeathCauses();
+    if(activeTab === 'misc') return renderMisc();
     if(activeTab === 'teams') return renderTeams();
     if(activeTab === 'season') return renderSeason();
     if(activeTab === 'replays') return renderReplayBrowser();
@@ -1289,9 +1303,9 @@
     const renderProfileLogTable = (list, type) => {
       const rows = profileLogRows(list,type);
       if(!rows.length) return `<div class="empty-state">No ${type === 'kill' ? 'kills' : type === 'assist' ? 'assists' : 'deaths'}.</div>`;
-      if(type === 'kill') return `<table><thead><tr><th>Week</th><th>Matchup</th><th>Turn</th><th>Victim</th><th>Cause</th><th>Replay</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${SBL.pokemon.escapeHtml(String(x.week))}</td><td>${SBL.pokemon.escapeHtml(String(x.matchup))}</td><td>${x.turn}</td><td>${x.victim ? pokemonLink(x.victim,SBL.pokemon.escapeHtml(x.victim),'',false) : '?'}</td><td>${SBL.pokemon.escapeHtml(String(x.cause))}</td><td>${x.replayId ? `<a class="nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(x.replayId)}${Number.isFinite(Number(x.turn)) && Number(x.turn) >= 0 ? `?turn=${encodeURIComponent(Number(x.turn))}` : ''}" target="_blank" rel="noopener">View</a>` : '<span class="note">Unavailable</span>'}</td></tr>`).join('')}</tbody></table>`;
-      if(type === 'assist') return `<table><thead><tr><th>Week</th><th>Matchup</th><th>Turn</th><th>Victim</th><th>Damage</th><th>Share</th><th>Reason</th><th>Killer</th><th>Replay</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${SBL.pokemon.escapeHtml(String(x.week))}</td><td>${SBL.pokemon.escapeHtml(String(x.matchup))}</td><td>${x.turn}</td><td>${x.victim ? pokemonLink(x.victim,SBL.pokemon.escapeHtml(x.victim),'',false) : '?'}</td><td class="num dealt">${x.damage.toFixed(1)}</td><td class="num">${x.percent.toFixed(1)}%</td><td>${SBL.pokemon.escapeHtml(String(x.cause || 'damage'))}</td><td>${x.killer ? pokemonLink(x.killer,SBL.pokemon.escapeHtml(x.killer),'',false) : '?'}</td><td>${x.replayId ? `<a class="nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(x.replayId)}${Number.isFinite(Number(x.turn)) && Number(x.turn) >= 0 ? `?turn=${encodeURIComponent(Number(x.turn))}` : ''}" target="_blank" rel="noopener">View</a>` : '<span class="note">Unavailable</span>'}</td></tr>`).join('')}</tbody></table>`;
-      return `<table><thead><tr><th>Week</th><th>Matchup</th><th>Turn</th><th>Killer</th><th>Replay</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${SBL.pokemon.escapeHtml(String(x.week))}</td><td>${SBL.pokemon.escapeHtml(String(x.matchup))}</td><td>${x.turn}</td><td>${x.killer ? pokemonLink(x.killer,SBL.pokemon.escapeHtml(x.killer),'',false) : 'Unattributed'}</td><td>${x.replayId ? `<a class="nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(x.replayId)}${Number.isFinite(Number(x.turn)) && Number(x.turn) >= 0 ? `?turn=${encodeURIComponent(Number(x.turn))}` : ''}" target="_blank" rel="noopener">View</a>` : '<span class="note">Unavailable</span>'}</td></tr>`).join('')}</tbody></table>`;
+      if(type === 'kill') return `<table><thead><tr><th>Week</th><th>Matchup</th><th>Turn</th><th>Victim</th><th>Cause</th><th>Replay</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${SBL.pokemon.escapeHtml(String(x.week))}</td><td>${SBL.pokemon.escapeHtml(String(x.matchup))}</td><td>${x.turn}</td><td>${x.victim ? pokemonLink(x.victim,SBL.pokemon.escapeHtml(x.victim),'',false) : '?'}</td><td>${SBL.pokemon.escapeHtml(String(x.cause))}</td><td>${x.replayId ? `<span class="note">${SBL.pokemon.escapeHtml(battleLabel(x.replayId))}</span>` : '<span class="note">Unavailable</span>'}</td></tr>`).join('')}</tbody></table>`;
+      if(type === 'assist') return `<table><thead><tr><th>Week</th><th>Matchup</th><th>Turn</th><th>Victim</th><th>Damage</th><th>Share</th><th>Reason</th><th>Killer</th><th>Replay</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${SBL.pokemon.escapeHtml(String(x.week))}</td><td>${SBL.pokemon.escapeHtml(String(x.matchup))}</td><td>${x.turn}</td><td>${x.victim ? pokemonLink(x.victim,SBL.pokemon.escapeHtml(x.victim),'',false) : '?'}</td><td class="num dealt">${x.damage.toFixed(1)}</td><td class="num">${x.percent.toFixed(1)}%</td><td>${SBL.pokemon.escapeHtml(String(x.cause || 'damage'))}</td><td>${x.killer ? pokemonLink(x.killer,SBL.pokemon.escapeHtml(x.killer),'',false) : '?'}</td><td>${x.replayId ? `<span class="note">${SBL.pokemon.escapeHtml(battleLabel(x.replayId))}</span>` : '<span class="note">Unavailable</span>'}</td></tr>`).join('')}</tbody></table>`;
+      return `<table><thead><tr><th>Week</th><th>Matchup</th><th>Turn</th><th>Killer</th><th>Replay</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${SBL.pokemon.escapeHtml(String(x.week))}</td><td>${SBL.pokemon.escapeHtml(String(x.matchup))}</td><td>${x.turn}</td><td>${x.killer ? pokemonLink(x.killer,SBL.pokemon.escapeHtml(x.killer),'',false) : 'Unattributed'}</td><td>${x.replayId ? `<span class="note">${SBL.pokemon.escapeHtml(battleLabel(x.replayId))}</span>` : '<span class="note">Unavailable</span>'}</td></tr>`).join('')}</tbody></table>`;
     };
     return `<div class="panel pokemon-profile">
       <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
@@ -1444,7 +1458,7 @@
     const byTurn={};
     for(const e of events){ const k=String(e.turn||0); (byTurn[k] ||= []).push(e); }
     const root=document.createElement('div');
-    root.innerHTML=`<div class="pokemon-overlay" id="luckPokemonModal"><div class="pokemon-modal" role="dialog" aria-modal="true" aria-label="Luck summary for ${SBL.pokemon.escapeHtml(species)}"><div class="pokemon-modal-head"><div style="display:flex;align-items:center;gap:10px;">${SBL.pokemon.spriteMarkup(species,'sprite-xl')}<div><strong>${SBL.pokemon.escapeHtml(species)}</strong><div class="note">Luck summary · ${score>=0?'+':''}${score.toFixed(2)} luck</div></div></div><button class="ghost small" id="luckPokemonClose" type="button">Close ✕</button></div><div class="pokemon-modal-body"><div class="profile-grid"><div><span>Lucky events</span><strong>${events.filter(e=>e.score>0).length}</strong></div><div><span>Unlucky events</span><strong>${events.filter(e=>e.score<0).length}</strong></div><div><span>Games</span><strong>${rows.length}</strong></div><div><span>Net luck</span><strong>${score>=0?'+':''}${score.toFixed(2)}</strong></div></div><div class="section-divider"></div><h3 class="mini-heading">What turns did ${SBL.pokemon.escapeHtml(species)} get lucky?</h3>${Object.keys(byTurn).sort((a,b)=>Number(a)-Number(b)).map(turn=>`<div style="margin:0 0 12px;padding:10px 12px;background:var(--panel2);border:1px solid var(--border);border-radius:8px;"><strong>Turn ${SBL.pokemon.escapeHtml(turn)}</strong>${byTurn[turn].map(e=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-top:7px;">${e.score>=0?'🍀':'💀'}<div><strong>${SBL.pokemon.escapeHtml(e.type.replace(/-/g,' '))}</strong> <span class="note">${e.score>=0?'+':''}${Number(e.score).toFixed(2)}</span><div class="note">${SBL.pokemon.escapeHtml(e.detail)} · ${SBL.pokemon.escapeHtml(e.team)} vs ${SBL.pokemon.escapeHtml(e.opponent)} · <a class="nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(e.replayId)}" target="_blank" rel="noopener">Replay</a></div></div></div>`).join('')}</div>`).join('') || '<div class="empty-state">No turn-by-turn luck events are stored yet. Reprocess the replays with the latest parser.</div>'}</div></div></div>`;
+    root.innerHTML=`<div class="pokemon-overlay" id="luckPokemonModal"><div class="pokemon-modal" role="dialog" aria-modal="true" aria-label="Luck summary for ${SBL.pokemon.escapeHtml(species)}"><div class="pokemon-modal-head"><div style="display:flex;align-items:center;gap:10px;">${SBL.pokemon.spriteMarkup(species,'sprite-xl')}<div><strong>${SBL.pokemon.escapeHtml(species)}</strong><div class="note">Luck summary · ${score>=0?'+':''}${score.toFixed(2)} luck</div></div></div><button class="ghost small" id="luckPokemonClose" type="button">Close ✕</button></div><div class="pokemon-modal-body"><div class="profile-grid"><div><span>Lucky events</span><strong>${events.filter(e=>e.score>0).length}</strong></div><div><span>Unlucky events</span><strong>${events.filter(e=>e.score<0).length}</strong></div><div><span>Games</span><strong>${rows.length}</strong></div><div><span>Net luck</span><strong>${score>=0?'+':''}${score.toFixed(2)}</strong></div></div><div class="section-divider"></div><h3 class="mini-heading">What turns did ${SBL.pokemon.escapeHtml(species)} get lucky?</h3>${Object.keys(byTurn).sort((a,b)=>Number(a)-Number(b)).map(turn=>`<div style="margin:0 0 12px;padding:10px 12px;background:var(--panel2);border:1px solid var(--border);border-radius:8px;"><strong>Turn ${SBL.pokemon.escapeHtml(turn)}</strong>${byTurn[turn].map(e=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-top:7px;">${e.score>=0?'🍀':'💀'}<div><strong>${SBL.pokemon.escapeHtml(e.type.replace(/-/g,' '))}</strong> <span class="note">${e.score>=0?'+':''}${Number(e.score).toFixed(2)}</span><div class="note">${SBL.pokemon.escapeHtml(e.detail)} · ${SBL.pokemon.escapeHtml(e.team)} vs ${SBL.pokemon.escapeHtml(e.opponent)} · ${SBL.pokemon.escapeHtml(battleLabel(e.replayId))}</div></div></div>`).join('')}</div>`).join('') || '<div class="empty-state">No turn-by-turn luck events are stored yet. Reprocess the replays with the latest parser.</div>'}</div></div></div>`;
     document.body.appendChild(root.firstElementChild); document.body.style.overflow='hidden'; hideStatsNav();
     const modal=document.getElementById('luckPokemonModal');
     const closeLuck=()=>{modal.remove();document.body.style.overflow='';showStatsNav();};
@@ -1465,7 +1479,7 @@
       const view=viewSel.value;
       if(view==='game'){
         const rows=luckGameData(scopeSel.value);
-        document.getElementById('luckTable').innerHTML=!rows.length?`<div class="empty-state">No luck data for this scope yet. Reprocess the replays after updating the luck parser.</div>`:`<div class="franchise-table-wrap"><table class="franchise-table"><thead><tr><th>#</th><th>Game</th><th>Matchup</th><th>Winner</th><th class="num">Luck</th><th class="num">Crits</th><th class="num">Dodges</th><th class="num">Low-Acc Hits</th><th class="num">Status</th><th class="num">Secondary</th><th class="num">Flinches</th><th class="num">Confusion</th><th class="num">Protect</th><th class="num">Sleep</th><th class="num">Freeze</th></tr></thead><tbody>${rows.map((r,i)=>`<tr><td>${i+1}</td><td><a class="nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(r.id)}" target="_blank" rel="noopener">${SBL.pokemon.escapeHtml(r.id||'Replay')}</a></td><td><strong>${SBL.pokemon.escapeHtml(r.team1)}</strong> vs <strong>${SBL.pokemon.escapeHtml(r.team2)}</strong></td><td>${SBL.pokemon.escapeHtml(r.winner||'—')}</td><td class="num"><strong>${r.score>=0?'+':''}${r.score.toFixed(2)}</strong></td><td class="num">${r.crits}</td><td class="num">${r.dodges}</td><td class="num">${r.lowAccuracyHits}</td><td class="num">${r.statusDodges.toFixed(2)}</td><td class="num">${r.secondary>=0?'+':''}${r.secondary.toFixed(2)}</td><td class="num">${r.flinches}</td><td class="num">${r.confusion}</td><td class="num">${r.protect}</td><td class="num">${r.sleep>=0?'+':''}${r.sleep.toFixed(2)}</td><td class="num">${r.freeze>=0?'+':''}${r.freeze.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`;
+        document.getElementById('luckTable').innerHTML=!rows.length?`<div class="empty-state">No luck data for this scope yet. Reprocess the replays after updating the luck parser.</div>`:`<div class="franchise-table-wrap"><table class="franchise-table"><thead><tr><th>#</th><th>Game</th><th>Matchup</th><th>Winner</th><th class="num">Luck</th><th class="num">Crits</th><th class="num">Dodges</th><th class="num">Low-Acc Hits</th><th class="num">Status</th><th class="num">Secondary</th><th class="num">Flinches</th><th class="num">Confusion</th><th class="num">Protect</th><th class="num">Sleep</th><th class="num">Freeze</th></tr></thead><tbody>${rows.map((r,i)=>`<tr><td>${i+1}</td><td><span class="note">${SBL.pokemon.escapeHtml(battleLabel(r.id, r.id || 'Battle'))}</span></td><td><strong>${SBL.pokemon.escapeHtml(r.team1)}</strong> vs <strong>${SBL.pokemon.escapeHtml(r.team2)}</strong></td><td>${SBL.pokemon.escapeHtml(r.winner||'—')}</td><td class="num"><strong>${r.score>=0?'+':''}${r.score.toFixed(2)}</strong></td><td class="num">${r.crits}</td><td class="num">${r.dodges}</td><td class="num">${r.lowAccuracyHits}</td><td class="num">${r.statusDodges.toFixed(2)}</td><td class="num">${r.secondary>=0?'+':''}${r.secondary.toFixed(2)}</td><td class="num">${r.flinches}</td><td class="num">${r.confusion}</td><td class="num">${r.protect}</td><td class="num">${r.sleep>=0?'+':''}${r.sleep.toFixed(2)}</td><td class="num">${r.freeze>=0?'+':''}${r.freeze.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`;
         return;
       }
       const pokemon=view==='pokemon';
@@ -1478,22 +1492,219 @@
     draw();
   }
 
-  function renderDeathCauses(){
-    contentEl.innerHTML=`<div class="panel"><h2>Death Causes</h2><div class="cause-subheading">Top victims</div><div id="causeBody"></div></div>`;
-    const sel={value:'ALL'};
-    function draw(){
-      const counts={}; const pokemon={}; const causeLogs={};
-      for(const r of allReplays(sel.value)) for(const k in r.mons){
-        const m=r.mons[k];
-        for(const d of (m.deathLog||[])){
-          const raw=(d.cause||'Other'); const cleanCause=String(raw).replace(/^(item|ability):\s*/i,'').trim(); const c=/^(unattributed)$/i.test(cleanCause)?'Other':(/stealth rock|spikes|toxic spikes|sticky web/i.test(cleanCause)?'Hazard':(/recoil/i.test(cleanCause)?'Recoil':(/psn|tox|brn|poison|burn/i.test(cleanCause)?'Status':cleanCause))); counts[c]=(counts[c]||0)+1;
-          if(!pokemon[c]) pokemon[c]={}; const sp=m.species; pokemon[c][sp]=(pokemon[c][sp]||0)+1;
-          if(!causeLogs[c]) causeLogs[c]=[]; causeLogs[c].push({pokemon:sp,...d});
+  function renderMisc(){
+    contentEl.innerHTML=`<div class="misc-wrap">
+      <div class="panel misc-hero">
+        <div>
+          <h2>Misc Stats</h2>
+          <div class="note">Fun league records and battle oddities from every processed replay.</div>
+        </div>
+        <div class="stats-control misc-stat-control"><label for="miscStat">Stat</label>
+          <select id="miscStat"></select>
+        </div>
+      </div>
+      <div class="panel misc-formula">
+        <strong>How these stats work</strong>
+        <span>Select a stat below to see its exact definition at the top of the leaderboard.</span>
+        <span>Calculated/event-based stats are derived directly from the processed battle logs; raw totals are aggregated across all processed battles.</span>
+      </div>
+      <div id="miscGrid"></div>
+    </div>`;
+
+    const esc=v=>SBL.pokemon.escapeHtml(String(v??''));
+    const all=()=>allReplays().filter(r=>r && r.misc);
+    const STATUS_LABELS={tox:'Toxic',psn:'Poison',brn:'Burn',par:'Paralysis',slp:'Sleep',frz:'Freeze'};
+    const statusCounter=()=>{
+      const counts={};
+      for(const r of all()) for(const [k,v] of Object.entries(r.misc?.statusInflicted||{})){
+        const label=STATUS_LABELS[String(k).trim().toLowerCase()] || String(k).trim();
+        counts[label]=(counts[label]||0)+Number(v||0);
+      }
+      return Object.entries(counts).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));
+    };
+    const topCounter=(field)=>{
+      const counts={};
+      for(const r of all()) for(const [k,v] of Object.entries(r.misc?.[field]||{})) counts[k]=(counts[k]||0)+Number(v||0);
+      return Object.entries(counts).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));
+    };
+    const pokemonArray=(field,metric)=>{
+      const counts={};
+      for(const r of all()) for(const x of (r.misc?.[field]||[])){
+        if(!x?.pokemon) continue;
+        const display = SBL?.replays?.canonicalBattleSpecies ? SBL.replays.canonicalBattleSpecies(x.pokemon) : String(x.pokemon);
+        const k=String(display).trim().toLowerCase();
+        if(!counts[k]) counts[k]={pokemon:display,value:0};
+        counts[k].value += metric?Number(x[metric]||0):1;
+      }
+      return Object.values(counts)
+        .sort((a,b)=>b.value-a.value||a.pokemon.localeCompare(b.pokemon));
+    };
+    const pokemonMap=(metric)=>{
+      const counts={};
+      for(const r of all()) for(const x of Object.values(r.misc?.pokemon||{})){
+        if(!x?.species) continue;
+        const species=canonical(x.species);
+        counts[species]=(counts[species]||0)+Number(x[metric]||0);
+      }
+      // Flinch counts also exist in the parser's per-Pokémon luck records. Use
+      // them as a compatibility fallback for replays that predate the Misc
+      // flinch field, while never double-counting replays that already have it.
+      if(metric==='flinches'){
+        // Older replay records may have flinches in luckPokemon but not in misc.pokemon.
+        // Use the per-Pokémon misc count when present; otherwise fall back to the
+        // corresponding luckPokemon record for that same Pokémon instance.
+        for(const r of all()){
+          const miscMons=Object.values(r.misc?.pokemon||{});
+          for(const x of Object.values(r.luckPokemon||{})){
+            if(!x?.species || Number(x.flinches||0)<=0) continue;
+            const species=canonical(x.species);
+            const matching=miscMons.filter(m=>canonical(m?.species||'')===species);
+            const miscCount=matching.reduce((sum,m)=>sum+Number(m?.flinches||0),0);
+            const luckCount=Number(x.flinches||0);
+            if(miscCount===0) counts[species]=(counts[species]||0)+luckCount;
+          }
         }
       }
-      const rows=Object.entries(counts).sort((a,b)=>b[1]-a[1]);
-      document.getElementById('causeBody').innerHTML=!rows.length?`<div class="empty-state">No deaths recorded.</div>`:`<div class="death-cause-list">${rows.map(([c,n],i)=>{const top=Object.entries(pokemon[c]).sort((a,b)=>b[1]-a[1]).slice(0,6);return `<div class="death-cause-entry"><div class="death-cause-rank">${i+1}</div><div class="death-cause-main"><div class="death-cause-title">${SBL.pokemon.escapeHtml(c)} <span class="badge">${n}</span></div><div class="death-cause-mons">${top.map(([sp,v])=>`<span class="death-cause-mon">${SBL.pokemon.spriteMarkup(sp,'death-cause-sprite')}${pokemonLink(sp, SBL.pokemon.escapeHtml(sp), '', false)}<span class="badge">${v}</span></span>`).join('')}</div></div></div>`}).join('')}</div>`;
+      return Object.entries(counts).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));
+    };
+    const itemSprite=(name)=>{
+      // Showdown item IDs are kebab-case, but its current icon directory does not
+      // contain every newer item. Use Showdown first, then PokeAPI as a reliable
+      // fallback for newer Gen 9 items.
+      const raw=String(name||'').trim().toLowerCase().replace(/[’']/g,'');
+      const aliases={
+        'booster energy':'booster-energy','heavy-duty boots':'heavy-duty-boots','assault vest':'assault-vest',
+        'clear amulet':'clear-amulet','eject pack':'eject-pack','blunder policy':'blunder-policy',
+        'weakness policy':'weakness-policy','grassy seed':'grassy-seed','mirror herb':'mirror-herb','ability shield':'ability-shield'
+      };
+      const id=aliases[raw] || raw.replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+      if(!id) return '';
+      const label=esc(name);
+      // PokeAPI's maintained item sprite collection includes the newer Gen 9
+      // items that are absent from some Showdown icon mirrors. Use it first,
+      // then Showdown as a fallback for legacy/custom icons.
+      const pokeapi=`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/${encodeURIComponent(id)}.png`;
+      const showdown=`https://play.pokemonshowdown.com/sprites/itemicons/${encodeURIComponent(id)}.png`;
+      return `<img class="sprite misc-item-sprite" src="${pokeapi}" data-fallback-src="${showdown}" alt="${label}" title="${label}" width="32" height="32" loading="lazy" onerror="if(this.dataset.fallbackSrc && this.src!==this.dataset.fallbackSrc){this.src=this.dataset.fallbackSrc;this.removeAttribute('data-fallback-src')}else{this.style.display='none'}">`;
+    };
+    const rowLabel=(label,kind)=>{
+      if(kind==='pokemon') return `${SBL.pokemon.spriteMarkup(canonical(label),'misc-pokemon-sprite')}<span>${esc(label)}</span>`;
+      if(kind==='status') return `<span>${esc(statusDisplayName(label))}</span>`;
+      if(kind==='item') return `${itemSprite(label)}<span>${esc(label)}</span>`;
+      return esc(label);
+    };
+    const statusDisplayName=(value)=>({tox:'Toxic',psn:'Poison',brn:'Burn',par:'Paralysis',slp:'Sleep',frz:'Freeze'})[String(value||'').toLowerCase()]||value;
+    const statRows=(rows,kind)=>{
+      if(!rows.length) return '<div class="empty-state">No data yet.</div>';
+      return `<div class="misc-list">${rows.map((x,i)=>`<div class="misc-row"><span class="misc-rank">${i+1}</span><span class="misc-name${kind?' misc-with-sprite':''}">${rowLabel(x[0],kind)}</span><strong>${esc(x[2] ?? Number(x[1]).toLocaleString(undefined,{maximumFractionDigits:2}))}</strong></div>`).join('')}</div>`;
+    };
+    const monRows=(rows)=>{
+      if(!rows.length) return '<div class="empty-state">No data yet.</div>';
+      return `<div class="misc-list">${rows.map((x,i)=>`<div class="misc-row"><span class="misc-rank">${i+1}</span><span class="misc-name">${esc(x.pokemon)}</span><strong>${Number(x.value).toLocaleString()}</strong></div>`).join('')}</div>`;
+    };
+    const battleRows=(rows, formatter)=>{
+      if(!rows.length) return '<div class="empty-state">No data yet.</div>';
+      return `<div class="misc-list">${rows.map((x,i)=>`<div class="misc-row misc-battle-row"><span class="misc-rank">${i+1}</span><span class="misc-name">${esc(formatter(x))}</span><strong>${esc(x.value)}</strong></div>`).join('')}</div>`;
+    };
+
+    const battleMetric=(label, getValue, descending=true)=>{
+      const rows=[];
+      for(const r of all()){
+        const value=Number(getValue(r)||0);
+        if(!Number.isFinite(value) || value<=0) continue;
+        rows.push({r,value});
+      }
+      rows.sort((a,b)=>(descending?b.value-a.value:a.value-b.value) || String(a.r.id).localeCompare(String(b.r.id)));
+      return rows.map(x=>[battleLabel(x.r.id,x.r.id),x.value]);
+    };
+
+    const canonical=(name)=>SBL?.replays?.canonicalBattleSpecies ? SBL.replays.canonicalBattleSpecies(name) : String(name||'');
+
+    const crossMatchKillStreak=()=>{
+      const states={};
+      const best={};
+      const ordered=all().slice().sort((a,b)=>(replayTimestampMs(a)-replayTimestampMs(b)) || String(a.id||'').localeCompare(String(b.id||'')));
+      for(const r of ordered){
+        for(const [mk,x] of Object.entries(r.misc?.pokemon||{})){
+          if(!x?.species) continue;
+          const side=String(mk).split('|')[0];
+          const team=teamFor(r.players?.[side]) || r.players?.[side] || side;
+          const species=canonical(x.species);
+          const key=`${String(team).trim().toLowerCase()}|${normName(species)}`;
+          const downs=Math.max(0,Number(x.downs||0));
+          const fallen=Math.max(0,Number(x.fallen||0));
+          if(!states[key]) states[key]={pokemon:species,team,current:0,matches:0,startId:null,startBattle:null};
+          const st=states[key];
+          if(downs>0){
+            st.current+=downs;
+            st.matches+=1;
+            if(!st.startId) st.startId=r.id;
+          }
+          if(fallen>0){
+            if(st.current>0){
+              const prev=best[key];
+              if(!prev || st.current>prev.value || (st.current===prev.value && st.matches>prev.matches)) best[key]={pokemon:st.pokemon,team:st.team,value:st.current,matches:st.matches,replayId:r.id};
+            }
+            st.current=0; st.matches=0; st.startId=null; st.startBattle=null;
+          }
+        }
+      }
+      for(const [key,st] of Object.entries(states)){
+        if(st.current>0){
+          const prev=best[key];
+          if(!prev || st.current>prev.value || (st.current===prev.value && st.matches>prev.matches)) best[key]={pokemon:st.pokemon,team:st.team,value:st.current,matches:st.matches,replayId:null};
+        }
+      }
+      return Object.values(best).sort((a,b)=>b.value-a.value||b.matches-a.matches||a.pokemon.localeCompare(b.pokemon));
+    };
+
+    const statDefinitions=[
+      {category:'Move Usage',name:'Most Used Move',desc:'Shows which moves have been used most often across all processed battles.',kind:'text',fn:()=>topCounter('moveUses')},
+      {category:'Move Usage',name:'Most Missed Move',desc:'Shows which moves have produced the most misses in total. This is a raw miss count, not a miss rate.',kind:'text',fn:()=>topCounter('misses')},
+      {category:'Move Usage',name:'Most Spammy Pokémon',desc:'Shows the biggest single example of a Pokémon repeatedly using the same move in one battle.',kind:'text',fn:()=>all().map(r=>r.misc?.mostSpammy).filter(Boolean).map(x=>[`${x.pokemon} · ${x.move} · ${battleLabel(x.replayId)}`,Number(x.count||0)]).sort((a,b)=>b[1]-a[1])},
+      {category:'Items & Switching',name:'Most Consumed Item',desc:'Shows which held items have been consumed most often by their users.',kind:'item',fn:()=>topCounter('itemConsumed')},
+      {category:'Items & Switching',name:'Most Knocked Off Item',desc:'Shows which held items have been specifically removed by Knock Off most often.',kind:'item',fn:()=>topCounter('itemKnockedOff')},
+      {category:'Items & Switching',name:'Most Removed Item',desc:'Shows which held items have been removed by any tracked removal effect most often.',kind:'item',fn:()=>topCounter('itemRemoved')},
+      {category:'Items & Switching',name:'Most Switches in a Battle',desc:'Shows which battle had the most total switches by both players combined.',fn:()=>battleMetric('switches',r=>r.misc?.mostSwitchesInBattle?.count)},
+      {category:'Combat',name:'Most Statuses Inflicted',desc:'Shows which status conditions were successfully inflicted most often. Toxic is displayed as Toxic rather than the replay shorthand tox.',fn:()=>statusCounter()},
+      {category:'Combat',name:'Most Critical Hits by Pokémon',desc:'Shows which Pokémon have landed the most critical hits across all processed battles.',kind:'pokemon',fn:()=>pokemonMap('crits')},
+      {category:'Combat',name:'Most Flinches by Pokémon',desc:'Shows which Pokémon have successfully caused the most flinches across all processed battles.',kind:'pokemon',fn:()=>pokemonMap('flinches')},
+      {category:'Battle Records',name:'Longest Battle',desc:'Shows every battle ranked by turn count. Use the sort control to view the longest or shortest battles first.',fn:()=>battleMetric('turns',r=>r.misc?.longestBattle)},
+      {category:'Battle Records',name:'First Blood',desc:'Shows which Pokémon have scored the first KO of a battle most often.',kind:'pokemon',fn:()=>{const c={};for(const r of all()){const x=r.misc?.firstBlood;if(x?.pokemon){const k=canonical(x.pokemon);c[k]=(c[k]||0)+1;}}return Object.entries(c).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));}},
+      {category:'Battle Records',name:'First Blood → Win',desc:'Shows how often each Pokémon’s first-blood KO came from the side that ultimately won. The percentage is wins after first blood divided by that Pokémon’s first-blood games.',kind:'pokemon',fn:()=>{const c={};for(const r of all()){const x=r.misc?.firstBloodWon;if(!x?.pokemon)continue;const k=canonical(x.pokemon);if(!c[k])c[k]={first:0,wins:0};c[k].first++;if(x.won)c[k].wins++;}return Object.entries(c).map(([k,v])=>[k,v.first?Math.round(v.wins/v.first*1000)/10:0,`${v.wins}/${v.first} (${v.first?Math.round(v.wins/v.first*1000)/10:0}%)`]).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));}},
+      {category:'Battle Records',name:'Most Comeback Wins',desc:'Shows which teams won after being down at least one Pokémon for more than half of the battle. The parser measures turns spent behind in remaining Pokémon.',fn:()=>{const c={};for(const r of all())for(const x of (r.misc?.comebackSides||[])){const player=r.players?.[x.side];if(!player)continue;const team=teamFor(player)||player;c[team]=(c[team]||0)+1;}return Object.entries(c).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));}},
+      {category:'Momentum',name:'Kill Streak',desc:'Shows the longest uninterrupted KO streak by a Pokémon across matches. The streak continues through matches where the Pokémon does not appear and ends only when that Pokémon is KOed.',kind:'pokemon',fn:()=>crossMatchKillStreak().map(x=>[x.pokemon,x.value,`${x.value} KOs${x.matches>1?` · ${x.matches} matches`:''}`])},
+      {category:'Momentum',name:'Most Closers',desc:'Shows which Pokémon have landed the final KO that ended the opponent’s full roster most often.',kind:'pokemon',fn:()=>pokemonArray('closers').map(x=>[x.pokemon,x.value])},
+      {category:'Momentum',name:'Most Revenge KOs',desc:'Shows which Pokémon most often answered a teammate’s recent KO with a KO of their own. A revenge KO uses the parser’s tracked two-turn response window.',kind:'pokemon',fn:()=>pokemonArray('revengeKOs').map(x=>[x.pokemon,x.value])},
+      {category:'Momentum',name:'Most Trade KOs',desc:'Shows which Pokémon have been involved in rapid KO exchanges where an opposing KO is answered within the tracked exchange window.',kind:'pokemon',fn:()=>pokemonArray('trades').map(x=>[x.pokemon,x.value])},
+      {category:'Momentum',name:'Sacrifices',desc:'Shows Pokémon that objectively look like a sack: they entered after a teammate fainted, were KOed within two active turns, and did not score a KO. This measures the sequence, not player intent.',kind:'pokemon',fn:()=>pokemonArray('sacrifices').map(x=>[x.pokemon,x.value])},
+      {category:'Faints',name:'Most First to Fall',desc:'Shows which Pokémon are most often the first Pokémon KOed in their battles.',kind:'pokemon',fn:()=>{const c={};for(const r of all()){const x=r.misc?.firstFallen;if(x?.pokemon){const k=canonical(x.pokemon);c[k]=(c[k]||0)+1;}}return Object.entries(c).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));}},
+      {category:'Faints',name:'Most Last to Fall',desc:'Shows which Pokémon are most often the final Pokémon KOed on their losing side.',kind:'pokemon',fn:()=>{const c={};for(const r of all()){const x=r.misc?.lastFallen;if(x?.pokemon){const k=canonical(x.pokemon);c[k]=(c[k]||0)+1;}}return Object.entries(c).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));}}
+    ];
+
+    const sel=document.getElementById('miscStat');
+    const categories=[...new Set(statDefinitions.map(x=>x.category))];
+    sel.innerHTML=categories.map(cat=>`<optgroup label="${esc(cat)}">${statDefinitions.filter(x=>x.category===cat).map(x=>`<option value="${esc(x.name)}">${esc(x.name)}</option>`).join('')}</optgroup>`).join('');
+    function draw(){
+      const name=sel.value;
+      const def=statDefinitions.find(x=>x.name===name) || statDefinitions[0];
+      const rows=def.fn();
+      const sortableBattle = def.name === 'Longest Battle';
+      const sortControl = sortableBattle ? `<label class="stats-control misc-sort-control">Sort <select id="miscBattleSort"><option value="desc">Longest first</option><option value="asc">Shortest first</option></select></label>` : '';
+      document.getElementById('miscGrid').innerHTML=`<div class="panel misc-card">
+        <div class="misc-card-head"><div><h3>${esc(def.name)}</h3><div class="note">${esc(def.desc)}</div></div><div class="misc-card-actions">${sortControl}<span class="count">${rows.length} entries</span></div></div>
+        <div id="miscRows">${statRows(rows,def.kind)}</div>
+      </div>`;
+      if(sortableBattle){
+        const sort=document.getElementById('miscBattleSort');
+        const renderSorted=()=>{
+          const sorted=[...rows].sort((a,b)=>(sort.value==='asc'?a[1]-b[1]:b[1]-a[1])||String(a[0]).localeCompare(String(b[0])));
+          document.getElementById('miscRows').innerHTML=statRows(sorted,def.kind);
+        };
+        sort.addEventListener('change',renderSorted);
+      }
     }
+    sel.addEventListener('change',draw);
     draw();
   }
 
@@ -1829,7 +2040,7 @@
         <td style="color:var(--text-dim)">${SBL.pokemon.escapeHtml(x.format)}</td>
         <td>${x.winner ? `<span class="kills">${SBL.pokemon.escapeHtml(x.result)}</span>` : `<span class="badge">Unknown</span>`}</td>
         <td class="num"><button class="ghost small" data-replay-summary="${SBL.pokemon.escapeHtml(x.r.id)}">Summary</button></td>
-        <td class="num"><a class="nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(x.r.id)}" target="_blank" rel="noopener">View replay</a></td>
+        <td class="num"><span class="note">${SBL.pokemon.escapeHtml(battleLabel(x.r.id))}</span></td>
       </tr>`).join('')}</tbody></table>`;
     }
     search.addEventListener('input',draw);

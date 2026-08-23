@@ -501,6 +501,14 @@
       const id = SBL.util.extractReplayId(url);
       if(!id){ appendLog(logEl, `Could not read a replay id from: ${url}`, true); invalid++; continue; }
       if(seen.has(id) || STATE.replays[id]){
+        if(STATE.replays[id] && Number(STATE.replays[id].parserVersion||0) < 6){
+          if(!seen.has(id)){
+            appendLog(logEl, `Reprocessing older parser version: ${id}`, false);
+            ids.push(id);
+            seen.add(id);
+          }
+          continue;
+        }
         appendLog(logEl, `Already processed: ${id} — skipped`, false);
         skipped++;
         continue;
@@ -845,6 +853,7 @@
     const seasonBadge = document.getElementById('seasonBadge');
     if(seasonBadge) seasonBadge.textContent = loaded ? (STATE.settings.activeSeason || DEFAULT_SEASON) : '';
     if(!loaded){ contentEl.innerHTML = `<div class="empty-state">Loading…</div>`; return; }
+    if(activeTab === 'overview') return renderOverview();
     if(activeTab === 'process') return renderProcess();
     if(activeTab === 'players') return renderPlayers();
     if(activeTab === 'draft') return renderDraft();
@@ -854,13 +863,46 @@
     if(activeTab === 'commissioner') return renderCommissioner();
     if(activeTab === 'admin-log') return drawAdminLog();
     if(activeTab === 'seasonsetup') return renderSeasonSetup();
-    if(activeTab === 'settings') return renderSettings();
+    if(activeTab === 'settings') return renderSettings('franchises');
+    if(activeTab === 'settings-data') return renderSettings('data');
+    if(activeTab === 'settings-system') return renderSettings('system');
   }
   // jump to another tab programmatically
   function goToTab(tab){
     activeTab = tab;
     [...tabsEl.children].forEach(b=>b.classList.toggle('active', b.dataset.tab===activeTab));
     render();
+  }
+
+  function renderOverview(){
+    const replayCount = Object.keys(STATE.replays||{}).length;
+    const franchises = configuredFranchises();
+    const users = new Set();
+    Object.values(STATE.replays||{}).forEach(r=>{ ['p1','p2'].forEach(side=>{ const u=String(r?.players?.[side]||'').trim(); if(u) users.add(u); }); });
+    const currentWeek = weeksList().length ? weeksList()[weeksList().length-1] : 'No weeks assigned';
+    const top = globalPokemonStats('ALL').slice(0,5);
+    contentEl.innerHTML = `
+      <div class="admin-section">
+        <div class="admin-section-title"><div><h2>Overview</h2><div class="note">A quick snapshot of the current league state and the most important admin actions.</div></div></div>
+        <div class="panel">
+          <div class="admin-subsection"><h3>System</h3><div class="stats-grid">
+            <div class="stat-card"><div class="lbl">Season</div><div class="val">${SBL.pokemon.escapeHtml(STATE.settings.activeSeason||DEFAULT_SEASON)}</div></div>
+            <div class="stat-card"><div class="lbl">Current week</div><div class="val">${SBL.pokemon.escapeHtml(currentWeek)}</div></div>
+            <div class="stat-card"><div class="lbl">Franchises</div><div class="val">${franchises.length}</div></div>
+            <div class="stat-card"><div class="lbl">Users in replays</div><div class="val">${users.size}</div></div>
+            <div class="stat-card"><div class="lbl">Processed replays</div><div class="val">${replayCount}</div></div>
+          </div></div>
+          <div class="admin-subsection"><h3>Quick Actions</h3><div class="foot-actions">
+            <button class="primary" data-overview-tab="process">Process Replays</button>
+            <button class="ghost" data-overview-tab="seasonsetup">Season Management</button>
+            <button class="ghost" data-overview-tab="settings">Franchises &amp; Users</button>
+          </div></div>
+        </div>
+      </div>
+      <div class="admin-section"><div class="panel"><div class="admin-subsection"><h3>Top Pokémon by damage dealt</h3>
+        ${top.length ? `<table><thead><tr><th>#</th><th>Pokémon</th><th class="num">Damage</th><th class="num">KOs</th></tr></thead><tbody>${top.map((s,i)=>`<tr><td>${i+1}</td><td><div class="pname-cell">${SBL.pokemon.spriteMarkup(s.species,'sprite')}${SBL.pokemon.escapeHtml(SBL.pokemon.displayName(s.species))}</div></td><td class="num">${s.dealt.toFixed(1)}</td><td class="num">${s.kills}</td></tr>`).join('')}</tbody></table>` : `<div class="empty-state">No games processed yet.</div>`}
+      </div></div></div>`;
+    contentEl.querySelectorAll('[data-overview-tab]').forEach(btn=>btn.addEventListener('click',()=>{ activeTab=btn.dataset.overviewTab; tabsEl.querySelectorAll('.admin-nav-item').forEach(b=>b.classList.toggle('active',b.dataset.tab===activeTab)); render(); }));
   }
 
   function renderProcess(){
@@ -880,7 +922,20 @@
           <div class="foot-actions" style="margin-top:0; margin-bottom:12px;">
             <button type="button" class="ghost" id="reprocessAll">Reprocess all replays (re-fetches &amp; re-parses everything)</button>
           </div>
-          ${renderReplayTable()}`}
+          <div class="replay-filter-card">
+            <div class="replay-filter-head">
+              <div>
+                <div class="replay-filter-title">Filter replays</div>
+                <div class="replay-filter-help">Narrow the processed replay list by week and/or franchise. A franchise may have multiple Showdown usernames.</div>
+              </div>
+              <button type="button" class="ghost small" id="clearReplayFilters">Clear</button>
+            </div>
+            <div class="replay-filter-grid admin-filter-grid">
+              <div><label for="replayWeekFilter">Week</label><select id="replayWeekFilter"><option value="ALL">All weeks</option>${weeksList().map(w=>`<option value="${SBL.pokemon.escapeHtml(w)}">${SBL.pokemon.escapeHtml(w)}</option>`).join('')}</select></div>
+              <div><label for="replayFranchiseFilter">Franchise</label><select id="replayFranchiseFilter"><option value="ALL">All franchises</option>${replayFranchisesList().map(f=>`<option value="${SBL.pokemon.escapeHtml(f)}">${SBL.pokemon.escapeHtml(f)}</option>`).join('')}</select></div>
+            </div>
+          </div>
+          <div id="processedReplayTable">${renderReplayTable()}</div>`}
       </div>
     `;
     document.getElementById('processBtn').addEventListener('click', async ()=>{
@@ -891,6 +946,19 @@
       btn.disabled = true;
       await processUrls(urls, logEl);
       btn.disabled = false;
+    });
+    const weekFilter = document.getElementById('replayWeekFilter');
+    const franchiseFilter = document.getElementById('replayFranchiseFilter');
+    const replayTableHost = document.getElementById('processedReplayTable');
+    function redrawReplayTable(){
+      if(replayTableHost) replayTableHost.innerHTML = renderReplayTable(weekFilter?.value || 'ALL', franchiseFilter?.value || 'ALL');
+    }
+    weekFilter?.addEventListener('change', redrawReplayTable);
+    franchiseFilter?.addEventListener('change', redrawReplayTable);
+    document.getElementById('clearReplayFilters')?.addEventListener('click', ()=>{
+      if(weekFilter) weekFilter.value='ALL';
+      if(franchiseFilter) franchiseFilter.value='ALL';
+      redrawReplayTable();
     });
     const reBtn = document.getElementById('reprocessAll');
     if(reBtn) reBtn.addEventListener('click', async (event)=>{
@@ -964,8 +1032,29 @@
     render();
   }
 
-  function renderReplayTable(){
-    const list = Object.values(STATE.replays).sort((a,b)=>b.processedAt-a.processedAt);
+  function replayFranchisesList(){
+    const franchises = new Set();
+    Object.values(STATE.replays).forEach(r=>{
+      if(!r?.players) return;
+      ['p1','p2'].forEach(side=>{
+        const name = String(teamFor(r.players[side]) || '').trim();
+        if(name) franchises.add(name);
+      });
+    });
+    // Include configured franchises even if they have no processed replay yet.
+    configuredFranchises().forEach(f=>{ if(f?.name) franchises.add(f.name); });
+    return Array.from(franchises).sort((a,b)=>a.localeCompare(b));
+  }
+  function renderReplayTable(weekFilter='ALL', franchiseFilter='ALL'){
+    const list = Object.values(STATE.replays)
+      .filter(r => weekFilter === 'ALL' || String(r.week||'Unassigned') === String(weekFilter))
+      .filter(r => {
+        if(franchiseFilter === 'ALL') return true;
+        const p1 = String(teamFor(r.players?.p1)||'').trim();
+        const p2 = String(teamFor(r.players?.p2)||'').trim();
+        return p1 === String(franchiseFilter) || p2 === String(franchiseFilter);
+      })
+      .sort((a,b)=>b.processedAt-a.processedAt);
     const rows = list.map(r => `
       <tr>
         <td>
@@ -981,49 +1070,28 @@
     setTimeout(()=>{
       document.querySelectorAll('[data-save-week]').forEach(btn=>{
         btn.addEventListener('click', async ()=>{
-          const id = btn.dataset.saveWeek;
-          const replay = STATE.replays[id];
+          const id = btn.dataset.saveWeek; const replay = STATE.replays[id];
           const input = document.querySelector(`[data-week-id="${CSS.escape(id)}"]`);
           if(!replay || !input) return;
-          const week = input.value.trim() || 'Unassigned';
-          replay.week = week;
-          replay.weekOverride = true;
-          await saveReplays();
-          await logAdminAction('set_replay_week', `Set replay ${id} to ${week} (manual week override).`, {replayId:id, week});
-          renderTicker();
-          render();
+          const week = input.value.trim() || 'Unassigned'; replay.week = week; replay.weekOverride = true;
+          await saveReplays(); await logAdminAction('set_replay_week', `Set replay ${id} to ${week} (manual week override).`, {replayId:id, week}); renderTicker(); render();
         });
       });
       document.querySelectorAll('[data-auto-week]').forEach(btn=>{
         btn.addEventListener('click', async ()=>{
-          const id = btn.dataset.autoWeek;
-          const replay = STATE.replays[id];
-          if(!replay) return;
-          replay.weekOverride = false;
-          replay.week = automaticWeekForReplay(replay);
-          assignAutomaticWeeks();
-          await saveReplays();
-          await logAdminAction('restore_replay_auto_week', `Restored automatic week assignment for replay ${id}.`, {replayId:id, week:replay.week});
-          renderTicker();
-          render();
+          const id = btn.dataset.autoWeek; const replay = STATE.replays[id]; if(!replay) return;
+          replay.weekOverride = false; replay.week = automaticWeekForReplay(replay); assignAutomaticWeeks();
+          await saveReplays(); await logAdminAction('restore_replay_auto_week', `Restored automatic week assignment for replay ${id}.`, {replayId:id, week:replay.week}); renderTicker(); render();
         });
       });
       document.querySelectorAll('[data-remove]').forEach(btn=>{
         btn.addEventListener('click', async ()=>{
-          const id = btn.dataset.remove;
-          const replay = STATE.replays[id];
-          delete STATE.replays[id];
-          await deleteReplayRemote(id);
-          await logAdminAction('remove_replay', `Removed processed replay ${id}.`, {
-            replayId:id,
-            players: replay?.players || null
-          });
-          renderTicker();
-          render();
+          const id = btn.dataset.remove; const replay = STATE.replays[id]; delete STATE.replays[id]; await deleteReplayRemote(id);
+          await logAdminAction('remove_replay', `Removed processed replay ${id}.`, {replayId:id, players: replay?.players || null}); renderTicker(); render();
         });
       });
     }, 0);
-    return `<table><thead><tr><th>Week</th><th>Matchup</th><th>Format</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    return rows ? `<table><thead><tr><th>Week</th><th>Matchup</th><th>Format</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty-state">No replays match these filters.</div>`;
   }
 
   function weekSelectorHtml(id){
@@ -3561,6 +3629,22 @@ function renderDraft(){ return drawDraft(); }
     let pendingRosterUpload = null;
     const rosterStatus = document.getElementById('rosterUploadStatus');
     const rosterPreview = document.getElementById('rosterPreview');
+    // Organize the existing controls into clearer admin subsections without changing their behavior.
+    const seasonPanels = Array.from(contentEl.querySelectorAll(':scope > .panel'));
+    const seasonGroups = [
+      {title:'Season Management', help:'Season lifecycle, archived seasons, and safe season-level actions.', indexes:[0]},
+      {title:'Roster & Player Pool', help:'Publish and review the current season roster data.', indexes:[1]},
+      {title:'Standings & Qualification', help:'Conference assignments, manual ladder corrections, and playoff visibility.', indexes:[2,3,4]},
+      {title:'Schedule & Weeks', help:'Build, upload, validate, and reconcile the season fixture.', indexes:[5]}
+    ];
+    seasonGroups.forEach(group=>{
+      const section=document.createElement('div'); section.className='admin-section';
+      section.innerHTML=`<div class="admin-section-title"><div><h2>${SBL.pokemon.escapeHtml(group.title)}</h2><div class="note">${SBL.pokemon.escapeHtml(group.help)}</div></div></div>`;
+      const panels=group.indexes.map(i=>seasonPanels[i]).filter(Boolean); panels.forEach(panel=>section.appendChild(panel));
+      if(panels.length) contentEl.appendChild(section);
+    });
+    seasonPanels.forEach(panel=>{ if(panel.parentElement===contentEl) panel.remove(); });
+
     const rosterFile = document.getElementById('rosterFile');
     const loadRosterFileBtn = document.getElementById('loadRosterFileBtn');
     const publishRostersBtn = document.getElementById('publishRostersBtn');
@@ -3941,47 +4025,23 @@ function fixtureMatchCount(fixtureData){const f=Array.isArray(fixtureData)?fixtu
 
   }
 
-  function renderSettings(){
+  function renderSettings(mode='franchises'){
+    const showFranchises = mode === 'franchises';
+    const showData = mode === 'data';
+    const showSystem = mode === 'system';
     contentEl.innerHTML = `
-      <div class="panel">
-        <h2>Player → Team name mapping</h2>
-        <div class="note">Map each Showdown username to your league's team/trainer name, so stats group correctly. These mapped team names are also the source for the league's franchise list used by Draft Setup, ordering, and budgets.</div>
-        <div class="row" style="margin-top:12px; align-items:center;">
-          <label style="display:flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
-            <input type="checkbox" id="caseInsensitiveToggle" ${STATE.settings.caseInsensitiveNames ? 'checked' : ''}>
-            Ignore case when grouping team names (e.g. "Team Fire" and "team fire" count as the same team)
-          </label>
-        </div>
-        <div id="mapRows" style="margin-top:12px;"></div>
-        <div class="map-row">
-          <input type="text" id="newUser" placeholder="showdown username">
-          <input type="text" id="newTeam" placeholder="team name">
-          <button class="ghost small" id="addMap">Add</button>
-        </div>
-      </div>
-      <div class="panel">
-        <h2>Possible duplicate players</h2>
-        <div class="note">Usernames that look like the same person typed differently (e.g. <code>dossa37</code> / <code>dossa_37</code>, or <code>podraa</code> / <code>podrrraaa</code>). Merging points every variant at whichever one has played the most games.</div>
-        <div id="dupPlayers" style="margin-top:12px;"></div>
-      </div>
-      <div class="panel">
-        <h2>Possible duplicate teams (shared roster)</h2>
-        <div class="note">Since this is a draft league each team's roster is fixed — two team tags whose Pokémon overlap heavily are probably the same team under two different names. Merging groups everything under the tag with the most total appearances.</div>
-        <div id="dupTeams" style="margin-top:12px;"></div>
-      </div>
-      <div class="panel">
-        <h2>Data</h2>
-        <div class="note">
-          Storage mode: <strong>Shared Supabase database</strong>
-        </div>
-        <div class="note">All replay, team, and settings data is stored in the shared Supabase database used by the public dashboard.</div>
-        <div class="foot-actions">
-          <button class="ghost" id="exportBackup">Download backup (.json)</button>
-          <button class="ghost" id="importBackupBtn">Restore from backup</button>
-          <input type="file" id="importBackupFile" accept="application/json" style="display:none;">
-          <button class="ghost danger-btn" id="resetAll">Clear all season data</button>
-        </div>
-      </div>`;
+      ${showFranchises ? `
+      <div class="admin-section"><div class="admin-section-title"><div><h2>Franchises &amp; Users</h2><div class="note">Manage the mapping between Showdown usernames and league franchises, then clean up likely duplicates.</div></div></div>
+      <div class="panel"><div class="admin-subsection"><h3>Franchise mapping</h3><div class="note">Map each Showdown username to your league's franchise/team name. These mappings are the source for franchise lists, stats grouping, ordering, and budgets.</div><div id="mapRows" style="margin-top:12px;"></div><div class="map-row"><input type="text" id="newUser" placeholder="showdown username"><input type="text" id="newTeam" placeholder="team name"><button class="ghost small" id="addMap">Add</button></div></div></div>
+      <div class="panel"><div class="admin-subsection"><h3>Duplicate users</h3><div class="note">Review usernames that look like the same person typed differently and merge them into the canonical mapping.</div><div id="dupPlayers" style="margin-top:12px;"></div></div></div>
+      <div class="panel"><div class="admin-subsection"><h3>Duplicate franchises</h3><div class="note">Review likely duplicate team tags whose rosters overlap heavily and merge them under the established franchise name.</div><div id="dupTeams" style="margin-top:12px;"></div></div></div></div>` : ''}
+      ${showSystem ? `
+      <div class="admin-section"><div class="admin-section-title"><div><h2>System Settings</h2><div class="note">Small global behaviors that affect how admin data is grouped and interpreted.</div></div></div>
+      <div class="panel"><div class="admin-subsection"><h3>Grouping behavior</h3><div class="note">These settings do not change stored replay data; they control how franchise names are grouped in the admin tools.</div><label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer;"><input type="checkbox" id="caseInsensitiveToggle" ${STATE.settings.caseInsensitiveNames ? 'checked' : ''}> Ignore case when grouping team names</label></div></div></div>` : ''}
+      ${showData ? `
+      <div class="admin-section"><div class="admin-section-title"><div><h2>Data Management</h2><div class="note">Backup, restore, and maintenance tools for the shared league data.</div></div></div>
+      <div class="panel"><div class="admin-subsection"><h3>Storage</h3><div class="note">Storage mode: <strong>Shared Supabase database</strong></div><div class="note">All replay, team, and settings data is stored in the shared database used by the public dashboard.</div></div><div class="admin-danger-section"><h3>Backup &amp; reset</h3><div class="foot-actions"><button class="ghost" id="exportBackup">Download backup (.json)</button><button class="ghost" id="importBackupBtn">Restore from backup</button><input type="file" id="importBackupFile" accept="application/json" style="display:none;"><button class="ghost danger-btn" id="resetAll">Clear all season data</button></div></div></div></div>` : ''}`;
+    if(showFranchises){
     const mapRows = document.getElementById('mapRows');
     function drawMap(){
       const entries = Object.entries(STATE.teamMap);
@@ -4063,12 +4123,6 @@ function fixtureMatchCount(fixtureData){const f=Array.isArray(fixtureData)?fixtu
     }
     drawDupTeams();
 
-    document.getElementById('caseInsensitiveToggle').addEventListener('change', async (e)=>{
-      STATE.settings.caseInsensitiveNames = e.target.checked;
-      await saveSettings();
-      await logAdminAction('set_case_insensitive_names', `Case-insensitive team grouping ${e.target.checked ? 'enabled' : 'disabled'}.`, {enabled:e.target.checked});
-      render();
-    });
     document.getElementById('addMap').addEventListener('click', async ()=>{
       const rawUser = document.getElementById('newUser').value.trim();
       const u = rawUser.toLowerCase();
@@ -4081,52 +4135,42 @@ function fixtureMatchCount(fixtureData){const f=Array.isArray(fixtureData)?fixtu
       document.getElementById('newTeam').value='';
       drawMap();
     });
-    document.getElementById('resetAll').addEventListener('click', async ()=>{
-      if(!confirm('This clears every processed replay for the whole league. Continue?')) return;
-      STATE.replays = {};
-      await deleteAllRemote();
-      await saveSharedState();
-      await logAdminAction('clear_all_season_data', 'Cleared all processed replay data for the current season.', {season:STATE.settings.activeSeason || DEFAULT_SEASON});
-      renderTicker();
-      render();
-    });
-    document.getElementById('exportBackup').addEventListener('click', ()=>{
-      const blob = new Blob([JSON.stringify(STATE, null, 2)], {type:'application/json'});
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = `league-dashboard-backup-${new Date().toISOString().slice(0,10)}.json`;
-      link.click();
-    });
-    document.getElementById('importBackupBtn').addEventListener('click', ()=>{
-      document.getElementById('importBackupFile').click();
-    });
-    document.getElementById('importBackupFile').addEventListener('change', async (e)=>{
-      const file = e.target.files[0];
-      if(!file) return;
-      try{
-        const text = await file.text();
-        const data = JSON.parse(text);
-        if(!data.replays) throw new Error('not a valid backup file');
-        if(!confirm(`This will replace your current data with the backup (${Object.keys(data.replays).length} replays). Continue?`)) return;
-        STATE.replays = data.replays || {};
-        STATE.teamMap = data.teamMap || {};
-        STATE.settings = Object.assign({caseInsensitiveNames:true, rosters:{}}, data.settings || {});
-        STATE.settings.rosters = STATE.settings.rosters || {};
-        STATE.settings.draft = normalizeDraftState(STATE.settings.draft);
-        await deleteRemoteRowsNotInState();
-        await saveReplays();
-        await saveTeamMap();
+    }
+    if(showSystem){
+      document.getElementById('caseInsensitiveToggle')?.addEventListener('change', async (e)=>{
+        STATE.settings.caseInsensitiveNames = e.target.checked;
         await saveSettings();
-        await logAdminAction('restore_backup', `Restored dashboard state from backup with ${Object.keys(STATE.replays).length} replays.`, {replayCount:Object.keys(STATE.replays).length});
-        renderTicker();
-        render();
-      }catch(err){
-        alert('Could not read that backup file: ' + err.message);
-      }
-      e.target.value = '';
-    });
+        await logAdminAction('set_case_insensitive_names', `Case-insensitive team grouping ${e.target.checked ? 'enabled' : 'disabled'}.`, {enabled:e.target.checked});
+      });
+    }
+    if(showData){
+      document.getElementById('resetAll')?.addEventListener('click', async ()=>{
+        if(!confirm('This clears every processed replay for the whole league. Continue?')) return;
+        STATE.replays = {}; await deleteAllRemote(); await saveSharedState();
+        await logAdminAction('clear_all_season_data', 'Cleared all processed replay data for the current season.', {season:STATE.settings.activeSeason || DEFAULT_SEASON});
+        renderTicker(); render();
+      });
+      document.getElementById('exportBackup')?.addEventListener('click', ()=>{
+        const blob = new Blob([JSON.stringify(STATE, null, 2)], {type:'application/json'});
+        const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
+        link.download = `league-dashboard-backup-${new Date().toISOString().slice(0,10)}.json`; link.click();
+      });
+      document.getElementById('importBackupBtn')?.addEventListener('click', ()=>document.getElementById('importBackupFile')?.click());
+      document.getElementById('importBackupFile')?.addEventListener('change', async (e)=>{
+        const file=e.target.files[0]; if(!file) return;
+        try{
+          const text=await file.text(); const data=JSON.parse(text); if(!data.replays) throw new Error('not a valid backup file');
+          if(!confirm(`This will replace your current data with the backup (${Object.keys(data.replays).length} replays). Continue?`)) return;
+          STATE.replays=data.replays||{}; STATE.teamMap=data.teamMap||{}; STATE.settings=Object.assign({caseInsensitiveNames:true,rosters:{}},data.settings||{});
+          STATE.settings.rosters=STATE.settings.rosters||{}; STATE.settings.draft=normalizeDraftState(STATE.settings.draft);
+          await deleteRemoteRowsNotInState(); await saveReplays(); await saveTeamMap(); await saveSettings();
+          await logAdminAction('restore_backup', `Restored dashboard state from backup with ${Object.keys(STATE.replays).length} replays.`, {replayCount:Object.keys(STATE.replays).length});
+          renderTicker(); render();
+        }catch(err){ alert('Could not read that backup file: ' + err.message); }
+        e.target.value='';
+      });
+    }
   }
-
   // ---------- Fixture upload controller ----------
   // This controller is deliberately self-contained.  The upload button must
   // not depend on Season Setup's other controls or on the fixture generator.

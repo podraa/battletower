@@ -731,7 +731,7 @@
       const pool = role === 'offered' ? roster : requestPool;
       return Array.from(set).map(name=>{
         const m = pool.find(x=>x.name===name) || {name, points:null};
-        return `<span class="selected-chip">${SBL.pokemon.spriteMarkup(m.name,'sprite')} ${SBL.pokemon.escapeHtml(m.name)}<button type="button" data-remove="${SBL.pokemon.escapeHtml(name)}" data-role="${role}" aria-label="Remove ${SBL.pokemon.escapeHtml(name)}">×</button></span>`;
+        return `<span class="selected-chip" data-sprite-style="${SBL.pokemon.escapeHtml(SBL.pokemon.getSpriteStyle?.()||'3d')}">${SBL.pokemon.spriteMarkup(m.name,'sprite')} ${SBL.pokemon.escapeHtml(m.name)}<button type="button" data-remove="${SBL.pokemon.escapeHtml(name)}" data-role="${role}" aria-label="Remove ${SBL.pokemon.escapeHtml(name)}">×</button></span>`;
       }).join('');
     }
 
@@ -1277,29 +1277,118 @@
     const themes = Array.isArray(window.SBL_THEMES) ? window.SBL_THEMES : [];
     const savedTheme = window.SBLTheme?.getSavedId?.() || document.documentElement.dataset.sblTheme || 'amber';
     const currentTheme = themes.find(t => t.id === savedTheme) || themes[0];
-    contentEl.innerHTML = `<div class="panel account-panel">
-      <div class="myteam-section-head"><div><div class="myteam-kicker">Account</div><h2>Account</h2><div class="note">Your SBL account, franchise assignment, and site preferences.</div></div></div>
-      <div class="profile-grid">
-        <div><span>Username</span><strong>${SBL.pokemon.escapeHtml(profile?.username || '—')}</strong></div>
-        <div><span>Franchise</span><strong>${SBL.pokemon.escapeHtml(profile?.team_name || '—')}</strong></div>
-        <div><span>Status</span><strong>${SBL.pokemon.escapeHtml(statusLabel)}</strong></div>
-        <div><span>Trade credits</span><strong>${Number(profile?.trade_credits || 0)}</strong></div>
-      </div>
-      <div class="section-divider"></div>
-      <div class="account-preferences">
-        <div class="account-preferences-head"><div><h3 class="mini-heading">Theme</h3><div class="note">Choose the site theme. It applies immediately and is saved for your browser.</div></div><span class="badge" id="accountThemeName">${SBL.pokemon.escapeHtml(currentTheme?.name || 'Theme')}</span></div>
-        <div class="account-theme-grid" id="accountThemeGrid">
-          ${themes.map(t => `<button type="button" class="account-theme-swatch${t.id===savedTheme?' active':''}" data-account-theme="${SBL.pokemon.escapeHtml(t.id)}" title="${SBL.pokemon.escapeHtml(t.name)}" aria-label="${SBL.pokemon.escapeHtml(t.name)}" aria-pressed="${t.id===savedTheme?'true':'false'}"><span class="theme-swatch-preview" style="background:${SBL.pokemon.escapeHtml(t.bg)};border-color:${SBL.pokemon.escapeHtml(t.border)}"><i style="background:${SBL.pokemon.escapeHtml(t.accent)}"></i><b style="background:${SBL.pokemon.escapeHtml(t.panel)}"></b></span><span>${SBL.pokemon.escapeHtml(t.name)}</span></button>`).join('')}
+    const themeGroup = theme => {
+      if(theme?.group) return theme.group;
+      const hex = String(theme?.accent || '').replace('#','');
+      if(hex.length !== 6) return 'Other';
+      const r=parseInt(hex.slice(0,2),16)/255, g=parseInt(hex.slice(2,4),16)/255, b=parseInt(hex.slice(4,6),16)/255;
+      const max=Math.max(r,g,b), min=Math.min(r,g,b), d=max-min;
+      if(d < 0.08) return 'Neutral';
+      let h=0;
+      if(max===r) h=((g-b)/d)%6; else if(max===g) h=(b-r)/d+2; else h=(r-g)/d+4;
+      h=(h*60+360)%360;
+      if(h < 15 || h >= 345) return 'Red';
+      if(h < 45) return 'Orange';
+      if(h < 70) return 'Yellow';
+      if(h < 165) return 'Green';
+      if(h < 195) return 'Cyan';
+      if(h < 255) return 'Blue';
+      if(h < 290) return 'Purple';
+      if(h < 345) return 'Pink';
+      return 'Other';
+    };
+    const themeGroups = themes.reduce((groups,t)=>{ const g=themeGroup(t); (groups[g] ||= []).push(t); return groups; }, {});
+    const themeGroupOrder=['Red','Orange','Yellow','Green','Cyan','Blue','Purple','Pink','Neutral','Pokemon'];
+    const savedThemeGroup = themeGroup(currentTheme);
+    const initialThemeGroup = themeGroups[savedThemeGroup]?.length ? savedThemeGroup : themeGroupOrder.find(g=>themeGroups[g]?.length) || 'Neutral';
+    const spriteStyle = window.SBL?.pokemon?.getSpriteStyle?.() || document.documentElement.dataset.sblSpriteStyle || '3d';
+    const renderThemeSwatches = (group) => {
+      const list = themeGroups[group] || [];
+      if(!list.length) return '<div class="empty-state">No themes in this colour group.</div>';
+      return `<div class="account-theme-group"><div class="account-theme-group-label">${SBL.pokemon.escapeHtml(group)} themes</div><div class="account-theme-swatch-grid">${list.map(t => `<button type="button" class="theme-swatch${t.id===savedTheme?' active':''}" data-theme-id="${SBL.pokemon.escapeHtml(t.id)}" aria-label="Use ${SBL.pokemon.escapeHtml(t.name)} theme"><span class="preview" style="background:${SBL.pokemon.escapeHtml(t.bg)};border-color:${SBL.pokemon.escapeHtml(t.border)}"><span style="background:${SBL.pokemon.escapeHtml(t.accent)}"></span><span style="background:${SBL.pokemon.escapeHtml(t.panel)}"></span><span style="background:${SBL.pokemon.escapeHtml(t.panelAlt)}"></span></span><span class="label-row"><span>${SBL.pokemon.escapeHtml(t.name)}</span><span class="check">✓</span></span></button>`).join('')}</div></div>`;
+    };
+    contentEl.innerHTML = `<div class="account-page">
+      <div class="account-hero panel">
+        <div class="account-hero-copy">
+          <div class="myteam-kicker">Account & Preferences</div>
+          <h2>Make SBL yours</h2>
+          <div class="note">Manage your profile and choose how Pokémon are displayed throughout the site.</div>
         </div>
+        <div class="account-avatar"><span>${SBL.pokemon.escapeHtml((profile?.username||profile?.team_name||'?').slice(0,1).toUpperCase())}</span></div>
       </div>
-      <div class="section-divider"></div>
-      <div class="row" style="justify-content:flex-end;"><button type="button" class="ghost" id="accountLogoutBtn">Log out</button></div>
+
+      <div class="account-layout">
+        <section class="panel account-card">
+          <div class="account-card-head"><div><div class="account-card-kicker">Profile</div><h3>Your account</h3></div><span class="account-status ${SBL.pokemon.escapeHtml(status)}">${SBL.pokemon.escapeHtml(statusLabel)}</span></div>
+          <div class="account-profile-list">
+            <div class="account-profile-row"><span>Username</span><strong>${SBL.pokemon.escapeHtml(profile?.username || '—')}</strong></div>
+            <div class="account-profile-row"><span>Franchise</span><strong>${SBL.pokemon.escapeHtml(profile?.team_name || '—')}</strong></div>
+            <div class="account-profile-row"><span>Trade credits</span><strong>${Number(profile?.trade_credits || 0)}</strong></div>
+          </div>
+        </section>
+
+        <section class="panel account-card account-preferences-card">
+          <div class="account-card-head"><div><div class="account-card-kicker">Display</div><h3>Pokémon sprites</h3><div class="note">Choose the artwork style used for Pokémon across SBL.</div></div></div>
+          <div class="sprite-choice-grid" id="accountSpriteStyle">
+            <button type="button" class="sprite-choice${spriteStyle==='3d'?' active':''}" data-sprite-style="3d" aria-pressed="${spriteStyle==='3d'?'true':'false'}">
+              <div class="sprite-choice-art">${SBL.pokemon.spriteMarkup('pikachu','sprite-choice-sprite','3d')}</div>
+              <div><strong>3D</strong><span>HOME-style renders</span></div><i aria-hidden="true">✓</i>
+            </button>
+            <button type="button" class="sprite-choice${spriteStyle==='2d'?' active':''}" data-sprite-style="2d" aria-pressed="${spriteStyle==='2d'?'true':'false'}">
+              <div class="sprite-choice-art">${SBL.pokemon.spriteMarkup('pikachu','sprite-choice-sprite','2d')}</div>
+              <div><strong>2D</strong><span>Classic battle sprites</span></div><i aria-hidden="true">✓</i>
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel account-card account-theme-card">
+        <div class="account-card-head"><div><div class="account-card-kicker">Appearance</div><h3>Theme</h3><div class="note">Pick a colour group or Pokémon, then choose from only the themes in that group.</div></div></div>
+        <div class="account-theme-picker">
+          <div class="account-theme-select-row account-theme-select-full">
+            <label for="accountThemeGroupSelect">Theme colour</label>
+            <select id="accountThemeGroupSelect" aria-describedby="accountThemeHelp">
+              ${themeGroupOrder.filter(group => themeGroups[group]?.length).map(group => `<option value="${SBL.pokemon.escapeHtml(group)}" ${group===initialThemeGroup?'selected':''}>${SBL.pokemon.escapeHtml(group)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="account-theme-current" id="accountThemeCurrent" aria-live="polite">
+            <span class="theme-swatch-preview" style="background:${SBL.pokemon.escapeHtml(currentTheme?.bg||'transparent')};border-color:${SBL.pokemon.escapeHtml(currentTheme?.border||'var(--border)')}"><i style="background:${SBL.pokemon.escapeHtml(currentTheme?.accent||'var(--amber)')}"></i><b style="background:${SBL.pokemon.escapeHtml(currentTheme?.panel||'var(--panel)')}"></b></span>
+            <span id="accountThemeName">${SBL.pokemon.escapeHtml(currentTheme?.name || 'Theme')}</span>
+          </div>
+          <div class="account-theme-swatches" id="accountThemeSwatches">${renderThemeSwatches(initialThemeGroup)}</div>
+          <div class="note" id="accountThemeHelp">Choose a colour above to filter the swatches. Your selected theme is remembered on this browser.</div>
+        </div>
+      </section>
+
+      <div class="account-actions"><button type="button" class="ghost" id="accountLogoutBtn">Log out</button></div>
     </div>`;
-    document.getElementById('accountThemeGrid')?.addEventListener('click', e=>{
-      const btn=e.target.closest('[data-account-theme]'); if(!btn || !window.SBLTheme?.apply) return;
-      const id=btn.dataset.accountTheme; const theme=window.SBLTheme.apply(id,true);
-      document.querySelectorAll('#accountThemeGrid [data-account-theme]').forEach(x=>{const active=x.dataset.accountTheme===id;x.classList.toggle('active',active);x.setAttribute('aria-pressed',active?'true':'false');});
-      const label=document.getElementById('accountThemeName'); if(label) label.textContent=theme?.name||id;
+
+    document.getElementById('accountSpriteStyle')?.addEventListener('click', e=>{
+      const btn=e.target.closest('[data-sprite-style]'); if(!btn) return;
+      const style=window.SBL?.pokemon?.setSpriteStyle?.(btn.dataset.spriteStyle,true) || btn.dataset.spriteStyle;
+      document.querySelectorAll('#accountSpriteStyle [data-sprite-style]').forEach(x=>{
+        const active=x.dataset.spriteStyle===style; x.classList.toggle('active',active); x.setAttribute('aria-pressed',active?'true':'false');
+      });
+      renderAccount();
+    });
+    document.getElementById('accountThemeSwatches')?.addEventListener('click', e=>{
+      const btn=e.target.closest('[data-theme-id]'); if(!btn) return;
+      const theme=themes.find(t=>t.id===btn.dataset.themeId);
+      if(!theme || !window.SBLTheme?.apply) return;
+      window.SBLTheme.apply(theme.id,true);
+      const label=document.getElementById('accountThemeName'); if(label) label.textContent=theme.name||theme.id;
+      const current=document.getElementById('accountThemeCurrent');
+      if(current){
+        current.querySelector('.theme-swatch-preview')?.setAttribute('style', `background:${theme.bg};border-color:${theme.border}`);
+        const accent=current.querySelector('.theme-swatch-preview i'); if(accent) accent.style.background=theme.accent;
+        const panel=current.querySelector('.theme-swatch-preview b'); if(panel) panel.style.background=theme.panel;
+      }
+      document.querySelectorAll('#accountThemeSwatches [data-theme-id]').forEach(x=>x.classList.toggle('active',x.dataset.themeId===theme.id));
+    });
+    document.getElementById('accountThemeGroupSelect')?.addEventListener('change', e=>{
+      const group=e.target.value;
+      const swatches=document.getElementById('accountThemeSwatches');
+      if(swatches) swatches.innerHTML=renderThemeSwatches(group);
     });
     document.getElementById('accountLogoutBtn')?.addEventListener('click', async ()=>{try{await SBL.auth.signOut();}catch(e){console.error('Logout failed:',e);}session=null;profile=null;activeTab='myteam';render();});
   }
