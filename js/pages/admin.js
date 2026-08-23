@@ -501,7 +501,7 @@
       const id = SBL.util.extractReplayId(url);
       if(!id){ appendLog(logEl, `Could not read a replay id from: ${url}`, true); invalid++; continue; }
       if(seen.has(id) || STATE.replays[id]){
-        if(STATE.replays[id] && Number(STATE.replays[id].parserVersion||0) < 6){
+        if(STATE.replays[id] && Number(STATE.replays[id].parserVersion||0) < 7){
           if(!seen.has(id)){
             appendLog(logEl, `Reprocessing older parser version: ${id}`, false);
             ids.push(id);
@@ -574,7 +574,17 @@
   }
   function weeksList(){
     const set = new Set(Object.values(STATE.replays).map(r=>r.week || 'Unassigned'));
-    return Array.from(set).sort();
+    return Array.from(set).sort((a,b)=>{
+      const sa=String(a??''), sb=String(b??'');
+      const na=parseInt(sa.match(/\d+/)?.[0]||'',10);
+      const nb=parseInt(sb.match(/\d+/)?.[0]||'',10);
+      const aNum=Number.isFinite(na), bNum=Number.isFinite(nb);
+      if(aNum && bNum && na!==nb) return na-nb;
+      if(aNum!==bNum) return aNum ? -1 : 1;
+      if(sa==='Unassigned') return 1;
+      if(sb==='Unassigned') return -1;
+      return sa.localeCompare(sb,undefined,{numeric:true,sensitivity:'base'});
+    });
   }
   function globalPokemonStats(weekFilter){
     const out = {}; // normSpecies -> {species, dealt, taken, kills, deaths, games, coaches}
@@ -828,13 +838,13 @@
   function closeTopPopup(){ return !!document.querySelector('#auditModal .audit-overlay') && (closeAudit(),true); }
   function openAudit(species, type, list, showLink){
     showLink = showLink !== false;
-    const label = type === 'kills' ? 'Kills' : 'Deaths';
+    const label = type === 'kills' ? 'Knockouts' : 'Deaths';
     const rows = (list || []).slice().sort((a,b)=> (a.replayId||'').localeCompare(b.replayId||'') || (a.turn-b.turn));
     document.getElementById('auditModal').innerHTML = `
       <div class="audit-overlay" id="auditOverlay">
         <div class="audit-box">
           <h3>${SBL.pokemon.escapeHtml(SBL.pokemon.displayName(species))} — ${label} (${rows.length})</h3>
-          <div class="audit-sub">Every ${type==='kills'?'kill':'death'} credited to this Pokémon this scope, with the turn${showLink?', replay,':''} and why it was credited.</div>
+          <div class="audit-sub">Every ${type==='kills'?'knockout':'death'} credited to this Pokémon this scope, with the turn${showLink?', replay,':''} and why it was credited.</div>
           ${rows.length===0 ? `<div class="empty-state">No entries.</div>` : `<ul class="audit-list">
             ${rows.map(r=>`<li>
               <span>Turn ${r.turn} — ${type==='kills' ? 'vs ' + SBL.pokemon.escapeHtml(r.victim||'?') : (r.killer ? 'by ' + SBL.pokemon.escapeHtml(r.killer) : 'unattributed')} <span class="audit-cause">(${SBL.pokemon.escapeHtml(r.cause||'—')})</span></span>
@@ -1094,8 +1104,18 @@
     return rows ? `<table><thead><tr><th>Week</th><th>Matchup</th><th>Format</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty-state">No replays match these filters.</div>`;
   }
 
+  function weekSort(a,b){
+    const sa=String(a??''), sb=String(b??'');
+    const na=parseInt(sa.match(/\d+/)?.[0]||'',10);
+    const nb=parseInt(sb.match(/\d+/)?.[0]||'',10);
+    const aNum=Number.isFinite(na), bNum=Number.isFinite(nb);
+    if(aNum && bNum && na!==nb) return na-nb;
+    if(aNum!==bNum) return aNum ? -1 : 1;
+    if(sa==='Unassigned') return 1; if(sb==='Unassigned') return -1;
+    return sa.localeCompare(sb,undefined,{numeric:true,sensitivity:'base'});
+  }
   function weekSelectorHtml(id){
-    const weeks = weeksList();
+    const weeks = weeksList().sort(weekSort);
     return `<select id="${id}">
       <option value="ALL">All season</option>
       <option value="LAST4">Last 4 games</option>

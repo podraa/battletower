@@ -934,6 +934,32 @@ function norm(s){
   if(raw.replace(/\s+/g,'')==='yefmoc') return 'comfey';
   return raw.replace(/\s+/g,' ');
 }
+
+const PREP_POISON_TYPES = new Set(['Poison']);
+function prepIsPoisonSpecies(species){
+  const types=normalizedTypes(typeMapForItemSpecies(species));
+  return types.some(t=>PREP_POISON_TYPES.has(String(t)));
+}
+function typeMapForItemSpecies(species){
+  const key=canonicalSpecies(species);
+  try{
+    if(typeof getPokemonTypes==='function') return getPokemonTypes(key)||[];
+    if(typeof window!=='undefined' && window.POKEMON_TYPES) return window.POKEMON_TYPES[key]||[];
+  }catch(e){}
+  const n=norm(key);
+  const poisonBases=new Set(['bulbasaur','ivysaur','venusaur','weedle','kakuna','beedrill','ekans','arbok','nidoranf','nidorina','nidoqueen','nidoranm','nidorino','nidoking','zubat','golbat','crobat','oddish','gloom','vileplume','tentacool','tentacruel','grimer','muk','koffing','weezing','gastly','haunter','gengar','spinarak','ariados','qwilfish','dustox','roselia','swalot','gulpin','seviper','stunky','skuntank','croagunk','toxicroak','skorupi','drapion','trubbish','garbodor','foongus','amoonguss','venipede','whirlipede','scolipede','skrelp','dragalge','mareanie','toxapex','salandit','salazzle','poipole','naganadel','stakataka','eternatus','gimmighoul','glimmet','glimmora','varoom','revavroom','clodsire','ironmoth','pecharunt']);
+  return poisonBases.has(n)?['Poison']:[];
+}
+function sanitizePrepItems(species, source){
+  const out={};
+  for(const [item,count] of Object.entries(source||{})){
+    const k=String(item||'').trim();
+    if(!k || Number(count||0)<=0) continue;
+    if(k.toLowerCase()==='black sludge' && !prepIsPoisonSpecies(species)) continue;
+    out[k]=1;
+  }
+  return out;
+}
 function teamKey(s){return norm(s).replace(/[^a-z0-9]/g,'')}
 function sameTeam(a,b){return teamKey(a)===teamKey(b)}
 function teamFor(u){const raw=String(u||'').trim();const k=raw.toLowerCase();return STATE.teamMap[k]||raw||'Unknown'}
@@ -982,25 +1008,33 @@ function resolveReplaySpecies(raw, rosterSpecies){
 function monsForSide(r,side,preferredRoster=[]){
   const out={};
   const replayRoster=(r.teamRoster?.[side]||[]).map(rosterMonName).filter(Boolean);
-  const rosterSpecies=(preferredRoster.length?preferredRoster:replayRoster).map(rosterMonName).map(canonicalSpecies).filter(Boolean);
+  const replaySpecies=replayRoster.map(canonicalSpecies).filter(Boolean);
+  const resolutionRoster=(preferredRoster.length?preferredRoster:replayRoster).map(rosterMonName).map(canonicalSpecies).filter(Boolean);
   for(const m of Object.values(r.mons||{})){
     if(String(m?.side||'').toLowerCase()!==side || !m.species)continue;
-    const species=resolveReplaySpecies(m.species,rosterSpecies);
+    const species=resolveReplaySpecies(m.species,resolutionRoster);
     const k=norm(species);
-    if(!out[k])out[k]={...m,species,_fromReplay:true};
+    if(!out[k])out[k]={...m,species,_fromReplay:true,items:sanitizePrepItems(species,m.items),confirmedItems:sanitizePrepItems(species,m.confirmedItems),inferredItems:sanitizePrepItems(species,m.inferredItems)};
     else{
       const x=out[k];
       x.appearances=(Number(x.appearances)||0)+(Number(m.appearances)||0);
-      x.kills=(Number(x.kills)||0)+(Number(m.kills)||0);
-      x.deaths=(Number(x.deaths)||0)+(Number(m.deaths)||0);
-      x.damageDealt=(Number(x.damageDealt)||0)+(Number(m.damageDealt)||0);
-      x.damageTaken=(Number(x.damageTaken)||0)+(Number(m.damageTaken)||0);
-      x.moves={...(x.moves||{}),...(m.moves||{})};
+      x.kills=(Number(x.kills)||0)+(Number(m.kills||0));
+      x.deaths=(Number(x.deaths)||0)+(Number(m.deaths||0));
+      x.damageDealt=(Number(x.damageDealt)||0)+(Number(m.damageDealt||0));
+      x.damageTaken=(Number(x.damageTaken)||0)+(Number(m.damageTaken||0));
+      x.moves={...(x.moves||{})}; for(const [mv,c] of Object.entries(m.moves||{})) x.moves[mv]=(x.moves[mv]||0)+Number(c||0);
+      x.items={...(x.items||{}), ...sanitizePrepItems(species, m.items)};
+      x.confirmedItems={...(x.confirmedItems||{}), ...sanitizePrepItems(species, m.confirmedItems)};
+      x.inferredItems={...(x.inferredItems||{}), ...sanitizePrepItems(species, m.inferredItems)};
+      x.leads=(Number(x.leads)||0)+Number(m.leads||0); x.sentOut=(Number(x.sentOut)||0)+Number(m.sentOut||0);
     }
   }
-  for(const sp of rosterSpecies){
+  // A submitted team member is an appearance even when there was no switch-in
+  // event. This is the sitewide definition used by Match Prep and Stats.
+  for(const sp of replaySpecies){
     const k=norm(sp);
-    if(!out[k])out[k]={species:sp,appearances:0,kills:0,deaths:0,damageDealt:0,damageTaken:0,moves:{},_fromReplay:false};
+    if(!out[k])out[k]={species:sp,appearances:1,kills:0,deaths:0,damageDealt:0,damageTaken:0,moves:{},items:{},leads:0,sentOut:0,_fromReplay:true};
+    else out[k].appearances=1;
   }
   return Object.values(out);
 }
@@ -1108,7 +1142,7 @@ function aggregate(team){
   // the current roster even when a Pokémon has not appeared in a processed replay.
   for(const mon of currentRoster){
     const species=canonicalSpecies(rosterMonName(mon)); const k=norm(species);
-    if(species && !mons[k]) mons[k]={species,appearances:0,kills:0,deaths:0,dealt:0,taken:0,replays:new Set(),gameSets:[],weeks:new Set()};
+    if(species && !mons[k]) mons[k]={species,appearances:0,kills:0,deaths:0,dealt:0,taken:0,replays:new Set(),gameSets:[],weeks:new Set(),items:{},confirmedItems:{},inferredItems:{},itemEvidence:{}};
   }
   for(const r of games){
     const side=sideForTeam(r,team);if(!side)continue;
@@ -1120,15 +1154,21 @@ function aggregate(team){
       // appearance or replay participation unless it exists in r.mons.
       if(m._fromReplay!==true) continue;
       const k=norm(m.species);
-      if(!mons[k])mons[k]={species:m.species,appearances:0,kills:0,deaths:0,dealt:0,taken:0,replays:new Set(),gameSets:[],weeks:new Set()};
+      if(!mons[k])mons[k]={species:m.species,appearances:0,kills:0,deaths:0,dealt:0,taken:0,replays:new Set(),gameSets:[],weeks:new Set(),items:{},confirmedItems:{},inferredItems:{},itemEvidence:{}};
       const a=mons[k];
+      // Sitewide appearance semantics: m.appearances means the Pokémon was
+      // brought in the submitted team for this replay, not merely sent onto
+      // the field. Count it once per replay.
       a.appearances+=Number(m.appearances||0)||1;a.kills+=Number(m.kills||0);a.deaths+=Number(m.deaths||0);
+      a.leads=(Number(a.leads)||0)+Number(m.leads||0);
+      a.sentOut=(Number(a.sentOut)||0)+Number(m.sentOut||0);
       a.dealt+=Number(m.damageDealt||0);a.taken+=Number(m.damageTaken||0);a.replays.add(r.id);const replayWeek=String(r.week??r.round??r.roundNumber??'').trim();if(replayWeek && Number(m.appearances||0)>0)a.weeks.add(replayWeek);
-      const moves=Object.keys(m.moves||{}).filter(Boolean);
-      a.gameSets.push({
-        week: replayWeek,
-        moves
-      });
+      for(const [item] of Object.entries(sanitizePrepItems(m.species,m.items))) a.items[item]=(a.items[item]||0)+1;
+      for(const [item] of Object.entries(sanitizePrepItems(m.species,m.confirmedItems))) a.confirmedItems[item]=(a.confirmedItems[item]||0)+1;
+      for(const [item] of Object.entries(sanitizePrepItems(m.species,m.inferredItems))) a.inferredItems[item]=(a.inferredItems[item]||0)+1;
+      for(const [item,evidence] of Object.entries(m.itemEvidence||{})){a.itemEvidence[item] ||= [];for(const ev of (evidence||[]))if(!a.itemEvidence[item].includes(ev))a.itemEvidence[item].push(ev);}
+      const moves={...(m.moves||{})};
+      a.gameSets.push({replayId:String(r.id||''), week: replayWeek, moves, items:sanitizePrepItems(m.species,m.items), confirmedItems:sanitizePrepItems(m.species,m.confirmedItems), inferredItems:sanitizePrepItems(m.species,m.inferredItems), sentOut:Number(m.sentOut||0), led:Number(m.leads||0)>0 ? 1 : 0});
       seen.push(k)
     }
     seen.sort();for(let i=0;i<seen.length;i++)for(let j=i+1;j<seen.length;j++){const key=seen[i]+'|'+seen[j];pairCounts[key]=(pairCounts[key]||0)+1}
@@ -1524,6 +1564,11 @@ async function franchiseMons(team){
       x.deaths=(Number(x.deaths)||0)+(Number(m.deaths)||0);
       x.dealt=(Number(x.dealt)||0)+(Number(m.dealt)||0);
       x.taken=(Number(x.taken)||0)+(Number(m.taken)||0);
+      x.leads=(Number(x.leads)||0)+(Number(m.leads)||0);
+      x.moves={...(x.moves||{})}; for(const [mv,c] of Object.entries(m.moves||{}))x.moves[mv]=(x.moves[mv]||0)+Number(c||0);
+      x.items={...(x.items||{})}; for(const [it,c] of Object.entries(m.items||{}))x.items[it]=(x.items[it]||0)+Number(c||0);
+      x.confirmedItems={...(x.confirmedItems||{})}; for(const [it,c] of Object.entries(m.confirmedItems||{}))x.confirmedItems[it]=Math.max(Number(x.confirmedItems[it]||0),Number(c||0));
+      x.inferredItems={...(x.inferredItems||{})}; for(const [it,c] of Object.entries(m.inferredItems||{}))x.inferredItems[it]=Math.max(Number(x.inferredItems[it]||0),Number(c||0));
       if(m.replays instanceof Set)m.replays.forEach(r=>x.replays.add(r));
       if(Array.isArray(m.gameSets))x.gameSets.push(...m.gameSets);
     }
@@ -1819,7 +1864,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
   const observedFor=m=>observedMoves(m);
   const rolesFor=m=>inferRoles(m);
   const opponentAggregate=aggregate(opponent);
-  const usageFor=m=>opponentAggregate.mons[norm(m.species)] || opponentAggregate.mons[m.species] || {appearances:0,kills:0,deaths:0,dealt:0,taken:0,replays:new Set(),gameSets:[],weeks:new Set()};
+  const usageFor=m=>opponentAggregate.mons[norm(m.species)] || opponentAggregate.mons[m.species] || {appearances:0,kills:0,deaths:0,dealt:0,taken:0,replays:new Set(),gameSets:[],weeks:new Set(),items:{},confirmedItems:{},inferredItems:{},itemEvidence:{}};
 
   // -------- Opponent Team Overview --------
   // Show the concrete matchup instead of subjective labels: which of YOUR
@@ -1854,20 +1899,90 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
     </div>
     <div class="prep-card-section"><span>Type effectiveness</span>${group('Weaknesses',weaknesses)}${group('Resistances',resistances)}${group('Immunities',immunities)}</div>
     <div class="prep-card-section"><span>Base stats</span><div class="prep-stat-grid">${[['hp','HP'],['attack','Atk'],['defense','Def'],['special-attack','SpA'],['special-defense','SpD'],['speed','Spe']].map(([k,l])=>`<span class="prep-chip">${l}: ${baseStats[k]??'—'}</span>`).join('')}</div></div>`;
-    const usageHtml=`<div class="prep-usage-grid"><div><span>Appearances</span><strong>${usage.appearances||0}</strong></div><div><span>KOs</span><strong>${usage.kills||0}</strong></div><div><span>Deaths</span><strong>${usage.deaths||0}</strong></div><div><span>Damage dealt</span><strong>${Number(usage.dealt||0).toFixed(0)}</strong></div><div><span>Damage taken</span><strong>${Number(usage.taken||0).toFixed(0)}</strong></div><div><span>Sets recorded</span><strong>${(usage.gameSets||[]).filter(g=>g.moves?.length).length}</strong></div></div>`;
+    const usageHtml=`<div class="prep-usage-grid"><div><span>Appearances</span><strong>${usage.appearances||0}</strong></div><div><span>KOs</span><strong>${usage.kills||0}</strong></div><div><span>Deaths</span><strong>${usage.deaths||0}</strong></div><div><span>Damage dealt</span><strong>${Number(usage.dealt||0).toFixed(0)}</strong></div><div><span>Damage taken</span><strong>${Number(usage.taken||0).toFixed(0)}</strong></div></div>`;
     const broughtInWeeks=[...(usage.weeks||[])].sort((a,b)=>{const na=Number(a),nb=Number(b);if(Number.isFinite(na)&&Number.isFinite(nb))return na-nb;return String(a).localeCompare(String(b),undefined,{numeric:true,sensitivity:'base'});});
     const weekLabel=w=>/^\d+$/.test(String(w))?`Week ${w}`:String(w);
-    const weekMoves=new Map();
-    for(const set of (usage.gameSets||[])){const wk=String(set.week??'').trim();if(!wk)continue;const list=weekMoves.get(wk)||new Set();(set.moves||[]).filter(Boolean).forEach(move=>list.add(move));weekMoves.set(wk,list);}
+    const weekStats=new Map();
+    for(const set of (usage.gameSets||[])){const wk=String(set.week??'').trim();if(!wk)continue;const cur=weekStats.get(wk)||{moves:{},items:{},led:0,sentOut:0};for(const [move,count] of Object.entries(set.moves||{}))cur.moves[move]=(cur.moves[move]||0)+Number(count||0);for(const [item,count] of Object.entries(set.items||{}))cur.items[item]=(cur.items[item]||0)+Number(count||0);for(const [item,count] of Object.entries(set.confirmedItems||{}))cur.items[item]=Math.max(Number(cur.items[item]||0),Number(count||0));for(const [item,count] of Object.entries(set.inferredItems||{}))cur.items[item]=Math.max(Number(cur.items[item]||0),Number(count||0));cur.led+=Number(set.led||0);cur.sentOut+=Number(set.sentOut||0);weekStats.set(wk,cur);}
+    // Season-level usage is derived from every recorded game set. Older
+    // aggregate records may not have a top-level `moves` object even though
+    // the weekly gameSets do, so never let the season overview appear empty
+    // when the week-by-week data is present.
+    const seasonMoves={};
+    const seasonMovesBrought={};
+    const seasonItems={};
+    const seasonItemEvidence={};
+    // Item usage is a per-replay fact. A single replay may contain many
+    // recovery/item events, but it can only contribute one occurrence of a
+    // held item. Conversely, the same Pokémon can bring Leftovers in many
+    // different replays, and each distinct replay must add another occurrence.
+    // Deduplicate by replay id so duplicate parser rows cannot inflate counts.
+    const uniqueGameSets=new Map();
+    for(const set of (usage.gameSets||[])){
+      const rid=String(set.replayId||'').trim();
+      const key=rid || `week:${String(set.week??'').trim()}:idx:${uniqueGameSets.size}`;
+      if(!uniqueGameSets.has(key)) uniqueGameSets.set(key,set);
+      else {
+        const existing=uniqueGameSets.get(key);
+        existing.items={...(existing.items||{}),...(set.items||{})};
+        existing.confirmedItems={...(existing.confirmedItems||{}),...(set.confirmedItems||{})};
+        existing.inferredItems={...(existing.inferredItems||{}),...(set.inferredItems||{})};
+        existing.itemEvidence={...(existing.itemEvidence||{}),...(set.itemEvidence||{})};
+        existing.moves={...(existing.moves||{}),...(set.moves||{})};
+      }
+    }
+    for(const set of uniqueGameSets.values()){
+      const seenMoves=new Set();
+      for(const [move,count] of Object.entries(set.moves||{})){const k=String(move).trim();if(k){seasonMoves[k]=(seasonMoves[k]||0)+Number(count||0);seenMoves.add(k);}}
+      // Replay logs do not expose the full four-move team sheet. A move is
+      // therefore counted as "brought" when it is observed on that week's
+      // battle set; each replay contributes at most one bring for a move.
+      for(const k of seenMoves) seasonMovesBrought[k]=(seasonMovesBrought[k]||0)+1;
+      const confirmed=new Set(Object.keys(set.confirmedItems||{}));
+      const inferred=new Set(Object.keys(set.inferredItems||{}));
+      const items=new Set([...Object.keys(set.items||{}),...confirmed,...inferred]);
+      for(const item of items){
+        const k=String(item).trim();
+        if(!k) continue;
+        seasonItems[k]=(seasonItems[k]||0)+1;
+        if(confirmed.has(item)) seasonItemEvidence[k]='confirmed';
+        else if(seasonItemEvidence[k] !== 'confirmed' && inferred.has(item)) seasonItemEvidence[k]='inferred';
+      }
+    }
+    // Do not merge the old top-level item counters here. They are legacy
+    // aggregate/event counts and can no longer represent the number of
+    // distinct replays. gameSets is the authoritative per-replay source.
+    for(const [move,count] of Object.entries(usage.moves||{})){const k=String(move).trim();if(k&&!seasonMoves[k])seasonMoves[k]=Number(count||0);}
+    for(const [item,count] of Object.entries(usage.items||{})){const k=String(item).trim();if(k&&!seasonItems[k])seasonItems[k]=Number(count||0);}
+    const sortedMoveBroughtEntries=Object.entries(seasonMovesBrought).sort((a,b)=>Number(b[1])-Number(a[1])||a[0].localeCompare(b[0]));
+    const sortedMoveEntries=Object.entries(seasonMoves).sort((a,b)=>Number(b[1])-Number(a[1])||a[0].localeCompare(b[0]));
+    const sortedItemEntries=Object.entries(seasonItems).sort((a,b)=>Number(b[1])-Number(a[1])||a[0].localeCompare(b[0]));
+    const sentOutTotal=[...(usage.gameSets||[])].reduce((n,g)=>n+Number(g.sentOut||0),0);
+    const ledFromGameSets=[...(usage.gameSets||[])].reduce((n,g)=>n+(Number(g.led)||0),0);
+    const ledTotal=Math.min(ledFromGameSets>0?ledFromGameSets:Number(usage.leads||0),sentOutTotal);
+    const broughtTotal=Number(usage.appearances||0);
+    const totalMoveUses=Object.values(seasonMoves).reduce((a,b)=>a+Number(b||0),0);
+    const totalItemUses=Object.values(seasonItems).reduce((a,b)=>a+Number(b||0),0);
+    const pct=(count,total)=>total?`${Math.round((Number(count)||0)/total*100)}%`:'0%';
+    const usageRows=(entries,label,totalOverride=null)=>entries.length?entries.map(([name,count])=>{const total=totalOverride!=null?Number(totalOverride)||0:(label==='moves'?totalMoveUses:totalItemUses);const evidence=label==='items'&&seasonItemEvidence[name]==='inferred'?'<small class="prep-analysis-inferred">Inferred</small>':'';return `<div class="prep-analysis-row"><span>${esc(name)}${evidence}</span><div class="prep-analysis-row-value"><strong>${Number(count)||0}</strong><small>${pct(count,total)}</small></div></div>`;}).join(''):`<div class="small">No recorded ${label.toLowerCase()}.</div>`;
+    const weekSections=broughtInWeeks.length?broughtInWeeks.map((w,i)=>{const st=weekStats.get(String(w))||{moves:{},items:{},led:0,sentOut:0};const ms=Object.entries(st.moves).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));const its=Object.entries(st.items).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));const led=Number(st.led||0)>0&&Number(st.sentOut||0)>0;const sent=Number(st.sentOut||0)>0;const status=led?'Led · Sent out':sent?'Sent out':'Brought only';const moveUses=ms.reduce((a,x)=>a+Number(x[1]||0),0);const itemUses=its.reduce((a,x)=>a+Number(x[1]||0),0);return `<article class="prep-analysis-week" data-week-pane="${esc(w)}" ${i?'hidden':''}><div class="prep-analysis-week-head"><div><strong>${esc(weekLabel(w))}</strong><small>${status}</small></div><span class="prep-week-status-dot ${led?'is-led':sent?'is-sent':'is-brought'}"></span></div><div class="prep-analysis-week-stats"><span><b>${moveUses}</b> move uses</span><span><b>${itemUses}</b> item records</span></div><div class="prep-analysis-columns"><div><div class="prep-analysis-subhead">Moves clicked</div>${usageRows(ms,'moves',moveUses)}</div><div><div class="prep-analysis-subhead">Items held</div>${usageRows(its,'items',itemUses)}</div></div></article>`;}).join(''):'<div class="small">No recorded battle weeks for this Pokémon.</div>';
+    const weekButtons=broughtInWeeks.map((w,i)=>`<button type="button" class="prep-analysis-week-btn${i?'':' active'}" data-prep-week-btn="${esc(w)}" aria-pressed="${i?'false':'true'}">${esc(weekLabel(w))}</button>`).join('');
+    const matchupItems=goodInto.length?goodInto.map(x=>`<span class="prep-chip">${esc(displaySpecies(x))}</span>`).join(''):'<span class="small">No clear type advantage</span>';
     const analysisHtml=`<div class="matchprep-analysis-overview">
-      <div class="prep-card-section prep-analysis-week-card"><span>Brought in on</span><div class="prep-week-summary">${broughtInWeeks.length?broughtInWeeks.map(w=>{const moves=[...(weekMoves.get(String(w))||[])];return `<button type="button" class="prep-week-pill" data-prep-week="${esc(String(w))}" data-moves-json="${esc(JSON.stringify(moves))}"><span class="prep-week-dot"></span>${esc(weekLabel(w))}<span class="prep-week-chevron">›</span></button>`;}).join(''):'<span class="small">No recorded battle week for this Pokémon.</span>'}</div><div class="prep-week-moves" hidden></div><small class="prep-analysis-note">${broughtInWeeks.length?'Click a week to see the moves used that week.':'This Pokémon has not appeared in a recorded replay yet.'}</small></div>
-      <div class="prep-card-section"><span>Strong into your Pokémon</span><div class="prep-chip-row">${goodInto.length?goodInto.map(x=>`<span class="prep-chip">${esc(displaySpecies(x))}</span>`).join(''):'<span class="small">No clear type advantage</span>'}</div></div>
-      <div class="prep-card-section"><span>Observed moves</span><div class="prep-chip-row">${moves.length?moves.map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">No recorded moves</span>'}</div></div>
-      <div class="prep-card-section"><span>Likely roles</span><div class="prep-chip-row">${roles.length?roles.map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">Unclear</span>'}</div></div>
+      <section class="prep-analysis-season">
+        <div class="prep-analysis-section-head"><div><span class="prep-analysis-eyebrow">Season overview</span><h3>How ${esc(displaySpecies(m))} has been used</h3><p>All recorded battles for this season. <strong>Brought</strong> means included in the submitted team; <strong>Sent Out</strong> means it actually entered battle.</p></div></div>
+        <div class="prep-analysis-summary-grid"><div class="prep-analysis-stat"><span>Brought</span><strong>${broughtTotal}</strong><small>submitted teams</small></div><div class="prep-analysis-stat"><span>Led</span><strong>${ledTotal}</strong><small>battle starts</small></div><div class="prep-analysis-stat"><span>Sent out</span><strong>${sentOutTotal}</strong><small>field appearances</small></div></div>
+        <div class="prep-analysis-overview-grid">
+          <section class="prep-analysis-table-card"><div class="prep-analysis-card-head"><div><h4>Moves brought</h4><small>Number of battle sets where each move was observed. Replay logs do not expose unclicked moves.</small></div><strong>${Object.values(seasonMovesBrought).reduce((a,b)=>a+Number(b||0),0)}</strong></div><div class="prep-analysis-list">${usageRows(sortedMoveBroughtEntries,'moves',broughtInWeeks.length||1)}</div></section>
+          <section class="prep-analysis-table-card"><div class="prep-analysis-card-head"><div><h4>Items held</h4><small>Items actually recorded on this Pokémon</small></div><strong>${totalItemUses===1&&Object.keys(usage.items||{}).length===0?0:totalItemUses}</strong></div><div class="prep-analysis-list">${usageRows(sortedItemEntries,'items')}</div></section>
+        </div>
+        <div class="prep-analysis-extra-grid"><div class="prep-analysis-mini-card"><span>Strong into ${opponent}</span><div class="prep-chip-row">${matchupItems}</div></div><div class="prep-analysis-mini-card"><span>Likely roles</span><div class="prep-chip-row">${roles.length?roles.map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">Unclear</span>'}</div></div></div>
+      </section>
+      <section class="prep-analysis-weeks-section"><div class="prep-analysis-section-head"><div><span class="prep-analysis-eyebrow">Weekly breakdown</span><h3>Usage by week</h3><p>Select a week to view its usage without scrolling through the entire season.</p></div><div class="prep-analysis-week-buttons" role="group" aria-label="Select week">${weekButtons}</div></div><div class="prep-analysis-weeks">${weekSections}</div></section>
     </div>`;
     const threat=goodInto.length?`Strong into ${goodInto.length} Pokémon`:'No clear type advantage';
     const tc=goodInto.length?'matchup-bad':'matchup-neutral';
-    return `<article class="prep-opponent-card prep-opponent-popout" data-prep-popout="${esc(m.species)}" data-prep-team="opponent"><button type="button" class="prep-popout-trigger legacy-mon-card"><span class="mon-head">${sprite(m.species,'prep-sprite')}<span><span class="mon-name prep-legacy-name"><strong>${esc(displaySpecies(m))}</strong><span class="prep-inline-types">${effTypes.map(t=>typePill(t)).join('')}</span></span><span class="muted">${usage.replays?.size||0} replay${(usage.replays?.size||0)===1?'':'s'} · ${usage.appearances||0} appearances</span></span></span><span class="chips prep-legacy-chips"><span class="chip"><b>${usage.kills||0}</b> K</span><span class="chip"><b>${usage.deaths||0}</b> D</span><span class="chip"><b>${Number(usage.dealt||0).toFixed(0)}</b> dmg</span><span class="chip"><b>${(usage.gameSets||[]).filter(g=>g.moves?.length).length}</b> sets recorded</span></span><span class="small prep-legacy-threat">${esc(threat)}</span></button><div class="prep-popout-data" hidden data-usage="${esc(usageHtml)}" data-scouting="${esc(scoutingHtml)}" data-analysis="${esc(analysisHtml)}" data-appearances="${usage.appearances||0}" data-kills="${usage.kills||0}" data-deaths="${usage.deaths||0}" data-dealt="${Number(usage.dealt||0).toFixed(0)}" data-taken="${Number(usage.taken||0).toFixed(0)}"></div></article>`;
+    return `<article class="prep-opponent-card prep-opponent-popout" data-prep-popout="${esc(m.species)}" data-prep-team="opponent"><button type="button" class="prep-popout-trigger legacy-mon-card"><span class="mon-head">${sprite(m.species,'prep-sprite')}<span><span class="mon-name prep-legacy-name"><strong>${esc(displaySpecies(m))}</strong><span class="prep-inline-types">${effTypes.map(t=>typePill(t)).join('')}</span></span><span class="muted">${usage.replays?.size||0} replay${(usage.replays?.size||0)===1?'':'s'} · ${usage.appearances||0} appearances</span></span></span><span class="chips prep-legacy-chips"><span class="chip"><b>${usage.kills||0}</b> K</span><span class="chip"><b>${usage.deaths||0}</b> D</span><span class="chip"><b>${Number(usage.dealt||0).toFixed(0)}</b> dmg</span></span><span class="small prep-legacy-threat">${esc(threat)}</span></button><div class="prep-popout-data" hidden data-usage="${esc(usageHtml)}" data-scouting="${esc(scoutingHtml)}" data-analysis="${esc(analysisHtml)}" data-appearances="${usage.appearances||0}" data-kills="${usage.kills||0}" data-deaths="${usage.deaths||0}" data-dealt="${Number(usage.dealt||0).toFixed(0)}" data-taken="${Number(usage.taken||0).toFixed(0)}"></div></article>`;
   }))).join('');
 
   // -------- Your Team Overview --------
@@ -1880,7 +1995,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
     return mult!==null && mult>=2;
   });
   const yourAggregate=aggregate(yourTeam);
-  const yourUsageFor=m=>yourAggregate.mons[norm(m.species)] || yourAggregate.mons[m.species] || {appearances:0,kills:0,deaths:0,dealt:0,taken:0,replays:new Set(),gameSets:[],weeks:new Set()};
+  const yourUsageFor=m=>yourAggregate.mons[norm(m.species)] || yourAggregate.mons[m.species] || {appearances:0,kills:0,deaths:0,dealt:0,taken:0,replays:new Set(),gameSets:[],weeks:new Set(),items:{},confirmedItems:{},inferredItems:{},itemEvidence:{}};
   const yourCards=(await Promise.all(your.map(async m=>{
     const info=yourRoster.get(norm(m.species));
     const strongInto=strongIntoFor(m);
@@ -1906,20 +2021,83 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
     </div>
     <div class="prep-card-section"><span>Type effectiveness</span>${group('Weaknesses',weaknesses)}${group('Resistances',resistances)}${group('Immunities',immunities)}</div>
     <div class="prep-card-section"><span>Base stats</span><div class="prep-stat-grid">${[['hp','HP'],['attack','Atk'],['defense','Def'],['special-attack','SpA'],['special-defense','SpD'],['speed','Spe']].map(([k,l])=>`<span class="prep-chip">${l}: ${baseStats[k]??'—'}</span>`).join('')}</div></div>`;
-    const usageHtml=`<div class="prep-usage-grid"><div><span>Appearances</span><strong>${usage.appearances||0}</strong></div><div><span>KOs</span><strong>${usage.kills||0}</strong></div><div><span>Deaths</span><strong>${usage.deaths||0}</strong></div><div><span>Damage dealt</span><strong>${Number(usage.dealt||0).toFixed(0)}</strong></div><div><span>Damage taken</span><strong>${Number(usage.taken||0).toFixed(0)}</strong></div><div><span>Sets recorded</span><strong>${(usage.gameSets||[]).filter(g=>g.moves?.length).length}</strong></div></div>`;
+    const usageHtml=`<div class="prep-usage-grid"><div><span>Appearances</span><strong>${usage.appearances||0}</strong></div><div><span>KOs</span><strong>${usage.kills||0}</strong></div><div><span>Deaths</span><strong>${usage.deaths||0}</strong></div><div><span>Damage dealt</span><strong>${Number(usage.dealt||0).toFixed(0)}</strong></div><div><span>Damage taken</span><strong>${Number(usage.taken||0).toFixed(0)}</strong></div></div>`;
     const broughtInWeeks=[...(usage.weeks||[])].sort((a,b)=>{const na=Number(a),nb=Number(b);if(Number.isFinite(na)&&Number.isFinite(nb))return na-nb;return String(a).localeCompare(String(b),undefined,{numeric:true,sensitivity:'base'});});
     const weekLabel=w=>/^\d+$/.test(String(w))?`Week ${w}`:String(w);
-    const weekMoves=new Map();
-    for(const set of (usage.gameSets||[])){const wk=String(set.week??'').trim();if(!wk)continue;const list=weekMoves.get(wk)||new Set();(set.moves||[]).filter(Boolean).forEach(move=>list.add(move));weekMoves.set(wk,list);}
+    const weekStats=new Map();
+    for(const set of (usage.gameSets||[])){const wk=String(set.week??'').trim();if(!wk)continue;const cur=weekStats.get(wk)||{moves:{},items:{},led:0,sentOut:0};for(const [move,count] of Object.entries(set.moves||{}))cur.moves[move]=(cur.moves[move]||0)+Number(count||0);for(const [item,count] of Object.entries(set.items||{}))cur.items[item]=(cur.items[item]||0)+Number(count||0);for(const [item,count] of Object.entries(set.confirmedItems||{}))cur.items[item]=Math.max(Number(cur.items[item]||0),Number(count||0));for(const [item,count] of Object.entries(set.inferredItems||{}))cur.items[item]=Math.max(Number(cur.items[item]||0),Number(count||0));cur.led+=Number(set.led||0);cur.sentOut+=Number(set.sentOut||0);weekStats.set(wk,cur);}
+    // Season-level usage is derived from every recorded game set. Older
+    // aggregate records may not have a top-level `moves` object even though
+    // the weekly gameSets do, so never let the season overview appear empty
+    // when the week-by-week data is present.
+    const seasonMoves={};
+    const seasonMovesBrought={};
+    const seasonItems={};
+    const seasonItemEvidence={};
+    // Every gameSet represents one replay. Item counts are therefore summed
+    // across distinct replays, not maxed against the first replay. A replay may
+    // contain many item-related events, but the parser normalizes each game's
+    // item maps to 0/1. If the same replay is present twice, count it only once.
+    const seenReplayIds = new Set();
+    for(const set of (usage.gameSets||[])){
+      const replayId = String(set.replayId ?? '').trim();
+      if(replayId){
+        if(seenReplayIds.has(replayId)) continue;
+        seenReplayIds.add(replayId);
+      }
+      const seenMoves=new Set();
+      for(const [move,count] of Object.entries(set.moves||{})){const k=String(move).trim();if(k){seasonMoves[k]=(seasonMoves[k]||0)+Number(count||0);seenMoves.add(k);}}
+      // Replay logs do not expose the full four-move team sheet. A move is
+      // therefore counted as "brought" when it is observed on that week's
+      // battle set; each set contributes at most one bring for a move.
+      for(const k of seenMoves) seasonMovesBrought[k]=(seasonMovesBrought[k]||0)+1;
+
+      const addItemOnce=(item)=>{
+        const k=String(item||'').trim();
+        if(!k) return;
+        seasonItems[k]=(seasonItems[k]||0)+1;
+      };
+      for(const item of Object.keys(set.items||{})) addItemOnce(item);
+      for(const item of Object.keys(set.confirmedItems||{})){
+        addItemOnce(item);
+        seasonItemEvidence[item]='confirmed';
+      }
+      for(const item of Object.keys(set.inferredItems||{})){
+        addItemOnce(item);
+        if(seasonItemEvidence[item] !== 'confirmed') seasonItemEvidence[item]='inferred';
+      }
+    }
+    for(const [move,count] of Object.entries(usage.moves||{})){const k=String(move).trim();if(k&&!seasonMoves[k])seasonMoves[k]=Number(count||0);}
+    for(const [item,count] of Object.entries(usage.items||{})){const k=String(item).trim();if(k&&!seasonItems[k])seasonItems[k]=Number(count||0);}
+    const sortedMoveBroughtEntries=Object.entries(seasonMovesBrought).sort((a,b)=>Number(b[1])-Number(a[1])||a[0].localeCompare(b[0]));
+    const sortedMoveEntries=Object.entries(seasonMoves).sort((a,b)=>Number(b[1])-Number(a[1])||a[0].localeCompare(b[0]));
+    const sortedItemEntries=Object.entries(seasonItems).sort((a,b)=>Number(b[1])-Number(a[1])||a[0].localeCompare(b[0]));
+    const sentOutTotal=[...(usage.gameSets||[])].reduce((n,g)=>n+Number(g.sentOut||0),0);
+    const ledFromGameSets=[...(usage.gameSets||[])].reduce((n,g)=>n+(Number(g.led)||0),0);
+    const ledTotal=Math.min(ledFromGameSets>0?ledFromGameSets:Number(usage.leads||0),sentOutTotal);
+    const broughtTotal=Number(usage.appearances||0);
+    const totalMoveUses=Object.values(seasonMoves).reduce((a,b)=>a+Number(b||0),0);
+    const totalItemUses=Object.values(seasonItems).reduce((a,b)=>a+Number(b||0),0);
+    const pct=(count,total)=>total?`${Math.round((Number(count)||0)/total*100)}%`:'0%';
+    const usageRows=(entries,label,totalOverride=null)=>entries.length?entries.map(([name,count])=>{const total=totalOverride!=null?Number(totalOverride)||0:(label==='moves'?totalMoveUses:totalItemUses);const evidence=label==='items'&&seasonItemEvidence[name]==='inferred'?'<small class="prep-analysis-inferred">Inferred</small>':'';return `<div class="prep-analysis-row"><span>${esc(name)}${evidence}</span><div class="prep-analysis-row-value"><strong>${Number(count)||0}</strong><small>${pct(count,total)}</small></div></div>`;}).join(''):`<div class="small">No recorded ${label.toLowerCase()}.</div>`;
+    const weekSections=broughtInWeeks.length?broughtInWeeks.map((w,i)=>{const st=weekStats.get(String(w))||{moves:{},items:{},led:0,sentOut:0};const ms=Object.entries(st.moves).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));const its=Object.entries(st.items).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));const led=Number(st.led||0)>0&&Number(st.sentOut||0)>0;const sent=Number(st.sentOut||0)>0;const status=led?'Led · Sent out':sent?'Sent out':'Brought only';const moveUses=ms.reduce((a,x)=>a+Number(x[1]||0),0);const itemUses=its.reduce((a,x)=>a+Number(x[1]||0),0);return `<article class="prep-analysis-week" data-week-pane="${esc(w)}" ${i?'hidden':''}><div class="prep-analysis-week-head"><div><strong>${esc(weekLabel(w))}</strong><small>${status}</small></div><span class="prep-week-status-dot ${led?'is-led':sent?'is-sent':'is-brought'}"></span></div><div class="prep-analysis-week-stats"><span><b>${moveUses}</b> move uses</span><span><b>${itemUses}</b> item records</span></div><div class="prep-analysis-columns"><div><div class="prep-analysis-subhead">Moves clicked</div>${usageRows(ms,'moves',moveUses)}</div><div><div class="prep-analysis-subhead">Items held</div>${usageRows(its,'items',itemUses)}</div></div></article>`;}).join(''):'<div class="small">No recorded battle weeks for this Pokémon.</div>';
+    const weekButtons=broughtInWeeks.map((w,i)=>`<button type="button" class="prep-analysis-week-btn${i?'':' active'}" data-prep-week-btn="${esc(w)}" aria-pressed="${i?'false':'true'}">${esc(weekLabel(w))}</button>`).join('');
+    const matchupItems=strongInto.length?strongInto.map(x=>`<span class="prep-chip">${esc(displaySpecies(x))}</span>`).join(''):'<span class="small">No clear type advantage</span>';
     const analysisHtml=`<div class="matchprep-analysis-overview">
-      <div class="prep-card-section prep-analysis-week-card"><span>Brought in on</span><div class="prep-week-summary">${broughtInWeeks.length?broughtInWeeks.map(w=>{const moves=[...(weekMoves.get(String(w))||[])];return `<button type="button" class="prep-week-pill" data-prep-week="${esc(String(w))}" data-moves-json="${esc(JSON.stringify(moves))}"><span class="prep-week-dot"></span>${esc(weekLabel(w))}<span class="prep-week-chevron">›</span></button>`;}).join(''):'<span class="small">No recorded battle week for this Pokémon.</span>'}</div><div class="prep-week-moves" hidden></div><small class="prep-analysis-note">${broughtInWeeks.length?'Click a week to see the moves used that week.':'This Pokémon has not appeared in a recorded replay yet.'}</small></div>
-      <div class="prep-card-section"><span>Strong into opponent</span><div class="prep-chip-row">${strongInto.length?strongInto.map(x=>`<span class="prep-chip">${esc(displaySpecies(x))}</span>`).join(''):'<span class="small">No clear type advantage</span>'}</div></div>
-      <div class="prep-card-section"><span>Observed moves</span><div class="prep-chip-row">${moves.length?moves.map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">No recorded moves</span>'}</div></div>
-      <div class="prep-card-section"><span>Likely roles</span><div class="prep-chip-row">${roles.length?roles.map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">Unclear</span>'}</div></div>
+      <section class="prep-analysis-season">
+        <div class="prep-analysis-section-head"><div><span class="prep-analysis-eyebrow">Season overview</span><h3>How ${esc(displaySpecies(m))} has been used</h3><p>All recorded battles for this season. <strong>Brought</strong> means included in the submitted team; <strong>Sent Out</strong> means it actually entered battle.</p></div></div>
+        <div class="prep-analysis-summary-grid"><div class="prep-analysis-stat"><span>Brought</span><strong>${broughtTotal}</strong><small>submitted teams</small></div><div class="prep-analysis-stat"><span>Led</span><strong>${ledTotal}</strong><small>battle starts</small></div><div class="prep-analysis-stat"><span>Sent out</span><strong>${sentOutTotal}</strong><small>field appearances</small></div></div>
+        <div class="prep-analysis-overview-grid">
+          <section class="prep-analysis-table-card"><div class="prep-analysis-card-head"><div><h4>Moves brought</h4><small>Number of battle sets where each move was observed. Replay logs do not expose unclicked moves.</small></div><strong>${Object.values(seasonMovesBrought).reduce((a,b)=>a+Number(b||0),0)}</strong></div><div class="prep-analysis-list">${usageRows(sortedMoveBroughtEntries,'moves',broughtInWeeks.length||1)}</div></section>
+          <section class="prep-analysis-table-card"><div class="prep-analysis-card-head"><div><h4>Items held</h4><small>Items actually recorded on this Pokémon</small></div><strong>${totalItemUses===1&&Object.keys(usage.items||{}).length===0?0:totalItemUses}</strong></div><div class="prep-analysis-list">${usageRows(sortedItemEntries,'items')}</div></section>
+        </div>
+        <div class="prep-analysis-extra-grid"><div class="prep-analysis-mini-card"><span>Strong into ${opponent}</span><div class="prep-chip-row">${matchupItems}</div></div><div class="prep-analysis-mini-card"><span>Likely roles</span><div class="prep-chip-row">${roles.length?roles.map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">Unclear</span>'}</div></div></div>
+      </section>
+      <section class="prep-analysis-weeks-section"><div class="prep-analysis-section-head"><div><span class="prep-analysis-eyebrow">Weekly breakdown</span><h3>Usage by week</h3><p>Select a week to view its usage without scrolling through the entire season.</p></div><div class="prep-analysis-week-buttons" role="group" aria-label="Select week">${weekButtons}</div></div><div class="prep-analysis-weeks">${weekSections}</div></section>
     </div>`;
     const threat=strongInto.length?`Strong into ${strongInto.length} Pokémon`:'No clear type advantage';
     const tc=strongInto.length?'matchup-good':'matchup-neutral';
-    return `<article class="prep-opponent-card prep-opponent-popout" data-prep-popout="${esc(m.species)}" data-prep-team="your"><button type="button" class="prep-popout-trigger legacy-mon-card"><span class="mon-head">${sprite(m.species,'prep-sprite')}<span><span class="mon-name prep-legacy-name"><strong>${esc(displaySpecies(m))}</strong><span class="prep-inline-types">${effTypes.map(t=>typePill(t)).join('')}</span></span><span class="muted">${usage.replays?.size||0} replay${(usage.replays?.size||0)===1?'':'s'} · ${usage.appearances||0} appearances</span></span></span><span class="chips prep-legacy-chips"><span class="chip"><b>${usage.kills||0}</b> K</span><span class="chip"><b>${usage.deaths||0}</b> D</span><span class="chip"><b>${Number(usage.dealt||0).toFixed(0)}</b> dmg</span><span class="chip"><b>${(usage.gameSets||[]).filter(g=>g.moves?.length).length}</b> sets recorded</span></span><span class="small prep-legacy-threat">${esc(threat)}</span></button><div class="prep-popout-data" hidden data-usage="${esc(usageHtml)}" data-scouting="${esc(scoutingHtml)}" data-analysis="${esc(analysisHtml)}" data-appearances="${usage.appearances||0}" data-kills="${usage.kills||0}" data-deaths="${usage.deaths||0}" data-dealt="${Number(usage.dealt||0).toFixed(0)}" data-taken="${Number(usage.taken||0).toFixed(0)}"></div></article>`;
+    return `<article class="prep-opponent-card prep-opponent-popout" data-prep-popout="${esc(m.species)}" data-prep-team="your"><button type="button" class="prep-popout-trigger legacy-mon-card"><span class="mon-head">${sprite(m.species,'prep-sprite')}<span><span class="mon-name prep-legacy-name"><strong>${esc(displaySpecies(m))}</strong><span class="prep-inline-types">${effTypes.map(t=>typePill(t)).join('')}</span></span><span class="muted">${usage.replays?.size||0} replay${(usage.replays?.size||0)===1?'':'s'} · ${usage.appearances||0} appearances</span></span></span><span class="chips prep-legacy-chips"><span class="chip"><b>${usage.kills||0}</b> K</span><span class="chip"><b>${usage.deaths||0}</b> D</span><span class="chip"><b>${Number(usage.dealt||0).toFixed(0)}</b> dmg</span></span><span class="small prep-legacy-threat">${esc(threat)}</span></button><div class="prep-popout-data" hidden data-usage="${esc(usageHtml)}" data-scouting="${esc(scoutingHtml)}" data-analysis="${esc(analysisHtml)}" data-appearances="${usage.appearances||0}" data-kills="${usage.kills||0}" data-deaths="${usage.deaths||0}" data-dealt="${Number(usage.dealt||0).toFixed(0)}" data-taken="${Number(usage.taken||0).toFixed(0)}"></div></article>`;
   }))).join('');
 
   // -------- Defensive / Offensive Type Chart & Team Coverage Chart --------
@@ -2521,6 +2699,17 @@ async function render(){
         let moves=[]; try{moves=JSON.parse(week.dataset.movesJson||'[]')}catch{}
         movesBox.innerHTML=`<div class="prep-week-moves-title">Moves used in ${esc(week.textContent.replace('›','').trim())}</div><div class="prep-week-moves-list">${moves.length?moves.map(m=>`<span class="prep-chip">${esc(m)}</span>`).join(''):'<span class="small">No recorded moves for this week.</span>'}</div>`;
         movesBox.hidden=false;
+      });
+      modal.querySelector('#prepModeContent')?.addEventListener('click',e=>{
+        const btn=e.target.closest('[data-prep-week-btn]'); if(!btn)return;
+        const root=e.currentTarget;
+        const week=btn.dataset.prepWeekBtn;
+        root.querySelectorAll('[data-prep-week-btn]').forEach(b=>{
+          const active=b===btn;
+          b.classList.toggle('active',active);
+          b.setAttribute('aria-pressed',active?'true':'false');
+        });
+        root.querySelectorAll('[data-week-pane]').forEach(p=>{p.hidden=p.dataset.weekPane!==week;});
       });
 
       async function loadPrepPokemonData(){

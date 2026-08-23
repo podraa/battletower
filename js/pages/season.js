@@ -398,6 +398,9 @@
         team.linkedPlayers.add(username);
         team.replayCount++;
 
+        const appearanceCounted=new Set();
+        const submitted=(replay.teamRoster?.[side]||[]).map(x=>typeof x==='string'?x:String(x?.species||x?.name||'')).filter(Boolean).map(canonicalRosterSpecies);
+        const submittedKeys=new Set(submitted.map(normName));
         for(const stat of Object.values(replay.mons)){
           if(!stat || stat.side!==side || !stat.species) continue;
           const species=normName(stat.species)==='comfey' ? 'Comfey' : String(stat.species);
@@ -407,9 +410,21 @@
           target.taken += Number(stat.damageTaken)||0;
           target.kills += Number(stat.kills)||0;
           target.deaths += Number(stat.deaths)||0;
-          target.appearances += Number(stat.appearances)||0;
+          if(submittedKeys.size){
+            const key=normName(species);
+            if(submittedKeys.has(key) && !appearanceCounted.has(key)){target.appearances += 1;appearanceCounted.add(key);}
+          }else if(!appearanceCounted.has(normName(species))){
+            target.appearances += Number(stat.appearances)||0;
+            appearanceCounted.add(normName(species));
+          }
           if(Array.isArray(stat.killLog)) target.killLog.push(...stat.killLog);
           if(Array.isArray(stat.deathLog)) target.deathLog.push(...stat.deathLog);
+        }
+        // Legacy replays can have team preview data without a corresponding
+        // mons entry when a brought Pokémon was never sent out.
+        for(const speciesRaw of submitted){
+          const key=normName(speciesRaw), target=team.byKey[key];
+          if(target && !appearanceCounted.has(key)){target.appearances += 1;appearanceCounted.add(key);}
         }
       }
     }
@@ -729,13 +744,13 @@
   }
   function openAudit(species, type, list, showLink){
     showLink = showLink !== false;
-    const label = type === 'kills' ? 'Kills' : 'Deaths';
+    const label = type === 'kills' ? 'Knockouts' : 'Deaths';
     const rows = (list || []).slice().sort((a,b)=> (a.replayId||'').localeCompare(b.replayId||'') || (a.turn-b.turn));
     document.getElementById('auditModal').innerHTML = `
       <div class="audit-overlay" id="auditOverlay">
         <div class="audit-box">
           <h3>${pokemonLink(species, SBL.pokemon.escapeHtml(species))} — ${label} (${rows.length})</h3>
-          <div class="audit-sub">Every ${type==='kills'?'kill':'death'} credited to this Pokémon this scope, with the turn${showLink?', replay,':''} and why it was credited.</div>
+          <div class="audit-sub">Every ${type==='kills'?'knockout':'death'} credited to this Pokémon this scope, with the turn${showLink?', replay,':''} and why it was credited.</div>
           ${rows.length===0 ? `<div class="empty-state">No entries.</div>` : `<ul class="audit-list">
             ${rows.map(r=>`<li>
               <span>Turn ${r.turn} — ${type==='kills' ? 'vs ' + (r.victim ? pokemonLink(r.victim, SBL.pokemon.escapeHtml(r.victim), '', false) : '?') : (r.killer ? 'by ' + pokemonLink(r.killer, SBL.pokemon.escapeHtml(r.killer), '', false) : 'unattributed')} <span class="audit-cause">(${SBL.pokemon.escapeHtml(r.cause||'—')})</span></span>
@@ -1266,8 +1281,18 @@
     return `<table><thead><tr><th>Week</th><th>Matchup</th><th>Format</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
+  function weekSort(a,b){
+    const sa=String(a??''), sb=String(b??'');
+    const na=parseInt(sa.match(/\d+/)?.[0]||'',10);
+    const nb=parseInt(sb.match(/\d+/)?.[0]||'',10);
+    const aNum=Number.isFinite(na), bNum=Number.isFinite(nb);
+    if(aNum && bNum && na!==nb) return na-nb;
+    if(aNum!==bNum) return aNum ? -1 : 1;
+    if(sa==='Unassigned') return 1; if(sb==='Unassigned') return -1;
+    return sa.localeCompare(sb,undefined,{numeric:true,sensitivity:'base'});
+  }
   function weekSelectorHtml(id){
-    const weeks = weeksList();
+    const weeks = weeksList().sort(weekSort);
     return `<select id="${id}">
       <option value="ALL">All season</option>
       <option value="LAST4">Last 4 games</option>
@@ -1439,10 +1464,10 @@
         <div class="note" style="margin-top:3px;">${SBL.pokemon.escapeHtml(Array.from(s.coaches).sort().join(', '))}</div></div>
       </div>
       <div class="profile-grid">
-        <div><span>Games</span><strong>${s.games}</strong></div><div><span>Kills</span><strong class="kills">${s.kills}</strong></div>
+        <div><span>Games</span><strong>${s.games}</strong></div><div><span>Knockouts</span><strong class="kills">${s.kills}</strong></div>
         <div><span>Deaths</span><strong class="taken">${s.deaths}</strong></div><div><span>K/D</span><strong>${kd}</strong></div>
         <div><span>Damage dealt</span><strong class="dealt">${s.dealt.toFixed(1)}</strong></div><div><span>Damage taken</span><strong class="taken">${s.taken.toFixed(1)}</strong></div>
-        <div><span>Avg dmg/game</span><strong>${avg}</strong></div><div><span>Kill rate/game</span><strong>${s.games?(s.kills/s.games).toFixed(2):'0'}</strong></div>
+        <div><span>Avg dmg/game</span><strong>${avg}</strong></div><div><span>Knockout rate/game</span><strong>${s.games?(s.kills/s.games).toFixed(2):'0'}</strong></div>
       </div>
       <div class="profile-weeks" style="margin-top:14px;padding:12px 14px;background:var(--panel2);border:1px solid var(--border);border-radius:8px;">
         <div class="mini-heading" style="margin-bottom:8px;">Weeks Brought</div>
@@ -1450,7 +1475,7 @@
       </div>
       <div class="section-divider"></div>
       <div class="profile-two-col">
-        <div><h3 class="mini-heading">Kill record</h3>${s.killLog.length ? `<table><thead><tr><th>Turn</th><th>Victim</th><th>Cause</th><th>Replay</th></tr></thead><tbody>${s.killLog.slice().sort((a,b)=>(a.replayDate-b.replayDate) || (a.turn-b.turn)).map(x=>`<tr><td>${x.turn}</td><td>${x.victim ? pokemonLink(x.victim, SBL.pokemon.escapeHtml(x.victim), '', false) : '?'}</td><td>${SBL.pokemon.escapeHtml(x.cause||'—')}</td><td><a class="nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(x.replayId)}" target="_blank" rel="noopener">View</a></td></tr>`).join('')}</tbody></table>`:`<div class="empty-state">No kills.</div>`}</div>
+        <div><h3 class="mini-heading">Knockout record</h3>${s.killLog.length ? `<table><thead><tr><th>Turn</th><th>Victim</th><th>Cause</th><th>Replay</th></tr></thead><tbody>${s.killLog.slice().sort((a,b)=>(a.replayDate-b.replayDate) || (a.turn-b.turn)).map(x=>`<tr><td>${x.turn}</td><td>${x.victim ? pokemonLink(x.victim, SBL.pokemon.escapeHtml(x.victim), '', false) : '?'}</td><td>${SBL.pokemon.escapeHtml(x.cause||'—')}</td><td><a class="nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(x.replayId)}" target="_blank" rel="noopener">View</a></td></tr>`).join('')}</tbody></table>`:`<div class="empty-state">No knockouts.</div>`}</div>
         <div><h3 class="mini-heading">Death record</h3>${s.deathLog.length ? `<table><thead><tr><th>Turn</th><th>Killer</th><th>Replay</th></tr></thead><tbody>${s.deathLog.slice().sort((a,b)=>(a.replayDate-b.replayDate) || (a.turn-b.turn)).map(x=>`<tr><td>${x.turn}</td><td>${x.killer ? pokemonLink(x.killer, SBL.pokemon.escapeHtml(x.killer), '', false) : 'Unattributed'}</td><td><a class="nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(x.replayId)}" target="_blank" rel="noopener">View</a></td></tr>`).join('')}</tbody></table>`:`<div class="empty-state">No deaths.</div>`}</div>
       </div>
     </div>`;
@@ -1844,7 +1869,7 @@
         <div class="empty-state">No fixture has been published yet. The commissioner can generate or upload one from Admin → Season Setup.</div>
       </div>`;
     }
-    const weekNames = rounds.map(r => r.week);
+    const weekNames = rounds.map(r => r.week).sort(weekSort);
     if(!selectedFixtureWeek || !weekNames.includes(selectedFixtureWeek)){
       selectedFixtureWeek = currentFixtureWeek(rounds);
     }
@@ -2091,7 +2116,7 @@
             <div class="franchise-total-grid">
               <div><span>Damage</span><strong>${total.dealt.toFixed(1)}</strong></div>
               <div><span>Taken</span><strong>${total.taken.toFixed(1)}</strong></div>
-              <div><span>Kills</span><strong>${total.kills}</strong></div>
+              <div><span>Knockouts</span><strong>${total.kills}</strong></div>
               <div><span>Deaths</span><strong>${total.deaths}</strong></div>
             </div>
           </div>
@@ -2132,7 +2157,7 @@
 
   function renderReplayBrowser(){
     const data=replayBrowserData();
-    const weeks=[...new Set(data.map(x=>x.week))].sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true}));
+    const weeks=[...new Set(data.map(x=>x.week))].sort(weekSort);
     const players=[...new Set(data.flatMap(x=>[x.p1,x.p2]).filter(x=>x&&x!=='?'))].sort((a,b)=>a.localeCompare(b));
     const teams=[...new Set(data.flatMap(x=>x.teams).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
     contentEl.innerHTML=`
