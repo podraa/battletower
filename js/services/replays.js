@@ -387,6 +387,54 @@
     let pendingDelayedHit = {}; // targetSlot -> {stats, cause}; Showdown emits the delayed hit as -end, then an untagged -damage
     let residualSourceByMon = {}; // monKey -> source stats for lingering move damage (Curse, Salt Cure, trapping, etc.)
     let weatherSetter = {}; // weather name -> setter's stats object for weather chip kill credit
+    // Misc battle records. These are intentionally stored in the replay JSON so the
+    // Stats page can build league-wide leaderboards without another database table.
+    const misc = {
+      moveUses:{}, itemConsumed:{}, itemKnockedOff:{}, itemRemoved:{},
+      statusInflicted:{}, statusSuffered:{}, switches:{p1:0,p2:0}, leads:{p1:0,p2:0},
+      crits:{}, flinches:{}, protects:{}, misses:{}, dodges:{},
+      firstBlood:null, firstFallen:null, lastDowned:null, lastFallen:null, lastStanding:null,
+      revengeKOs:[], closers:[], trades:[], comebackSides:[], sacrifices:[],
+      longestBattle:0, totalEvents:0, maxSingleDamage:null, maxKillStreak:null, firstBloodWon:null,
+      mostSpammy:null, mostSwitchesInBattle:null,
+      battleDowns:{p1:0,p2:0}, battleFalls:{p1:0,p2:0}, comebackDeficitTurns:{p1:0,p2:0},
+      pokemon:{}
+    };
+    const activeSince = {};
+    let lastComebackCountTurn = 0;
+    function accountComebackDeficitThrough(turn){
+      const t=Math.max(0,Number(turn||0));
+      if(t<=lastComebackCountTurn) return;
+      const elapsed=t-lastComebackCountTurn;
+      const p1Down=Number(misc.battleFalls.p1||0), p2Down=Number(misc.battleFalls.p2||0);
+      if(p1Down>p2Down) misc.comebackDeficitTurns.p1 += elapsed;
+      else if(p2Down>p1Down) misc.comebackDeficitTurns.p2 += elapsed;
+      lastComebackCountTurn=t;
+    }
+    const activeTotals = {};
+    const lifespanStart = {};
+    const lastFallenBySide = {p1:null,p2:null};
+    const lastDownByPokemon = {};
+    const killStreaks = {};
+    let lastDownEvent = null;
+    function miscInc(bucket,key,n=1){ if(!key) return; bucket[key]=(Number(bucket[key])||0)+Number(n||0); }
+    function miscPokemon(stats){
+      if(!stats) return null;
+      const key=String(stats.side||'')+'|'+normName(canonicalBattleSpecies(stats.species||''));
+      if(!misc.pokemon[key]) misc.pokemon[key]={side:stats.side,species:canonicalBattleSpecies(stats.species||''),moves:{},switches:0,leads:0,downs:0,fallen:0,crits:0,flinches:0,statusesInflicted:0,statusesSuffered:0,totalActiveTurns:0,maxActiveTurns:0,shortestLifespan:null,damageDealt:0,damageTaken:0,largestHit:0};
+      return misc.pokemon[key];
+    }
+    function finishActive(monKey, turn){
+      if(!monKey || !activeSince[monKey]) return;
+      const turns=Math.max(0,Number(turn||0)-Number(activeSince[monKey]||0)+1);
+      activeTotals[monKey]=(Number(activeTotals[monKey])||0)+turns;
+      const rec=misc.pokemon[monKey]; if(rec){ rec.totalActiveTurns=(Number(rec.totalActiveTurns)||0)+turns; rec.maxActiveTurns=Math.max(Number(rec.maxActiveTurns)||0,turns); }
+      const start=Number(lifespanStart[monKey]||turn);
+      const lifespan=Math.max(0,Number(turn||0)-start+1);
+      if(rec){ rec.shortestLifespan=rec.shortestLifespan==null?lifespan:Math.min(rec.shortestLifespan,lifespan); }
+      if(!misc.shortestLifespan || lifespan<misc.shortestLifespan.turns) misc.shortestLifespan={pokemon:rec?.species||monKey.split('|')[1]||'?',side:rec?.side||monKey.split('|')[0],turns:lifespan,replayId};
+      delete activeSince[monKey];
+    }
 
     const HAZARD_MOVES = ['Stealth Rock','Spikes'];
     const DELAYED_MOVES = ['Future Sight','Doom Desire'];
@@ -590,6 +638,7 @@
             }
           }
           for(const k of Object.keys(turnActivity)) delete turnActivity[k];
+          accountComebackDeficitThrough(t);
           currentTurn = t;
           for(const mk of Object.keys(sleeping)){
             const st = sleeping[mk];
@@ -638,14 +687,19 @@
         slots[slot] = {species, hp, hpMax: parseMaxHP(parts[4] || '100/100'), side, monId};
         const newStats = ensureMon(slot);
         if(oldMonKey){
+          finishActive(oldMonKey,currentTurn-1);
           // A real replacement: count the incoming Pokémon as a switch.
           sideHasMadeSwitch[side] = true;
+          misc.switches[side]=(Number(misc.switches[side])||0)+1;
+          const mp=miscPokemon(newStats); if(mp) mp.switches=(Number(mp.switches)||0)+1;
           if(newStats) newStats.switches = (Number(newStats.switches)||0) + 1;
         } else if(!sideHasMadeSwitch[side] && currentTurn <= 1){
           // First send-out(s) of the battle are leads. This also supports doubles:
           // both initial Pokémon can receive a Lead before the first real switch.
-          if(newStats){ newStats.leads = (Number(newStats.leads)||0) + 1; sideLeadCount[side] += 1; }
+          if(newStats){ newStats.leads = (Number(newStats.leads)||0) + 1; sideLeadCount[side] += 1; const mp=miscPokemon(newStats); if(mp) mp.leads=(Number(mp.leads)||0)+1; misc.leads[side]=(Number(misc.leads[side])||0)+1; }
         }
+        const incomingMk=monKey(slot);
+        if(incomingMk){ activeSince[incomingMk]=currentTurn; if(!lifespanStart[incomingMk]) lifespanStart[incomingMk]=currentTurn; }
         // A new mon now occupies this slot — any prior *direct-hit* attacker
         // credit for this slot belonged to the mon that just left, so that must
         // not carry over. Status-source credit (poison/burn) is intentionally
@@ -713,6 +767,8 @@
           if(moveStats && moveName){
             if(!moveStats.moves) moveStats.moves = {};
             moveStats.moves[moveName] = (moveStats.moves[moveName] || 0) + 1;
+            miscInc(misc.moveUses,moveName,1);
+            const mp=miscPokemon(moveStats); if(mp) miscInc(mp.moves,moveName,1);
           }
         }
         if(source && HAZARD_MOVES.includes(moveName)){
@@ -775,6 +831,8 @@
         const source = parts[2] ? parts[2].split(':')[0].trim() : null;
         const target = parts[3] ? parts[3].split(':')[0].trim() : null;
         if(source && target && sideOf(source) !== sideOf(target)){
+          miscInc(misc.misses,lastMove?.move||'Unknown',1);
+          miscInc(misc.dodges,lastMove?.move||'Unknown',1);
           const targetSide = sideOf(target);
           // A miss is a dodge for the target. We also resolve the actual move
           // accuracy so the replay records whether this was a low-accuracy
@@ -833,6 +891,20 @@
           // Snapshot the contributor's damage HERE, at the item-removal event.
           // Do not wait until faint: the victim/source identity can change or the
           // live contribution map can be cleared/merged before the faint is read.
+          // Classify the item event for Misc. Showdown uses -enditem for both
+          // consumption and removal/transfer, so move/tag context is required.
+          const lowerTags=String(tags||'').toLowerCase();
+          const lowerItem=String(itemName||'').trim();
+          const sourceMove=(lowerTags.match(/(?:move:\s*)([^|]+)/i)?.[1]||'').trim();
+          const removalMove=/^(knock off|thief|covet|trick|switcheroo)$/i.test(sourceMove);
+          const transferMove=/^(trick|switcheroo)$/i.test(sourceMove);
+          if(lowerItem){
+            miscInc(misc.itemRemoved,lowerItem,1);
+            if(/^knock off$/i.test(sourceMove)) miscInc(misc.itemKnockedOff,lowerItem,1);
+            // Berries and explicit item-triggered endings are consumption unless
+            // a known removal/transfer move caused the event.
+            if(!removalMove && !transferMove) miscInc(misc.itemConsumed,lowerItem,1);
+          }
           if(targetMk && sourceStats && sourceStats.side !== sideOf(target)){
             // Item removal is a separate strategic contribution.  NEVER use the
             // item-removal event itself as a replacement for the attacker's damage.
@@ -849,25 +921,46 @@
           }
         }
       } else if(cmd === '-flinch'){
-        const target = parts[2] ? parts[2].split(':')[0].trim() : null;
-        if(target && lastMove && lastMove.target === target && sideOf(lastMove.source) !== sideOf(target)){
-          const chance = getMoveSecondaryChance(lastMove.move, 'flinch', 'flinch');
-          if(chance !== null && chance > 0 && chance < 100){
-            const mk=monKey(target);
-            if(mk && pendingSecondaryChecks[mk]){
-              for(const check of pendingSecondaryChecks[mk]) if(check.source===lastMove.source && check.target===target && check.kind==='flinch') check.resolved=true;
-              pendingSecondaryChecks[mk]=pendingSecondaryChecks[mk].filter(check=>!check.resolved);
-              if(!pendingSecondaryChecks[mk].length) delete pendingSecondaryChecks[mk];
-            }
-            const score = rarityLuck(chance / 100);
-            const aSide=sideOf(lastMove.source), tSide=sideOf(target);
-            luck[aSide].flinches += 1; luck[aSide].flinchLuck += score; addLuckEvent(luck[aSide], 'flinch', score, `${lastMove.move} flinched (${chance}% chance)`);
-            const aLuck=pokemonLuckForSlot(lastMove.source); if(aLuck){aLuck.flinches+=1;aLuck.flinchLuck+=score;addLuckEvent(aLuck,'flinch',score,`${lastMove.move} flinched (${chance}% chance)`);}
-            luck[tSide].flinchLuck -= score; addLuckEvent(luck[tSide], 'flinch-against', -score, `${lastMove.move} caused a flinch (${chance}% chance)`);
-            const tLuck=pokemonLuckForSlot(target); if(tLuck){tLuck.flinchLuck-=score;addLuckEvent(tLuck,'flinch-against',-score,`${lastMove.move} caused a flinch (${chance}% chance)`);}
+        // Showdown's explicit -flinch event is authoritative. Do not require
+        // move metadata or a perfectly populated lastAttacker record: the
+        // protocol event itself tells us the target flinched immediately after
+        // the move. Resolve the source from the move line first, then from the
+        // most recent attacker for that target.
+        const target = parts[2] ? parts[2].split(':')[0].trim() : (lastMove?.target || null);
+        const sourceSlot = lastMove?.source || null;
+        const fallbackStats = target ? lastAttacker[target]?.stats || null : null;
+        let sourceStats = sourceSlot ? ensureMon(sourceSlot) : null;
+        if(!sourceStats) sourceStats = fallbackStats;
+        const sourceSide = sourceStats?.side || (sourceSlot ? String(sourceSlot).slice(0,2) : '');
+        const targetSide = slots[target]?.side || (target ? String(target).slice(0,2) : '');
+        if(target && sourceStats && sourceSide && targetSide && sourceSide !== targetSide){
+          const moveName = lastMove?.move || 'Flinch';
+          const chance = getMoveSecondaryChance(moveName, 'flinch', 'flinch');
+          const effectiveChance = (chance !== null && chance > 0) ? chance : 100;
+          const mk=monKey(target);
+          if(mk && pendingSecondaryChecks[mk]){
+            for(const check of pendingSecondaryChecks[mk]) if(check.source===sourceSlot && check.target===target && check.kind==='flinch') check.resolved=true;
+            pendingSecondaryChecks[mk]=pendingSecondaryChecks[mk].filter(check=>!check.resolved);
+            if(!pendingSecondaryChecks[mk].length) delete pendingSecondaryChecks[mk];
+          }
+          const score = effectiveChance < 100 ? rarityLuck(effectiveChance / 100) : 0;
+          luck[sourceSide].flinches += 1; luck[sourceSide].flinchLuck += score;
+          miscInc(misc.flinches,moveName,1);
+          const fp=miscPokemon(sourceStats);
+          if(fp) fp.flinches=(Number(fp.flinches)||0)+1;
+          addLuckEvent(luck[sourceSide], 'flinch', score, `${moveName} flinched (${chance == null ? 'unknown' : chance}% chance)`);
+          const sourceLuck=pokemonLuckForSlot(sourceSlot || Object.keys(slots).find(k=>monKey(k)===sourceStats.id));
+          if(sourceLuck){ sourceLuck.flinches+=1; sourceLuck.flinchLuck+=score; addLuckEvent(sourceLuck,'flinch',score,`${moveName} flinched (${chance == null ? 'unknown' : chance}% chance)`); }
+          if(score){
+            luck[targetSide].flinchLuck -= score;
+            addLuckEvent(luck[targetSide], 'flinch-against', -score, `${moveName} caused a flinch (${chance}% chance)`);
+            const targetLuck=pokemonLuckForSlot(target);
+            if(targetLuck){targetLuck.flinchLuck-=score;addLuckEvent(targetLuck,'flinch-against',-score,`${moveName} caused a flinch (${chance}% chance)`);}
           }
         }
       } else if(cmd === '-confusion'){
+
+
         const target = parts[2] ? parts[2].split(':')[0].trim() : null;
         if(target && lastMove && lastMove.target === target && sideOf(lastMove.source) !== sideOf(target)){
           const chance=getMoveSecondaryChance(lastMove.move,'volatileStatus','confusion');
@@ -921,6 +1014,7 @@
             if(luck[attackerSide]){
               luck[attackerSide].crits += 1;
               luck[attackerSide].critLuck += rarityLuck(critChanceValue);
+              miscInc(misc.crits,lastMove.move,1); const cp=miscPokemon(ensureMon(lastMove.source)); if(cp) cp.crits=(Number(cp.crits)||0)+1;
               addLuckEvent(luck[attackerSide], 'crit', rarityLuck(critChanceValue), `${lastMove.move} crit (${critChanceValue.toFixed(1)}% chance)`);
             }
             const monLuck = pokemonLuckForSlot(lastMove.source);
@@ -983,7 +1077,13 @@
             pendingStatusChecks[mk] = pending.filter(check => !check.resolved);
             if(!pendingStatusChecks[mk].length) delete pendingStatusChecks[mk];
           }
+          if(statusCode){
+            miscInc(misc.statusSuffered,statusCode,1);
+            const sm=miscPokemon(ensureMon(slot)); if(sm) sm.statusesSuffered=(Number(sm.statusesSuffered)||0)+1;
+          }
           if(statusCode && lastMove && lastMove.target === slot && sideOf(lastMove.source) !== sideOf(slot)){
+            miscInc(misc.statusInflicted,statusCode,1);
+            const im=miscPokemon(ensureMon(lastMove.source)); if(im) im.statusesInflicted=(Number(im.statusesInflicted)||0)+1;
             const chance = getMoveStatusChance(lastMove.move, statusCode);
             if(chance !== null && chance > 0 && chance < 100){
               addSecondaryProcLuck(sideOf(lastMove.source), monKey(lastMove.source), sideOf(slot), mk, chance, 'status-proc', `${lastMove.move} inflicted ${statusCode} (${chance}% chance)`);
@@ -1060,6 +1160,10 @@
         slots[slot].hp = newHp;
         const targetStats = ensureMon(slot);
         if(targetStats) targetStats.damageTaken += dmg;
+        if(dmg>0){
+          if(!misc.maxSingleDamage || dmg>Number(misc.maxSingleDamage.damage||0)) misc.maxSingleDamage={damage:dmg,pokemon:targetStats?.species||slots[slot]?.species||'?',turn:currentTurn,move:lastMove?.move||null,replayId};
+          const tm=miscPokemon(targetStats); if(tm){ tm.damageTaken=(Number(tm.damageTaken)||0)+dmg; }
+        }
         if(lastMove && lastMove.target === slot && sideOf(lastMove.source) !== sideOf(slot)){
           if(!lastMove.hitCounted && isLowAccuracyMove(lastMove.move)){
             const attackerSide = sideOf(lastMove.source);
@@ -1178,6 +1282,7 @@
             continue;
           }
           attackerStats.damageDealt += dmg;
+          const ap=miscPokemon(attackerStats); if(ap){ ap.damageDealt=(Number(ap.damageDealt)||0)+dmg; ap.largestHit=Math.max(Number(ap.largestHit)||0,dmg); }
           if(damageClass === 'indirect') attackerStats.indirectDamage += dmg;
           else attackerStats.directDamage += dmg;
           // Track this attacker's cumulative contribution to this specific victim.
@@ -1233,6 +1338,8 @@
         const killerInfo = lastAttacker[slot];
         const killerStats = killerInfo ? killerInfo.stats : null;
         const credited = !!(killerStats && killerStats.side !== slots[slot].side);
+        const victimSide=String(slots[slot].side||'');
+        finishActive(victimMk,currentTurn);
         if(deadStats){
           const deadKey = monKey(slot);
           if(deadKey){
@@ -1258,7 +1365,45 @@
             cause: killerInfo.cause
           });
         }
-
+        if(credited){
+          const killerMk = killerStats.id || null;
+          const streakKey = killerMk || (String(killerStats.side||'')+'|'+normName(canonicalBattleSpecies(killerStats.species||'')));
+          killStreaks[streakKey] = Number(killStreaks[streakKey]||0) + 1;
+          const streakCount = killStreaks[streakKey];
+          if(!misc.maxKillStreak || streakCount > Number(misc.maxKillStreak.count||0)){
+            misc.maxKillStreak = {pokemon:canonicalBattleSpecies(killerStats.species),side:killerStats.side,count:streakCount,replayId,turn:currentTurn};
+          }
+        }
+        misc.battleFalls[victimSide]=(Number(misc.battleFalls[victimSide])||0)+1;
+        if(credited) misc.battleDowns[String(killerStats.side||'')]=(Number(misc.battleDowns[String(killerStats.side||'')])||0)+1;
+        const deadMp=miscPokemon(deadStats); if(deadMp) deadMp.fallen=(Number(deadMp.fallen)||0)+1;
+        const deadStreakKey = victimMk || (String(deadStats?.side||victimSide)+'|'+normName(canonicalBattleSpecies(deadStats?.species||slots[slot].species||'')));
+        delete killStreaks[deadStreakKey];
+        if(credited){ const kp=miscPokemon(killerStats); if(kp) kp.downs=(Number(kp.downs)||0)+1; }
+        if(!misc.firstFallen) misc.firstFallen={pokemon:deadStats?.species||slots[slot].species,side:victimSide,turn:currentTurn,replayId};
+        if(credited && !misc.firstBlood) misc.firstBlood={pokemon:killerStats.species,side:killerStats.side,turn:currentTurn,replayId,victim:deadStats?.species||slots[slot].species};
+        misc.lastFallen={pokemon:deadStats?.species||slots[slot].species,side:victimSide,turn:currentTurn,replayId};
+        if(credited) misc.lastDowned={pokemon:killerStats.species,side:killerStats.side,turn:currentTurn,replayId,victim:deadStats?.species||slots[slot].species};
+        const priorTeamFall = lastFallenBySide[victimSide];
+        const enteredAfterTeammateFall = priorTeamFall && lifespanStart[victimMk] != null && Number(lifespanStart[victimMk]) > Number(priorTeamFall.turn);
+        const activeTurnsBeforeFaint = deadMp ? Number(deadMp.maxActiveTurns||0) : 0;
+        if(!credited && enteredAfterTeammateFall && currentTurn-Number(priorTeamFall.turn)<=2 && activeTurnsBeforeFaint>0 && activeTurnsBeforeFaint<=2){
+          misc.sacrifices.push({pokemon:canonicalBattleSpecies(deadStats?.species||slots[slot].species),side:victimSide,turn:currentTurn,replayId,reason:'entered after a teammate fainted and was KOed within two active turns without scoring a KO'});
+        }
+        if(credited && lastFallenBySide[killerStats.side] && currentTurn-lastFallenBySide[killerStats.side].turn<=2){
+          // A faint can be surfaced more than once by replay parsing (for example
+          // when a multi-target event resolves in separate log lines). Count one
+          // revenge KO per actual killer/victim/turn event.
+          const revengePokemon = canonicalBattleSpecies(killerStats.species);
+          const revengeVictim = canonicalBattleSpecies(deadStats?.species||slots[slot].species);
+          const revengeKey = `${replayId}|${currentTurn}|${killerStats.side}|${normName(revengePokemon)}|${normName(revengeVictim)}`;
+          if(!misc.revengeKOs.some(x=>x._key===revengeKey)) misc.revengeKOs.push({pokemon:revengePokemon,side:killerStats.side,turn:currentTurn,replayId,victim:revengeVictim,_key:revengeKey});
+        }
+        lastFallenBySide[victimSide]={turn:currentTurn,pokemon:deadStats?.species||slots[slot].species};
+        if(lastDownEvent && deadStats && lastDownEvent.killerId === deadStats.id && currentTurn-lastDownEvent.turn<=2){
+          misc.trades.push({pokemon:deadStats.species,side:deadStats.side,turn:currentTurn,replayId,downsTradedFor:lastDownEvent.victim});
+        }
+        if(credited) lastDownEvent={killerId:killerStats.id,turn:currentTurn,victim:deadStats?.species||slots[slot].species};
         // Assist credit: scaled damage threshold with a 25% floor, plus explicit
         // strategic contribution events (item removal and Healing Wish/Revival Blessing).
         const victimInitialHp = deadStats && Number(deadStats.initialHp) > 0 ? Number(deadStats.initialHp) : 100;
@@ -1360,6 +1505,41 @@
     for(const mk of Object.keys(frozen)) finalizeStatusDuration(mk, 'frz');
     finalizePendingStatusChecks();
 
+    // Finalize active-time records and battle-level Misc records.
+    for(const [slot,entry] of Object.entries(slots)){ const mk=monKey(slot); if(mk) finishActive(mk,currentTurn); }
+    // Count the final turn using the post-faint board state. A comeback is based
+    // on being behind in actual remaining Pokémon, not on KO credit.
+    accountComebackDeficitThrough(currentTurn + 1);
+    misc.longestBattle=Math.max(0,currentTurn);
+    const battleEvents=Object.values(misc.pokemon);
+    const switchTotal=Number(misc.switches.p1||0)+Number(misc.switches.p2||0);
+    misc.mostSwitchesInBattle={count:switchTotal,replayId};
+    for(const mp of battleEvents){
+      const key=String(mp.side||'')+'|'+normName(mp.species||'');
+      const moveEntries=Object.entries(mp.moves||{});
+      if(moveEntries.length){ const [move,count]=moveEntries.sort((a,b)=>b[1]-a[1])[0]; const candidate={pokemon:mp.species,side:mp.side,move,count,replayId}; if(!misc.mostSpammy || count>misc.mostSpammy.count) misc.mostSpammy=candidate; }
+    }
+    // Per-battle records for trade/closer events.
+    const rosterSize={p1:teamRoster.p1.length,p2:teamRoster.p2.length};
+    if(misc.lastDowned && rosterSize[misc.lastFallen?.side] && misc.battleFalls[misc.lastFallen.side]>=rosterSize[misc.lastFallen.side]) misc.closers.push({...misc.lastDowned});
+    const winnerSide = winner && players.p1 && String(winner).toLowerCase()===String(players.p1).toLowerCase() ? 'p1' : (winner && players.p2 && String(winner).toLowerCase()===String(players.p2).toLowerCase() ? 'p2' : null);
+    if(winnerSide){
+      if(misc.firstBlood){
+        misc.firstBloodWon = {pokemon:canonicalBattleSpecies(misc.firstBlood.pokemon),side:misc.firstBlood.side,won:misc.firstBlood.side===winnerSide,replayId};
+      }
+      const standing=Object.values(mons).filter(m=>m.side===winnerSide && Number(m.deaths||0)===0 && Number(m.appearances||0)>0).sort((a,b)=>Number(b.totalActiveTurns||0)-Number(a.totalActiveTurns||0))[0];
+      if(standing) misc.lastStanding={pokemon:standing.species,side:standing.side,replayId};
+    }
+    if(winnerSide){
+      const deficitTurns=Number(misc.comebackDeficitTurns[winnerSide]||0);
+      const battleTurns=Math.max(1,Number(currentTurn||0));
+      // A comeback requires the winner to have been down at least one Pokémon
+      // for more than half of the battle. Equal or briefly trailing games do not count.
+      if(deficitTurns > battleTurns/2){
+        misc.comebackSides.push({side:winnerSide,player:players[winnerSide]||'',replayId,deficitTurns,battleTurns});
+      }
+    }
+    if(misc.maxSingleDamage) misc.maxSingleDamage.replayId=replayId;
     // Collapse battle stints back to league-level Pokémon identities only after
     // parsing is complete. This prevents Illusion/Transform/form changes/switches
     // and duplicate species from contaminating attribution while the replay is
@@ -1406,6 +1586,18 @@
       }
     }
 
+    // Reconcile flinch counts from the per-Pokémon luck records into Misc
+    // Stats. This keeps older replay rows and parser edge cases visible in the
+    // Pokémon-level flinch leaderboard without double-counting newer records.
+    for(const [mk,l] of Object.entries(luckPokemon)){
+      const flinches=Number(l?.flinches||0);
+      if(!flinches || !l?.species) continue;
+      const species=canonicalBattleSpecies(l.species);
+      const side=String(mk).split('|')[0];
+      const rec=Object.values(misc.pokemon).find(m=>String(m.side)===side && normName(canonicalBattleSpecies(m.species||''))===normName(species));
+      if(rec && Number(rec.flinches||0) < flinches) rec.flinches=flinches;
+    }
+
     const aggregatedLuckPokemon = {};
     for(const [mk,l] of Object.entries(luckPokemon)){
       const species=canonicalBattleSpecies(l.species || mk.split('|')[1] || '');
@@ -1417,8 +1609,8 @@
       for(const k of ['crits','critLuck','dodges','moveDodgeLuck','lowAccuracyHits','lowAccuracyHitLuck','lowAccuracyDodges','statusDodgeLuck','secondaryProcs','secondaryLuck','secondaryDodges','secondaryDodgeLuck','flinches','flinchLuck','confusionSelfHits','confusionLuck','protectSuccesses','protectLuck','fullParalysis','paralysisDodgeLuck','paralysisDodges','sleepTurns','sleepEvents','sleepDurationLuck','freezeTurns','freezeEvents','freezeDurationLuck']) out[k]+=Number(l[k]||0);
       out.luckEvents.push(...(l.luckEvents||[]));
     }
-    return { parserVersion: 5, id: replayId, format: json.formatid || json.format || '', uploadtime: json.uploadtime || null,
-      players, mons:aggregatedMons, winner, teamRoster, luck, luckPokemon:aggregatedLuckPokemon,
+    return { parserVersion: 6, id: replayId, format: json.formatid || json.format || '', uploadtime: json.uploadtime || null,
+      players, mons:aggregatedMons, winner, teamRoster, luck, luckPokemon:aggregatedLuckPokemon, misc
       };
   }
   // Shared replay persistence API. Page UIs should not reach directly into

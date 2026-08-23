@@ -1,6 +1,6 @@
 /* SBL shared Pokémon naming + remote sprite service.
  *
- * Sprite source: Pokémon Showdown's HOME sprite set.  This is intentionally
+ * Sprite source: Pokémon Showdown's HOME sprite set for 3D and Gen 5-style static sprites for 2D.  This is intentionally
  * name-based rather than PokeAPI numeric IDs: Showdown stores alternate forms
  * such as deoxys-attack, aegislash-blade and terapagos-stellar as real sprite
  * filenames. That avoids the missing-form problem caused by treating every
@@ -14,7 +14,25 @@
   window.SBL=window.SBL||{};
   window.SBL.pokemon=window.SBL.pokemon||{};
 
-  const SPRITE_ROOT='https://play.pokemonshowdown.com/sprites/home/';
+  const SPRITE_ROOTS={
+    '3d':'https://play.pokemonshowdown.com/sprites/home/',
+    '2d':'https://play.pokemonshowdown.com/sprites/gen5/'
+  };
+  const SPRITE_PREF_KEY='sbl_sprite_style';
+  function getSpriteStyle(){
+    try { return localStorage.getItem(SPRITE_PREF_KEY)==='2d' ? '2d' : '3d'; } catch { return '3d'; }
+  }
+  function setSpriteStyle(style, persist=true){
+    const next=style==='2d'?'2d':'3d';
+    try { if(persist) localStorage.setItem(SPRITE_PREF_KEY,next); } catch {}
+    document.documentElement.dataset.sblSpriteStyle=next;
+    document.querySelectorAll('img.sbl-remote-sprite').forEach(img=>{
+      const name=img.getAttribute('alt')||img.getAttribute('title')||'';
+      applySpriteSource(img,name,next);
+    });
+    return next;
+  }
+  document.documentElement.dataset.sblSpriteStyle=getSpriteStyle();
 
   const ALIASES={
     'chiyu':'chi-yu',
@@ -264,23 +282,64 @@
     return '';
   }
 
-  function spriteUrl(name){
+  function spriteUrl(name,styleOverride){
+    const style=styleOverride==='2d'?'2d':styleOverride==='3d'?'3d':getSpriteStyle();
     const file=spriteFilename(name);
-    return file ? `${SPRITE_ROOT}${encodeURIComponent(file)}.png` : '';
+    return file ? `${SPRITE_ROOTS[style]}${encodeURIComponent(file)}.png` : '';
+  }
+
+  function spriteUrlCandidates(name,styleOverride){
+    const style=styleOverride==='2d'?'2d':styleOverride==='3d'?'3d':getSpriteStyle();
+    const ids=candidateIds(name);
+    const files=[];
+    const addFile=f=>{ if(!f) return; const v=String(f).toLowerCase(); if(!files.includes(v)) files.push(v); };
+    ids.forEach(id=>{
+      addFile(EXTRA_FORM_FILES[id]);
+      addFile(FORM_FILES[id]);
+      addFile(id);
+      addFile(id.replace(/-/g,''));
+    });
+    // Showdown's two sprite sets are mostly aligned, but a handful of
+    // legacy/form names use compact filenames. Keep a deterministic fallback
+    // list so hyphenated roster names never result in a broken image.
+    return files.map(file=>`${SPRITE_ROOTS[style]}${encodeURIComponent(file)}.png`);
+  }
+
+  function applySpriteSource(img,name,style){
+    const urls=spriteUrlCandidates(name,style);
+    if(!urls.length){ img.classList.add('missing'); return; }
+    img.dataset.sblSpriteCandidates=JSON.stringify(urls);
+    img.dataset.sblSpriteIndex='0';
+    img.classList.remove('missing');
+    img.src=urls[0];
+  }
+
+  function handleSpriteError(img){
+    try {
+      const urls=JSON.parse(img.dataset.sblSpriteCandidates||'[]');
+      const next=Number(img.dataset.sblSpriteIndex||0)+1;
+      if(next<urls.length){
+        img.dataset.sblSpriteIndex=String(next);
+        img.src=urls[next];
+        return;
+      }
+    } catch {}
+    img.classList.add('missing');
   }
 
   function escapeHtml(s){
     return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  function spriteMarkup(name,cls){
+  function spriteMarkup(name,cls,styleOverride){
     const safe=escapeHtml(name);
     const baseClass=cls||'sprite';
-    const url=spriteUrl(name);
-    if(!url){
+    const urls=spriteUrlCandidates(name,styleOverride);
+    if(!urls.length){
       return `<span class="${baseClass} sbl-remote-sprite missing" role="img" aria-label="${safe}" title="${safe}"></span>`;
     }
-    return `<img class="${baseClass} sbl-remote-sprite" src="${url}" alt="${safe}" title="${safe}" width="96" height="96" decoding="async">`;
+    const candidates=escapeHtml(JSON.stringify(urls));
+    return `<img class="${baseClass} sbl-remote-sprite" src="${urls[0]}" alt="${safe}" title="${safe}" width="96" height="96" decoding="async" data-sbl-sprite-candidates='${candidates}' data-sbl-sprite-index="0" onerror="SBL.pokemon.handleSpriteError(this)">`;
   }
 
   function spriteCandidates(name){ return candidateIds(name); }
@@ -297,7 +356,11 @@
   window.SBL.pokemon.spriteFilename=spriteFilename;
   window.SBL.pokemon.spriteCandidates=spriteCandidates;
   window.SBL.pokemon.spriteUrl=spriteUrl;
+  window.SBL.pokemon.spriteUrlCandidates=spriteUrlCandidates;
+  window.SBL.pokemon.handleSpriteError=handleSpriteError;
   window.SBL.pokemon.spriteMarkup=spriteMarkup;
+  window.SBL.pokemon.getSpriteStyle=getSpriteStyle;
+  window.SBL.pokemon.setSpriteStyle=setSpriteStyle;
   window.SBL.pokemon.escapeHtml=escapeHtml;
   window.SBL.pokemon.installSprite=installSprite;
   window.SBL.pokemon.scanSprites=scanSprites;
