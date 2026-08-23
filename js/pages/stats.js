@@ -634,7 +634,7 @@
   function exportTeamCSVs(weekFilter, label){
     const teams = teamPokemonStats(weekFilter);
     for(const team in teams){
-      const rows = [['Pokemon','Total Damage Dealt','Total Damage Taken','Total Kills','Total Assists','Total Deaths','Appearances']];
+      const rows = [['Pokemon','Total Damage Dealt','Total Damage Taken','Total Kills','Total Assists','Total Fallen','Appearances']];
       const list = Object.values(teams[team]).sort((a,b)=>b.dealt-a.dealt);
       list.forEach(s => rows.push([s.species, s.dealt.toFixed(2), s.taken.toFixed(2), s.kills, s.assists||0, s.deaths, s.games]));
       download(`${team} - ${label}.csv`, toCSV(rows));
@@ -888,7 +888,7 @@
   function openAudit(species, type, list, showLink){
     lockPopupScroll();
     showLink = showLink !== false;
-    const label = type === 'kills' ? 'Kills' : (type === 'assists' ? 'Assists' : 'Deaths');
+    const label = type === 'kills' ? 'Kills' : (type === 'assists' ? 'Assists' : 'Fallen');
     const rows = (list || []).slice().sort((a,b)=> (a.replayId||'').localeCompare(b.replayId||'') || (a.turn-b.turn));
     document.getElementById('auditModal').innerHTML = `
       <div class="audit-overlay" id="auditOverlay">
@@ -925,6 +925,63 @@
     document.getElementById('assistProfileClose').addEventListener('click',close); modal.addEventListener('click',e=>{if(e.target===modal)close();});
   }
 
+
+  function renderFallenStats(){
+    const esc=v=>SBL.pokemon.escapeHtml(String(v??''));
+    const replays=allReplays().filter(r=>r);
+    const weeks=[...new Set(replays.map(r=>r.week).filter(v=>v!==undefined&&v!==null&&String(v)!==''))].sort((a,b)=>Number(a)-Number(b));
+    const weekOptions=`<option value="ALL">All Weeks</option>${weeks.map(w=>`<option value="${esc(w)}">Week ${esc(w)}</option>`).join('')}`;
+    contentEl.innerHTML=`<div class="panel" style="padding:18px;">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-end;flex-wrap:wrap;">
+        <div><h2 style="margin:0;color:var(--text);">Fallen Stats</h2><div class="note">Every recorded Pokémon fall from processed battles, including who caused it and how.</div></div>
+        <label class="stats-control">Week <select id="fallenWeek">${weekOptions}</select></label>
+      </div>
+      <div id="fallenSummary" style="margin-top:16px;"></div>
+      <div id="fallenTable" style="margin-top:16px;"></div>
+    </div>`;
+    const draw=()=>{
+      const wf=document.getElementById('fallenWeek').value;
+      const rows=[];
+      for(const r of replays){
+        if(wf!=='ALL' && String(r.week)!==String(wf)) continue;
+        const pkm=r.misc?.pokemon||{};
+        for(const [slot,m] of Object.entries(pkm)){
+          const species=m?.species||m?.name;
+          if(!species) continue;
+          const logs=Array.isArray(m.deathLog)?m.deathLog:[];
+          for(const x of logs){
+            rows.push({
+              pokemon:species,
+              killer:x.killer||x.source||x.by||'Unattributed',
+              cause:x.cause||x.method||'damage',
+              turn:x.turn??x.t??'—',
+              week:r.week??'—',
+              replayId:r.id,
+              battle:battleLabel(r.id)
+            });
+          }
+          // Legacy records without a detailed death log still contribute to the summary.
+          if(!logs.length && Number(m.deaths||m.fallen||0)>0){
+            for(let i=0;i<Number(m.deaths||m.fallen||0);i++) rows.push({pokemon:species,killer:'Unattributed',cause:'damage',turn:'—',week:r.week??'—',replayId:r.id,battle:battleLabel(r.id)});
+          }
+        }
+      }
+      const causeCounts={};
+      const pokemonCounts={};
+      rows.forEach(x=>{causeCounts[x.cause]=(causeCounts[x.cause]||0)+1;pokemonCounts[x.pokemon]=(pokemonCounts[x.pokemon]||0)+1;});
+      const topCause=Object.entries(causeCounts).sort((a,b)=>b[1]-a[1])[0];
+      const topMon=Object.entries(pokemonCounts).sort((a,b)=>b[1]-a[1])[0];
+      document.getElementById('fallenSummary').innerHTML=`<div class="profile-summary-grid">
+        <div><span>Total Fallen</span><strong>${rows.length}</strong></div>
+        <div><span>Most common cause</span><strong>${esc(topCause?topCause[0]:'—')}</strong></div>
+        <div><span>Most Fallen Pokémon</span><strong>${esc(topMon?topMon[0]:'—')}</strong></div>
+      </div>`;
+      document.getElementById('fallenTable').innerHTML=rows.length?`<div style="overflow:auto;"><table><thead><tr><th>Week</th><th>Pokémon</th><th>Fallen To</th><th>Cause</th><th>Turn</th><th>Battle</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.week)}</td><td>${SBL.pokemon.spriteMarkup(x.pokemon,'misc-pokemon-sprite')} ${esc(x.pokemon)}</td><td>${x.killer==='Unattributed'?'Unattributed':esc(x.killer)}</td><td>${esc(x.cause)}</td><td>${esc(x.turn)}</td><td><span class="note">${esc(x.battle)}</span></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">No fallen Pokémon recorded for this selection.</div>';
+    };
+    document.getElementById('fallenWeek').addEventListener('change',draw);
+    draw();
+  }
+
   function render(){
     document.getElementById('app').classList.toggle('wide', activeTab === 'teams' || activeTab === 'global' || activeTab === 'assists' || activeTab === 'goldenfist' || activeTab === 'luckiest' || activeTab === 'pokemonsearch' || activeTab === 'causes' || activeTab === 'misc' || activeTab === 'season' || activeTab === 'replays' || activeTab === 'overview');
     if(!loaded){ contentEl.innerHTML = `<div class="empty-state">Loading…</div>`; return; }
@@ -935,7 +992,7 @@
     if(activeTab === 'pokemonsearch') return renderPokemonSearch();
     if(activeTab === 'goldenfist') return renderGoldenFist();
     if(activeTab === 'luckiest') return renderLuckiestTeam();
-    if(activeTab === 'causes') return renderDeathCauses();
+    if(activeTab === 'causes') return renderFallenStats();
     if(activeTab === 'misc') return renderMisc();
     if(activeTab === 'teams') return renderTeams();
     if(activeTab === 'season') return renderSeason();
@@ -1135,7 +1192,7 @@
       const label = key==='directDamage' ? 'Direct Damage' : (key==='indirectDamage' ? 'Indirect Damage' : 'Total Damage');
       const stats = globalPokemonStats(sel.value).slice().sort((a,b)=>(Number(b[key])||0)-(Number(a[key])||0) || (Number(b.kills)||0)-(Number(a.kills)||0) || String(a.species).localeCompare(String(b.species)));
       document.getElementById('globalTable').innerHTML = stats.length===0 ? `<div class="empty-state">No data for this scope yet.</div>` :
-        `<table><thead><tr><th class="rank">#</th><th>Pokémon</th><th class="num">${label}</th><th class="num">Total</th><th class="num">Direct</th><th class="num">Indirect</th><th class="num">Kills</th><th class="num">Kills/Game</th><th class="num">Assists</th><th class="num">Deaths</th><th class="num">Games</th></tr></thead><tbody>
+        `<table><thead><tr><th class="rank">#</th><th>Pokémon</th><th class="num">${label}</th><th class="num">Total</th><th class="num">Direct</th><th class="num">Indirect</th><th class="num">Kills</th><th class="num">Kills/Game</th><th class="num">Assists</th><th class="num">Fallen</th><th class="num">Games</th></tr></thead><tbody>
         ${stats.map((s,i)=>`<tr>
           <td class="rank">${i+1}</td>
           <td class="pname"><div class="pname-cell">${pokemonName(s.species,true,'sprite-xl')}</div></td>
@@ -1221,7 +1278,7 @@
         return;
       }
       table.innerHTML = `<table><thead><tr>
-        <th>Pokémon</th><th>Coach / Team</th><th class="num">Luck Rank</th><th class="num">Dmg Dealt</th><th class="num">Dmg Taken</th><th class="num">Kills</th><th class="num">Kills/Game</th><th class="num">Assists</th><th class="num">Deaths</th><th class="num">Games</th><th class="num">Avg Dmg/Game</th>
+        <th>Pokémon</th><th>Coach / Team</th><th class="num">Luck Rank</th><th class="num">Dmg Dealt</th><th class="num">Dmg Taken</th><th class="num">Kills</th><th class="num">Kills/Game</th><th class="num">Assists</th><th class="num">Fallen</th><th class="num">Games</th><th class="num">Avg Dmg/Game</th>
       </tr></thead><tbody>
         ${stats.map(s=>`<tr class="search-match" data-pokemon="${SBL.pokemon.escapeHtml(s.species)}" tabindex="0" role="button" title="Open ${SBL.pokemon.escapeHtml(s.species)} profile" style="cursor:pointer;">
           <td class="pname"><div class="pname-cell">${pokemonName(s.species,true,'sprite-xl')}</div></td>
@@ -1319,10 +1376,10 @@
         <button type="button" class="profile-section-tab" data-profile-tab="usage">Usage</button>
         <button type="button" class="profile-section-tab" data-profile-tab="kills">Kills (${num(s.kills)})</button>
         <button type="button" class="profile-section-tab" data-profile-tab="assists">Assists (${num(s.assists)})</button>
-        <button type="button" class="profile-section-tab" data-profile-tab="deaths">Deaths (${num(s.deaths)})</button>
+        <button type="button" class="profile-section-tab" data-profile-tab="deaths" >Fallen (${num(s.deaths)})</button>
       </div>
       <section class="profile-section-panel" data-profile-section="overview"><h3 class="mini-heading">Battle overview</h3><div class="profile-summary-grid">
-        <div><span>Games</span><strong>${num(s.games)}</strong></div><div><span>Kills</span><strong>${num(s.kills)}</strong></div><div><span>Assists</span><strong>${num(s.assists)}</strong></div><div><span>Deaths</span><strong>${num(s.deaths)}</strong></div><div><span>K/D</span><strong>${kd}</strong></div><div><span>Avg dmg/game</span><strong>${num(s.games)?(num(s.dealt)/num(s.games)).toFixed(1):'0'}</strong></div><div><span>Kills / Game</span><strong>${killsPerGame}</strong></div>${fallbackLuckRank ? `<div><span>Luck Rank</span><strong>#${fallbackLuckRank.rank}</strong><div class=\"note\">${fallbackLuckRank.score>=0?'+':''}${Number(fallbackLuckRank.score||0).toFixed(2)} luck</div></div>` : ''}
+        <div><span>Games</span><strong>${num(s.games)}</strong></div><div><span>Kills</span><strong>${num(s.kills)}</strong></div><div><span>Assists</span><strong>${num(s.assists)}</strong></div><div><span>Fallen</span><strong>${num(s.deaths)}</strong></div><div><span>K/D</span><strong>${kd}</strong></div><div><span>Avg dmg/game</span><strong>${num(s.games)?(num(s.dealt)/num(s.games)).toFixed(1):'0'}</strong></div><div><span>Kills / Game</span><strong>${killsPerGame}</strong></div>${fallbackLuckRank ? `<div><span>Luck Rank</span><strong>#${fallbackLuckRank.rank}</strong><div class=\"note\">${fallbackLuckRank.score>=0?'+':''}${Number(fallbackLuckRank.score||0).toFixed(2)} luck</div></div>` : ''}
       </div></section>
       <section class="profile-section-panel" data-profile-section="damage" hidden><h3 class="mini-heading">Damage</h3><div class="profile-summary-grid">
         <div><span>Damage dealt</span><strong>${num(s.dealt).toFixed(1)}</strong></div><div><span>Damage taken</span><strong>${num(s.taken).toFixed(1)}</strong></div><div><span>Direct damage</span><strong>${num(s.directDamage).toFixed(1)}</strong></div><div><span>Indirect damage</span><strong>${num(s.indirectDamage).toFixed(1)}</strong></div>
@@ -1956,12 +2013,12 @@
               <div><span>Taken</span><strong>${total.taken.toFixed(1)}</strong></div>
               <div><span>Kills</span><strong>${total.kills}</strong></div>
               <div><span>Assists</span><strong>${total.assists||0}</strong></div>
-              <div><span>Deaths</span><strong>${total.deaths}</strong></div>
+              <div><span>Fallen</span><strong>${total.deaths}</strong></div>
             </div>
           </div>
           <div class="franchise-table-wrap">
             <table class="franchise-table">
-              <thead><tr><th>#</th><th>Pokémon</th><th class="num">Points</th><th class="num">Dmg Dealt</th><th class="num">Dmg Taken</th><th class="num">Kills</th><th class="num">Kills/Game</th><th class="num">Assists</th><th class="num">Deaths</th><th class="num">Apps</th></tr></thead>
+              <thead><tr><th>#</th><th>Pokémon</th><th class="num">Points</th><th class="num">Dmg Dealt</th><th class="num">Dmg Taken</th><th class="num">Kills</th><th class="num">Kills/Game</th><th class="num">Assists</th><th class="num">Fallen</th><th class="num">Apps</th></tr></thead>
               <tbody>${rows}</tbody>
             </table>
           </div>
