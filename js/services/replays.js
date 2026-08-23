@@ -338,6 +338,44 @@
     let lastMove = null; // {source, target, move}
     let currentTurn = 0;
     let winner = null;
+    // Track side screens independently so we can infer Light Clay only when a
+    // screen is demonstrably active for longer than the normal 5 turns.
+    // Showdown does not print the held item for this case, but it does print
+    // sidestart/sideend events and turn numbers, which is enough to reconstruct
+    // the observed duration.
+    const activeScreens = {p1:{}, p2:{}};
+    const screenInferenceRecorded = new Set();
+    function finishScreen(side, condition, endTurn, reason='sideend'){
+      const state = activeScreens[side]?.[condition];
+      if(!state) return;
+      const turns = Math.max(0, Number(endTurn||currentTurn) - Number(state.createdTurn||0));
+      // Reflect / Light Screen / Aurora Veil last 5 turns normally and 8 with
+      // Light Clay. We only infer Light Clay when the observed screen exceeded
+      // the normal duration and therefore cannot be explained by an ordinary
+      // screen. A source Pokémon must also be known from the creating move.
+      if(turns > 5 && state.sourceMk && state.sourceStats){
+        const key = `${state.sourceMk}|${condition}|${state.createdTurn}`;
+        if(!screenInferenceRecorded.has(key)){
+          screenInferenceRecorded.add(key);
+          recordInferredItem(state.sourceStats, 'Light Clay', `${condition} remained active for ${turns} turns (turn ${state.createdTurn} to ${endTurn}); exceeds the normal 5-turn duration`);
+        }
+      }
+      delete activeScreens[side][condition];
+    }
+    function startScreen(side, condition, sourceSlot){
+      if(!SCREEN_CONDITIONS.has(condition) || !side) return;
+      // A second sidestart of the same condition replaces the previous screen.
+      // Finalize the old one first so a replacement cannot accidentally count
+      // as an uninterrupted Light Clay screen.
+      if(activeScreens[side]?.[condition]) finishScreen(side, condition, currentTurn, 'replaced');
+      const source = sourceSlot && slots[sourceSlot] ? sourceSlot : null;
+      const sourceStats = source ? ensureMon(source) : null;
+      activeScreens[side][condition] = {
+        createdTurn: currentTurn,
+        sourceMk: source ? monKey(source) : null,
+        sourceStats,
+      };
+    }
     const luck = {p1:newLuckSide(), p2:newLuckSide()};
     const luckPokemon = {};
     function pokemonLuckForSlot(slot){
@@ -437,6 +475,8 @@
     }
 
     const HAZARD_MOVES = ['Stealth Rock','Spikes'];
+    const SCREEN_MOVES = ['Reflect','Light Screen','Aurora Veil'];
+    const SCREEN_CONDITIONS = new Set(SCREEN_MOVES);
     const DELAYED_MOVES = ['Future Sight','Doom Desire'];
     const STATUS_TAGS = ['psn','tox','brn'];
     const RESIDUAL_MOVES = [
@@ -480,19 +520,106 @@
       const s = slots[slot];
       return s?.monId || null;
     }
+    function recordInferredItem(stats, item, evidence){
+      if(!stats || !item) return;
+      stats.inferredItems ||= {};
+      const key = String(item).trim();
+      if(!key) return;
+      // Item evidence is a per-game fact, not a per-event counter. A Pokémon can
+      // trigger the same inference several times in one replay (e.g. multiple
+      // 1/16 heals), but that still means it held the item in only one game.
+      stats.inferredItems[key] = 1;
+      stats.itemEvidence ||= {};
+      stats.itemEvidence[key] ||= [];
+      if(evidence && !stats.itemEvidence[key].includes(evidence)) stats.itemEvidence[key].push(evidence);
+    }
+
+    // Black Sludge is only a valid inference for Poison-type Pokémon.
+    // Both Leftovers and Black Sludge restore 1/16 HP, so HP recovery alone
+    // cannot distinguish them; the Pokémon's typing is the necessary extra
+    // constraint. Keep this list local to the parser so replay parsing remains
+    // deterministic and does not depend on a network request.
+    const POISON_TYPE_SPECIES = new Set([
+      'Bulbasaur','Ivysaur','Venusaur','Venusaur-Mega','Venusaur-Gmax',
+      'Weedle','Kakuna','Beedrill','Beedrill-Mega','Ekans','Arbok',
+      'Nidoran-F','Nidorina','Nidoqueen','Nidoran-M','Nidorino','Nidoking',
+      'Zubat','Golbat','Crobat','Oddish','Gloom','Vileplume','Tentacruel',
+      'Grimer','Muk','Koffing','Weezing','Weezing-Galar','Gastly','Haunter','Gengar','Gengar-Mega',
+      'Spinarak','Ariados','Qwilfish','Qwilfish-Hisui','Dustox','Roselia','Swalot',
+      'Seviper','Stunky','Skuntank','Croagunk','Toxicroak','Skorupi','Drapion',
+      'Trubbish','Garbodor','Garbodor-Gmax','Foongus','Amoonguss','Tentacool',
+      'Venipede','Whirlipede','Scolipede','Dragalge','Mareanie','Toxapex',
+      'Salandit','Salazzle','Naganadel','Poipole','Eternatus','Eternatus-Eternamax',
+      'Glimmet','Glimmora','Varoom','Revavroom','Clodsire','Iron Moth',
+      'Pecharunt','Galarian-Weezing'
+    ]);
+    function isPoisonTypeSpecies(species){
+      const raw=String(species||'').trim();
+      if(!raw) return false;
+      const normalized=raw.replace(/\s+/g,'-');
+      return POISON_TYPE_SPECIES.has(raw) || POISON_TYPE_SPECIES.has(normalized);
+    }
+
+    function recordConfirmedItem(stats, item, evidence){
+      if(!stats || !item) return;
+      stats.confirmedItems ||= {};
+      const key = String(item).trim();
+      if(!key) return;
+      // A confirmed item belongs to this Pokémon's game record. Repeated Showdown
+      // item events in the same replay must not inflate the number of games held.
+      stats.confirmedItems[key] = 1;
+      stats.itemEvidence ||= {};
+      stats.itemEvidence[key] ||= [];
+      const ev = evidence || `Showdown item source: ${key}`;
+      if(!stats.itemEvidence[key].includes(ev)) stats.itemEvidence[key].push(ev);
+    }
+
+    function inferItemFromTags(stats, tags, context='') {
+      if(!stats || !tags) return;
+      const text = String(tags);
+      const m = text.match(/(?:\[from\]|\[of\])\s*item:\s*([^|\]]+)/i);
+      if(!m) return;
+      const raw = m[1].trim();
+      const known = {
+        'leftovers':'Leftovers','black sludge':'Black Sludge','life orb':'Life Orb','rocky helmet':'Rocky Helmet',
+        'weakness policy':'Weakness Policy','booster energy':'Booster Energy','throat spray':'Throat Spray',
+        'blunder policy':'Blunder Policy','white herb':'White Herb','mirror herb':'Mirror Herb',
+        'clear amulet':'Clear Amulet','light clay':'Light Clay','covert cloak':'Covert Cloak','focus sash':'Focus Sash',
+        'air balloon':'Air Balloon','eject button':'Eject Button','red card':'Red Card',
+        'mental herb':'Mental Herb','power herb':'Power Herb','sitrus berry':'Sitrus Berry','lum berry':'Lum Berry',
+        'chesto berry':'Chesto Berry','cheri berry':'Cheri Berry','pecha berry':'Pecha Berry',
+        'rawst berry':'Rawst Berry','aspear berry':'Aspear Berry','persim berry':'Persim Berry',
+        'aguav berry':'Aguav Berry','figy berry':'Figy Berry','iapapa berry':'Iapapa Berry','mago berry':'Mago Berry','wiki berry':'Wiki Berry'
+      };
+      const item = known[raw.toLowerCase()];
+      if(item) recordConfirmedItem(stats, item, context || `Showdown item source: ${item}`);
+    }
+
     function ensureMon(slot){
       const s = slots[slot];
       if(!s) return null;
       const k = monKey(slot);
       if(!mons[k]) mons[k] = {
         id:k, side:s.side, species:s.species, damageDealt:0, damageTaken:0,
-        kills:0, deaths:0, assists:0, appearances:0, killLog:[], deathLog:[], assistLog:[],
-        moves: {}, switches:0, leads:0,
+        kills:0, deaths:0, assists:0, appearances:0, sentOut:0, killLog:[], deathLog:[], assistLog:[],
+        moves: {}, items: {}, confirmedItems: {}, inferredItems: {}, heldItem:null, switches:0, leads:0,
         damageDealt:0, damageTaken:0, directDamage:0, indirectDamage:0,
         totalHpAvailable:(Number(s.hpMax)>0 ? Number(s.hpMax) : 100),
         initialHp:(Number(s.hpMax)>0 ? Number(s.hpMax) : 100),
         maxHpObserved:(Number(s.hpMax)>0 ? Number(s.hpMax) : null)
       };
+      // Older replay state / previously-created mon records may predate the
+      // item tracking fields. Normalize them before any item event touches the
+      // maps, otherwise an explicit item such as Leftovers can throw:
+      // `Cannot read properties of undefined (reading 'Leftovers')`.
+      mons[k].moves ||= {};
+      mons[k].items ||= {};
+      mons[k].confirmedItems ||= {};
+      mons[k].inferredItems ||= {};
+      mons[k].itemEvidence ||= {};
+      mons[k].killLog ||= [];
+      mons[k].deathLog ||= [];
+      mons[k].assistLog ||= [];
       if(Number.isFinite(s.hpMax) && s.hpMax > 0){
         const maxHp = Number(s.hpMax);
         mons[k].maxHpObserved = Math.max(mons[k].maxHpObserved || 0, maxHp);
@@ -882,6 +1009,23 @@
         if(targetFull){
           const target = targetFull.split(':')[0].trim();
           const targetMk = monKey(target);
+          const heldStats = ensureMon(target);
+          if(heldStats && itemName){
+            // An explicit Showdown item event is high-confidence evidence even if
+            // the replay never gave us a clean team-preview item record.
+            recordConfirmedItem(heldStats, itemName, `Showdown ${cmd} event`);
+            // Track the item this individual Pokémon was actually holding, not
+            // merely the number of times an item-removal/consumption event fired.
+            // A single -enditem event should count as one held-item occurrence.
+            // If the Pokémon later receives/uses another item, that new item is
+            // counted separately.
+            heldStats.items ||= {};
+            const previousHeld = String(heldStats.heldItem || '').trim();
+            if(previousHeld !== itemName){
+              heldStats.items[itemName] = (heldStats.items[itemName] || 0) + 1;
+            }
+            heldStats.heldItem = itemName;
+          }
           let sourceStats = null;
           if(tags.includes('[of]')){
             const ofSlot = ofSlotFromTag(tags);
@@ -905,6 +1049,11 @@
             // a known removal/transfer move caused the event.
             if(!removalMove && !transferMove) miscInc(misc.itemConsumed,lowerItem,1);
           }
+          // -enditem means the held item is no longer being held by this
+          // Pokémon (consumed, knocked off, removed, etc.).  Clear the live
+          // state so a later newly-acquired copy is counted as another held
+          // occurrence.
+          if(cmd === '-enditem' && heldStats) heldStats.heldItem = null;
           if(targetMk && sourceStats && sourceStats.side !== sideOf(target)){
             // Item removal is a separate strategic contribution.  NEVER use the
             // item-removal event itself as a replacement for the attacker's damage.
@@ -977,6 +1126,8 @@
         }
       } else if(cmd === '-boost' || cmd === '-unboost'){
         const target=parts[2] ? parts[2].split(':')[0].trim() : null;
+        const boostTargetStats = target ? ensureMon(target) : null;
+        inferItemFromTags(boostTargetStats, parts.slice(5).join('|'), `Showdown ${cmd} source`);
         if(target && lastMove && lastMove.target === target && sideOf(lastMove.source) !== sideOf(target)){
           const chance=getMoveSecondaryChance(lastMove.move,'boost',null);
           if(chance !== null && chance > 0 && chance < 100){
@@ -993,6 +1144,8 @@
         const slotFull=parts[2];
         const effect=parts.slice(3).join('|');
         const slot=slotFull ? slotFull.split(':')[0].trim() : null;
+        const activateStats = slot ? ensureMon(slot) : null;
+        inferItemFromTags(activateStats, effect, 'Showdown activation');
         if(slot && /move:\s*(Protect|Detect|Baneful Bunker|King's Shield|Spiky Shield|Silk Trap|Obstruct|Burning Bulwark|Max Guard)/i.test(effect) && lastMove?.source===slot){
           const n=(protectStreak[slot]||0)+1;
           protectStreak[slot]=n;
@@ -1316,6 +1469,25 @@
         const targetStats = ensureMon(slot);
         if(targetStats && gain > 0) targetStats.totalHpAvailable = (Number(targetStats.totalHpAvailable)||100) + gain;
         const tags = parts.slice(4).join('|');
+        inferItemFromTags(targetStats, tags, 'Showdown healing source');
+        // If the replay does not identify the item source, a repeated end-of-turn
+        // heal of exactly 1/16 max HP is strong evidence for Leftovers/Black Sludge.
+        // Poison typing is the constraint that makes Black Sludge a valid
+        // candidate; non-Poison Pokémon can only get the Leftovers inference.
+        if(targetStats && gain > 0 && !/\[from\]\s*item:/i.test(tags)){
+          const maxHp = Number(targetStats.maxHpObserved || slots[slot].hpMax || 0);
+          const expected = maxHp / 16;
+          const close = maxHp > 0 && Math.abs(gain - expected) <= 1;
+          if(close){
+            // Both items heal exactly 1/16 max HP. Typing lets us reject Black
+            // Sludge on non-Poison Pokémon; an explicit [from] item source elsewhere
+            // still overrides this as confirmed evidence.
+            recordInferredItem(targetStats, 'Leftovers', 'Repeated 1/16 max HP end-of-turn recovery; item source not revealed');
+            if(isPoisonTypeSpecies(targetStats.species || slots[slot]?.species)){
+              recordInferredItem(targetStats, 'Black Sludge', 'Repeated 1/16 max HP end-of-turn recovery on a Poison-type; item source not revealed');
+            }
+          }
+        }
         if(targetStats && tags.includes('Healing Wish')){
           const sourceTag = tags.match(/\[(?:wisher|of)\]\s*(p[12][a-f])\s*:/i);
           const sourceSlot = sourceTag ? sourceTag[1] : ofSlotFromTag(tags);
@@ -1328,6 +1500,22 @@
         }
         const parsedMaxHp = parseMaxHP(parts[3]);
         if(parsedMaxHp) slots[slot].hpMax = Math.max(slots[slot].hpMax || 0, parsedMaxHp);
+      } else if(cmd === '-sidestart' || cmd === '-sideend'){
+        const sideRaw = parts[2] || '';
+        const side = sideRaw.split(':')[0].trim();
+        const condition = String(parts[3] || '').trim();
+        if((side === 'p1' || side === 'p2') && SCREEN_CONDITIONS.has(condition)){
+          if(cmd === '-sidestart'){
+            // The creating move immediately precedes the sidestart event in
+            // Showdown's protocol. Only use it when it is the matching screen
+            // move and it was performed by the same side.
+            const source = lastMove && SCREEN_CONDITIONS.has(lastMove.move) && sideOf(lastMove.source) === side
+              ? lastMove.source : null;
+            startScreen(side, condition, source);
+          } else {
+            finishScreen(side, condition, currentTurn, 'sideend');
+          }
+        }
       } else if(cmd === 'faint'){
         const slotFull = parts[2];
         if(!slotFull) continue;
@@ -1545,32 +1733,89 @@
     // and duplicate species from contaminating attribution while the replay is
     // being processed.
     const aggregatedMons = {};
+
+    // Sitewide appearance rule: a Pokémon "appears" in a week/battle when it
+    // is part of the submitted team preview, even if it never gets sent onto
+    // the field. Keep sentOut separately for the old field-entry concept.
+    for(const side of ['p1','p2']){
+      for(const rosterSpeciesRaw of (teamRoster[side]||[])){
+        const species=canonicalBattleSpecies(rosterSpeciesRaw);
+        if(!species) continue;
+        const key=side+'|'+normName(species);
+        if(!aggregatedMons[key]){
+          aggregatedMons[key]={
+            id:key, side, species, appearances:1, sentOut:0, kills:0, deaths:0, assists:0,
+            moves:{}, items:{}, confirmedItems:{}, inferredItems:{}, itemEvidence:{}, heldItem:null, killLog:[], deathLog:[], assistLog:[], switches:0, leads:0,
+            damageDealt:0, damageTaken:0, directDamage:0, indirectDamage:0,
+            totalHpAvailable:0, initialHp:100, maxHpObserved:null
+          };
+        }
+      }
+    }
+
     for(const stint of Object.values(mons)){
       const species = canonicalBattleSpecies(stint.species);
       const key = stint.side + '|' + normName(species);
       if(!aggregatedMons[key]){
         aggregatedMons[key] = Object.assign({}, stint, {
-          id:key, species, appearances:1, moves:{...(stint.moves||{})}, killLog:[...(stint.killLog||[])], deathLog:[...(stint.deathLog||[])], assistLog:[...(stint.assistLog||[])],
-          switches:Number(stint.switches||0), leads:Number(stint.leads||0), directDamage:Number(stint.directDamage||0), indirectDamage:Number(stint.indirectDamage||0),
+          id:key, species, appearances:1, sentOut:Number(stint.appearances||0),
+          moves:{...(stint.moves||{})}, items:{...(stint.items||{})}, confirmedItems:{...(stint.confirmedItems||{})}, inferredItems:{...(stint.inferredItems||{})}, heldItem:stint.heldItem||null,
+          killLog:[...(stint.killLog||[])], deathLog:[...(stint.deathLog||[])], assistLog:[...(stint.assistLog||[])],
+          switches:Number(stint.switches||0), leads:Number(stint.leads||0),
+          directDamage:Number(stint.directDamage||0), indirectDamage:Number(stint.indirectDamage||0),
           totalHpAvailable:Number(stint.totalHpAvailable||0), initialHp:Number(stint.initialHp||100)
         });
       } else {
         const out = aggregatedMons[key];
+        out.sentOut += Number(stint.appearances||0);
         out.damageDealt += Number(stint.damageDealt||0);
         out.damageTaken += Number(stint.damageTaken||0);
         out.kills += Number(stint.kills||0);
         out.deaths += Number(stint.deaths||0);
         out.assists += Number(stint.assists||0);
-        out.switches += Number(stint.switches||0); out.leads += Number(stint.leads||0);
-        out.directDamage += Number(stint.directDamage||0); out.indirectDamage += Number(stint.indirectDamage||0);
+        out.switches += Number(stint.switches||0);
+        out.leads += Number(stint.leads||0);
+        out.directDamage += Number(stint.directDamage||0);
+        out.indirectDamage += Number(stint.indirectDamage||0);
         out.totalHpAvailable += Number(stint.totalHpAvailable||0);
         out.killLog.push(...(stint.killLog||[]));
         out.deathLog.push(...(stint.deathLog||[]));
         out.assistLog.push(...(stint.assistLog||[]));
         for(const [mv,count] of Object.entries(stint.moves||{})) out.moves[mv]=(out.moves[mv]||0)+Number(count||0);
+        for(const [item,count] of Object.entries(stint.items||{})) out.items[item]=(out.items[item]||0)+Number(count||0);
+        for(const [item,count] of Object.entries(stint.confirmedItems||{})) out.confirmedItems[item]=(out.confirmedItems[item]||0)+Number(count||0);
+        for(const [item,count] of Object.entries(stint.inferredItems||{})) out.inferredItems[item]=(out.inferredItems[item]||0)+Number(count||0);
+        for(const [item,evidence] of Object.entries(stint.itemEvidence||{})){ out.itemEvidence ||= {}; out.itemEvidence[item] ||= []; for(const ev of (evidence||[])) if(!out.itemEvidence[item].includes(ev)) out.itemEvidence[item].push(ev); }
         if(Number.isFinite(stint.maxHpObserved)) out.maxHpObserved=Math.max(out.maxHpObserved||0,stint.maxHpObserved);
       }
     }
+
+    for(const m of Object.values(aggregatedMons)){
+      m.appearances = 1;
+      // A parsed replay is exactly one game. Item counts in the replay-level
+      // record must therefore be binary: an item was observed/inferred in this
+      // game, or it was not. Never carry event/stint counts into the game-set.
+      const gameItems={};
+      const gameConfirmed={};
+      const gameInferred={};
+      for(const item of Object.keys(m.items||{})) gameItems[item]=1;
+      for(const item of Object.keys(m.confirmedItems||{})) gameConfirmed[item]=1;
+      for(const item of Object.keys(m.inferredItems||{})) gameInferred[item]=1;
+      m.items=gameItems;
+      m.confirmedItems=gameConfirmed;
+      m.inferredItems=gameInferred;
+      m.gameSets=[{replayId: String(replayId||''), moves:{...(m.moves||{})}, items:{...gameItems}, confirmedItems:{...gameConfirmed}, inferredItems:{...gameInferred}, itemEvidence:{...(m.itemEvidence||{})}, sentOut:Number(m.sentOut||0), led:Number(m.leads||0)>0 ? 1 : 0}];
+    }
+
+    // Some replays end without an explicit sideend event. Finalize any screen
+    // still active at the final observed turn so a full 8-turn screen is not
+    // lost merely because the battle ended on that turn.
+    for(const side of ['p1','p2']){
+      for(const condition of Object.keys(activeScreens[side]||{})){
+        finishScreen(side, condition, currentTurn, 'replay-end');
+      }
+    }
+
     // Final parser invariant: total damage must equal direct + indirect.
     // This also repairs records produced by an older parser version when one of
     // the new buckets was missing, without changing the underlying K/D/A logs.
@@ -1609,7 +1854,7 @@
       for(const k of ['crits','critLuck','dodges','moveDodgeLuck','lowAccuracyHits','lowAccuracyHitLuck','lowAccuracyDodges','statusDodgeLuck','secondaryProcs','secondaryLuck','secondaryDodges','secondaryDodgeLuck','flinches','flinchLuck','confusionSelfHits','confusionLuck','protectSuccesses','protectLuck','fullParalysis','paralysisDodgeLuck','paralysisDodges','sleepTurns','sleepEvents','sleepDurationLuck','freezeTurns','freezeEvents','freezeDurationLuck']) out[k]+=Number(l[k]||0);
       out.luckEvents.push(...(l.luckEvents||[]));
     }
-    return { parserVersion: 6, id: replayId, format: json.formatid || json.format || '', uploadtime: json.uploadtime || null,
+    return { parserVersion: 7, id: replayId, format: json.formatid || json.format || '', uploadtime: json.uploadtime || null,
       players, mons:aggregatedMons, winner, teamRoster, luck, luckPokemon:aggregatedLuckPokemon, misc
       };
   }

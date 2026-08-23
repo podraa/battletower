@@ -90,8 +90,9 @@
     addNumber(row,'kills',mon?.kills);
     addNumber(row,'deaths',mon?.deaths);
     addNumber(row,'assists',Array.isArray(mon?.assistLog) ? mon.assistLog.length : mon?.assists);
-    addNumber(row,'games',Number(mon?.appearances)||0);
-    addNumber(row,'appearances',Number(mon?.appearances)||0);
+    const effectiveAppearance=options.appearanceOverride!=null ? Number(options.appearanceOverride)||0 : (Number(mon?.appearances)||0);
+    addNumber(row,'games',effectiveAppearance);
+    addNumber(row,'appearances',effectiveAppearance);
 
     if(replay?.id) row.replays.add(replay.id);
     if(typeof options.teamFor==='function'){
@@ -126,7 +127,26 @@
         // Preserve the site's existing display convention: identity determines
         // grouping, while the first/available form-aware display name is shown.
         row.species=display(mon.species)||row.species;
-        mergeMon(row,mon,replay,options);
+        const roster=(replay?.teamRoster?.[mon?.side]||[]).map(x=>typeof x==='string'?x:String(x?.species||x?.name||'')).filter(Boolean);
+        const inSubmittedTeam=roster.some(x=>identity(x)===identity(mon.species));
+        mergeMon(row,mon,replay,{...options,appearanceOverride:inSubmittedTeam?1:undefined});
+      }
+      // Legacy processed replays may have teamRoster but only contain Pokémon
+      // that were actually sent out in `mons`. Seed the missing submitted-team
+      // members so sitewide appearance stats still mean "brought this week".
+      for(const side of ['p1','p2']){
+        for(const raw of (replay?.teamRoster?.[side]||[])){
+          const species=typeof raw==='string'?raw:String(raw?.species||raw?.name||'');
+          if(!species) continue;
+          const key=includeForms ? identity(species) : identity(display(species));
+          if(!key) continue;
+          const already=[...Object.values(replay?.mons||{})].some(mon=>mon?.side===side && mon?.species && identity(mon.species)===key);
+          if(already) continue;
+          let row=out.get(key);
+          if(!row){row=empty(display(species));out.set(key,row);}
+          row.species=display(species)||row.species;
+          mergeMon(row,{species,side,appearances:1},replay,{...options,appearanceOverride:1});
+        }
       }
     }
 
@@ -155,7 +175,22 @@
             let row=out.get(key);
             if(!row){ row=empty(display(mon.species)); out.set(key,row); }
             row.species=display(mon.species)||row.species;
-            mergeMon(row,mon,replay,{...options,teamFor});
+            const roster=(replay?.teamRoster?.[mon?.side]||[]).map(x=>typeof x==='string'?x:String(x?.species||x?.name||'')).filter(Boolean);
+            const inSubmittedTeam=roster.some(x=>identity(x)===identity(mon.species));
+            mergeMon(row,mon,replay,{...options,teamFor,appearanceOverride:inSubmittedTeam?1:undefined});
+          }
+          for(const side of ['p1','p2']){
+            for(const raw of (replay?.teamRoster?.[side]||[])){
+              const species=typeof raw==='string'?raw:String(raw?.species||raw?.name||'');
+              if(!species) continue;
+              const key=includeForms ? identity(species) : identity(display(species));
+              if(!key) continue;
+              const already=[...Object.values(replay?.mons||{})].some(mon=>mon?.side===side && mon?.species && identity(mon.species)===key);
+              if(already) continue;
+              let row=out.get(key); if(!row){row=empty(display(species));out.set(key,row);}
+              row.species=display(species)||row.species;
+              mergeMon(row,{species,side,appearances:1},replay,{...options,teamFor,appearanceOverride:1});
+            }
           }
         }
         if(index<source.length){
