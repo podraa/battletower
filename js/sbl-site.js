@@ -353,6 +353,19 @@
 
     const client = getClient();
 
+    // The shared shell can execute before the deferred Supabase/auth scripts on
+    // some pages. In that case the old implementation permanently hid the
+    // privileged links. Re-run permission setup once the auth bootstrap is ready.
+    document.addEventListener('sbl:auth-ready', () => {
+      const readyClient = getClient();
+      if (readyClient) setupPermissions(readyClient);
+    }, { once: false });
+
+    document.addEventListener('sbl:auth-changed', () => {
+      const readyClient = getClient();
+      if (readyClient) setupPermissions(readyClient);
+    }, { once: false });
+
     if (client) {
       setupPermissions(client);
 
