@@ -1030,6 +1030,35 @@ body{
 <style id="phase7-performance-shell">
   .match-prep-initialising{min-height:180px;display:grid;place-items:center;}
 </style>
+<style id="misc-stats-ui">
+.misc-wrap{display:flex;flex-direction:column;gap:14px}
+.misc-hero{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;padding:20px}
+.misc-hero h2{margin:0 0 5px;font-size:21px}
+.misc-stat-control{min-width:240px}
+.misc-stat-control select{min-width:240px}
+.misc-formula{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;padding:12px 16px;color:var(--text-dim);font-size:12px}
+.misc-formula strong{color:var(--text)}
+.misc-formula span{padding-left:12px;border-left:1px solid var(--border)}
+.misc-formula b{color:var(--amber)}
+.misc-card{padding:18px}
+.misc-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}
+.misc-card h3{margin:0;font-size:17px}
+.misc-list{display:flex;flex-direction:column;gap:6px}
+.misc-row{display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:10px;padding:9px 11px;background:var(--panel-alt);border:1px solid var(--border);border-radius:9px}
+.misc-row:hover{border-color:var(--amber)}
+.misc-rank{color:var(--text-dim);font-family:var(--mono);font-size:11px}
+.misc-name{min-width:0;overflow-wrap:anywhere}
+.misc-with-sprite{display:flex;align-items:center;gap:8px}.misc-pokemon-sprite{width:32px;height:32px;object-fit:contain;flex:0 0 32px}.misc-item-sprite{width:32px;height:32px;object-fit:contain;flex:0 0 32px}
+.misc-row strong{font-family:var(--mono);font-size:13px}
+.misc-battle-row .misc-name{font-weight:650}
+@media(max-width:700px){
+  .misc-hero{align-items:stretch;flex-direction:column}
+  .misc-stat-control,.misc-stat-control select{width:100%;min-width:0}
+  .misc-formula{display:block}
+  .misc-formula span{display:block;border-left:0;padding:5px 0 0}
+  .misc-card{padding:14px}
+}
+</style>
 </head>
 <body data-admin="true">
 <style>
@@ -1052,6 +1081,7 @@ body{
     <button data-tab="goldenfist">Golden Fist</button>
     <button data-tab="luckiest">Luckiest Team</button>
     <button data-tab="causes">Death Stats</button>
+    <button data-tab="misc">Misc</button>
     <button data-tab="teams">Franchise Stats</button>
     <button data-tab="replays">Replay Browser</button>
   </nav>

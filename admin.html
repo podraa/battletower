@@ -729,6 +729,119 @@ input,textarea,select{
 <link href="css/sbl-components.css" rel="stylesheet"/>
 <link href="css/sbl-sprites-layout.css" rel="stylesheet"/>
 <link href="css/sbl-phase7.css" rel="stylesheet"/>
+<style id="admin-clutter-reduction-final">
+/* Admin visual refresh only: no changes to tab behavior or underlying operations. */
+body[data-admin="true"]{background:var(--bg,#0e1218);}
+body[data-admin="true"] #app{max-width:1280px !important;padding:30px 26px 70px !important;}
+body[data-admin="true"] #app > header{padding:0 2px 8px !important;margin-bottom:18px !important;}
+body[data-admin="true"] #app > header h1{font-size:24px !important;letter-spacing:-.02em !important;}
+body[data-admin="true"] #app > header .sub{margin:5px 0 0 !important;}
+
+/* Replace the large nested navigation blocks with a quiet command bar. */
+body[data-admin="true"] .admin-nav{
+  display:grid !important;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px !important;
+  padding:0 !important;
+  margin:0 0 18px !important;
+  border:0 !important;
+}
+body[data-admin="true"] .admin-nav-group{min-width:0 !important;}
+body[data-admin="true"] .admin-nav-group-toggle{
+  min-height:40px !important;
+  padding:9px 12px !important;
+  border-radius:9px !important;
+  background:var(--panel) !important;
+  border:1px solid var(--border) !important;
+  font-size:12px !important;
+  letter-spacing:.01em;
+}
+body[data-admin="true"] .admin-nav-group.open .admin-nav-group-toggle{
+  border-color:color-mix(in srgb,var(--teal) 40%,var(--border)) !important;
+}
+body[data-admin="true"] .admin-nav-submenu{
+  margin-top:5px !important;
+  padding:4px !important;
+  border-radius:9px !important;
+  background:var(--panel) !important;
+  box-shadow:0 10px 24px rgba(0,0,0,.12) !important;
+}
+body[data-admin="true"] .admin-nav-item{
+  padding:8px 10px !important;
+  border-radius:6px !important;
+  font-size:12px !important;
+}
+body[data-admin="true"] .admin-nav-item.active{font-weight:700 !important;color:var(--text) !important;background:var(--panel-alt) !important;}
+
+/* Content is a restrained workspace instead of a stack of heavy boxes. */
+body[data-admin="true"] #content > .panel{
+  padding:20px !important;
+  border-radius:12px !important;
+  background:var(--panel) !important;
+  border-color:var(--border) !important;
+  box-shadow:0 8px 24px rgba(0,0,0,.06) !important;
+}
+body[data-admin="true"] #content > .panel + .panel{margin-top:10px !important;}
+body[data-admin="true"] #content > .panel > h2{
+  margin-bottom:6px !important;
+  color:var(--text) !important;
+  font-size:14px !important;
+  letter-spacing:.01em !important;
+  text-transform:none !important;
+}
+body[data-admin="true"] #content .row{gap:10px !important;margin-bottom:10px !important;}
+body[data-admin="true"] #content .foot-actions{margin-top:10px !important;}
+body[data-admin="true"] #content table th{padding:9px 10px !important;}
+body[data-admin="true"] #content table td{padding:9px 10px !important;}
+body[data-admin="true"] #content .trade-card,
+body[data-admin="true"] #content .roster-admin-card,
+body[data-admin="true"] #content .player-group,
+body[data-admin="true"] #content .gf-row,
+body[data-admin="true"] #content .commissioner-budget-card{
+  box-shadow:none !important;
+}
+
+/* Replay filtering: compact, obvious, and deliberately presentation-only. */
+.replay-filter-card{
+  margin:12px 0 14px;
+  padding:13px 14px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--panel-alt);
+}
+.replay-filter-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;}
+.replay-filter-title{font-size:12px;font-weight:700;color:var(--text);}
+.replay-filter-help{font-size:11px;color:var(--text-dim);margin-top:2px;line-height:1.4;}
+.replay-filter-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+.replay-filter-grid label{margin-bottom:5px;}
+.replay-filter-grid select{width:100%;}
+@media(max-width:800px){
+  body[data-admin="true"] .admin-nav{grid-template-columns:1fr !important;}
+  .replay-filter-grid{grid-template-columns:1fr;}
+}
+
+/* Admin navigation and section organization */
+body[data-admin="true"] .admin-nav{align-items:flex-start;min-height:46px;position:relative;}
+body[data-admin="true"] .admin-nav-group{position:relative;}
+body[data-admin="true"] .admin-nav-submenu{position:absolute;top:calc(100% + 4px);left:0;z-index:50;min-width:190px;display:none;}
+body[data-admin="true"] .admin-nav-group.open .admin-nav-submenu{display:flex;flex-direction:column;min-height:38px;}
+body[data-admin="true"] .admin-nav-group-toggle{white-space:nowrap;}
+body[data-admin="true"] .admin-nav-item{white-space:nowrap;}
+body[data-admin="true"] #content .admin-section{margin-top:14px;}
+body[data-admin="true"] #content .admin-section:first-child{margin-top:0;}
+body[data-admin="true"] #content .admin-section-title{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin:0 0 10px;}
+body[data-admin="true"] #content .admin-section-title h2{margin:0!important;}
+body[data-admin="true"] #content .admin-section-title .note{margin:2px 0 0;}
+body[data-admin="true"] #content .admin-subsection{padding:12px 0;border-top:1px solid var(--border);} 
+body[data-admin="true"] #content .admin-subsection:first-child{border-top:0;padding-top:0;}
+body[data-admin="true"] #content .admin-subsection h3{margin:0 0 5px;font-size:13px;}
+body[data-admin="true"] #content .admin-subsection > .note{margin:0 0 10px;}
+body[data-admin="true"] #content .admin-danger-section{border:1px solid color-mix(in srgb, var(--danger,#d55) 40%, var(--border));border-radius:10px;padding:12px;margin-top:12px;}
+body[data-admin="true"] #content .admin-danger-section h3{color:var(--danger,#d55);}
+body[data-admin="true"] #content .admin-filter-grid{grid-template-columns:repeat(2,minmax(180px,260px));}
+@media(max-width:800px){body[data-admin="true"] #content .admin-filter-grid{grid-template-columns:1fr;}}
+</style>
+
 </head>
 <body data-admin="true">
 <div id="app" style="display:none">
@@ -736,31 +849,49 @@ input,textarea,select{
 <h1> Admin Dashboard <span class="badge" id="seasonBadge" style="vertical-align:middle;"></span></h1>
 </header>
 <nav class="tabs admin-nav" id="tabs">
-<div class="admin-nav-group" data-nav-group="replays">
-<button class="admin-nav-group-toggle" type="button">Replay Management <span>⌄</span></button>
-<div class="admin-nav-submenu">
-<button class="admin-nav-item active" data-tab="process">Process Replays</button>
-<button class="admin-nav-item" data-tab="players">Replays by Player</button>
-</div>
-</div>
-<div class="admin-nav-group" data-nav-group="league">
-<button class="admin-nav-group-toggle" type="button">League Operations <span>⌄</span></button>
-<div class="admin-nav-submenu">
-<button class="admin-nav-item" data-tab="draft">Draft</button>
-<button class="admin-nav-item" data-tab="freeagency">Free Agency</button>
-<button class="admin-nav-item" data-tab="trades">Trades</button>
-<button class="admin-nav-item" data-tab="updates">League Updates</button>
-</div>
-</div>
-<div class="admin-nav-group" data-nav-group="admin">
-<button class="admin-nav-group-toggle" type="button">Administration <span>⌄</span></button>
-<div class="admin-nav-submenu">
-<button class="admin-nav-item" data-tab="commissioner">User Control</button>
-<button class="admin-nav-item" data-tab="admin-log">Admin Log</button>
-<button class="admin-nav-item" data-tab="seasonsetup">Season Setup</button>
-<button class="admin-nav-item" data-tab="settings">Settings</button>
-</div>
-</div>
+  <div class="admin-nav-group open" data-nav-group="overview">
+    <button class="admin-nav-group-toggle" type="button">Overview <span>⌄</span></button>
+    <div class="admin-nav-submenu">
+      <button class="admin-nav-item active" data-tab="overview">Dashboard</button>
+    </div>
+  </div>
+  <div class="admin-nav-group" data-nav-group="season">
+    <button class="admin-nav-group-toggle" type="button">Season <span>⌄</span></button>
+    <div class="admin-nav-submenu">
+      <button class="admin-nav-item" data-tab="seasonsetup">Season Management</button>
+      <button class="admin-nav-item" data-tab="draft">Draft</button>
+      <button class="admin-nav-item" data-tab="freeagency">Free Agency</button>
+      <button class="admin-nav-item" data-tab="trades">Trades</button>
+      <button class="admin-nav-item" data-tab="updates">League Updates</button>
+    </div>
+  </div>
+  <div class="admin-nav-group" data-nav-group="franchises">
+    <button class="admin-nav-group-toggle" type="button">Franchises &amp; Users <span>⌄</span></button>
+    <div class="admin-nav-submenu">
+      <button class="admin-nav-item" data-tab="settings">Franchises &amp; Users</button>
+      <button class="admin-nav-item" data-tab="commissioner">User Control</button>
+    </div>
+  </div>
+  <div class="admin-nav-group" data-nav-group="replays">
+    <button class="admin-nav-group-toggle" type="button">Replays <span>⌄</span></button>
+    <div class="admin-nav-submenu">
+      <button class="admin-nav-item" data-tab="process">Processed Replays</button>
+      <button class="admin-nav-item" data-tab="players">Replays by Player</button>
+    </div>
+  </div>
+  <div class="admin-nav-group" data-nav-group="data">
+    <button class="admin-nav-group-toggle" type="button">Data &amp; Maintenance <span>⌄</span></button>
+    <div class="admin-nav-submenu">
+      <button class="admin-nav-item" data-tab="settings-data">Data Management</button>
+      <button class="admin-nav-item" data-tab="admin-log">Admin Log</button>
+    </div>
+  </div>
+  <div class="admin-nav-group" data-nav-group="system">
+    <button class="admin-nav-group-toggle" type="button">System <span>⌄</span></button>
+    <div class="admin-nav-submenu">
+      <button class="admin-nav-item" data-tab="settings-system">System Settings</button>
+    </div>
+  </div>
 </nav>
 <!-- User Control UI: budgets and administration only; franchise rosters are intentionally not shown here. -->
 <div id="content"></div>
