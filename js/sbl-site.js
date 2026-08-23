@@ -111,9 +111,36 @@
 
     let ticking = false;
 
-    function updateForScroll() {
+    function isVisible(el) {
+      if (!el) return false;
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+      return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    function hasOpenPopup() {
+      const selectors = [
+        '[role=\"dialog\"]',
+        '.modal',
+        '.pokemon-overlay',
+        '.audit-overlay',
+        '.damage-calc-modal',
+        '.showdown-import-overlay',
+        '.prep-detail-modal',
+        '.luck-modal',
+        '[data-popup=\"true\"]'
+      ];
+      return selectors.some(selector => Array.from(document.querySelectorAll(selector)).some(isVisible));
+    }
+
+    function syncNavVisibility() {
+      const popupOpen = hasOpenPopup();
       const y = window.scrollY || document.documentElement.scrollTop || 0;
-      nav.classList.toggle('nav-hidden', y > 140);
+      nav.classList.toggle('nav-hidden', popupOpen || y > 140);
+    }
+
+    function updateForScroll() {
+      syncNavVisibility();
       ticking = false;
     }
 
@@ -124,15 +151,33 @@
       }
     }, { passive: true });
 
-    nav.addEventListener('mouseenter', () => nav.classList.remove('nav-hidden'));
+    nav.addEventListener('mouseenter', () => {
+      if (!hasOpenPopup()) nav.classList.remove('nav-hidden');
+    });
 
-    hover.addEventListener('mouseenter', () => nav.classList.remove('nav-hidden'));
+    hover.addEventListener('mouseenter', () => {
+      if (!hasOpenPopup()) nav.classList.remove('nav-hidden');
+    });
 
     document.addEventListener('mousemove', e => {
-      if (e.clientY <= 12) nav.classList.remove('nav-hidden');
+      if (e.clientY <= 12 && !hasOpenPopup()) nav.classList.remove('nav-hidden');
     }, { passive: true });
 
-    nav.classList.remove('nav-hidden');
+    // Any popup can be created by page-specific code. Watch the DOM so the
+    // shared navigation hides immediately when a dialog/overlay appears,
+    // without requiring each page to know about the nav implementation.
+    const popupObserver = new MutationObserver(() => syncNavVisibility());
+    popupObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'] });
+
+    // Clicking inside an open popup should keep the navigation hidden even
+    // if the popup is positioned below the nav or the nav was previously open.
+    document.addEventListener('click', e => {
+      if (e.target?.closest?.('[role=\"dialog\"], .modal, .pokemon-overlay, .audit-overlay, .damage-calc-modal, .showdown-import-overlay, .prep-detail-modal, [data-popup=\"true\"]')) {
+        nav.classList.add('nav-hidden');
+      }
+    }, true);
+
+    syncNavVisibility();
   }
 
   function lockNav(locked) {

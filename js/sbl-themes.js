@@ -57,30 +57,30 @@
     {id:'magenta', name:'Magenta', bg:'#170712', panel:'#280b20', panelAlt:'#38102c', border:'#5c1e4a', text:'#fff0fa', textDim:'#d39abb', accent:'#f0a', accentText:'#3d062c'},
     {id:'fuchsia', name:'Fuchsia', bg:'#170815', panel:'#280d23', panelAlt:'#3b1432', border:'#66205a', text:'#ffeafd', textDim:'#e18bcf', accent:'#ef5fd0', accentText:'#28091e'},
     {id:'blush', name:'Blush', bg:'#170b10', panel:'#27121b', panelAlt:'#3a1c28', border:'#653246', text:'#ffedf4', textDim:'#e8a2b8', accent:'#f58bb0', accentText:'#2a0c15'},
-    {id:'pikachu', name:'Pikachu', group:'Pokemon', bg:'#171507', panel:'#28220a', panelAlt:'#3a3010', border:'#665719', text:'#fff8cf', textDim:'#d9c66b', accent:'#facc15', accentText:'#211900'},
-    {id:'charizard', name:'Charizard', group:'Pokemon', bg:'#190805', panel:'#2b1108', panelAlt:'#3d1710', border:'#6d2a18', text:'#fff0e6', textDim:'#d99a79', accent:'#f97316', accentText:'#2a0b04'},
-    {id:'blastoise', name:'Blastoise', group:'Pokemon', bg:'#06121b', panel:'#0c2430', panelAlt:'#123746', border:'#24586b', text:'#e8faff', textDim:'#80b9c9', accent:'#38bdf8', accentText:'#062132'},
-    {id:'venusaur', name:'Venusaur', group:'Pokemon', bg:'#071308', panel:'#102416', panelAlt:'#18331d', border:'#2d5633', text:'#edffe9', textDim:'#8fbd88', accent:'#4ade80', accentText:'#07230f'},
-    {id:'gengar', name:'Gengar', group:'Pokemon', bg:'#10091a', panel:'#1b1028', panelAlt:'#29173b', border:'#4b2c67', text:'#f7edff', textDim:'#bca4d3', accent:'#a855f7', accentText:'#1b092c'},
-    {id:'umbreon', name:'Umbreon', group:'Pokemon', bg:'#08090d', panel:'#11151d', panelAlt:'#1b202a', border:'#3c424b', text:'#f7f3d7', textDim:'#a9a486', accent:'#facc15', accentText:'#181506'},
-    {id:'espeon', name:'Espeon', group:'Pokemon', bg:'#150d1c', panel:'#23142c', panelAlt:'#321d3e', border:'#5a3867', text:'#fff0ff', textDim:'#d0a8ce', accent:'#e879f9', accentText:'#32102f'},
-    {id:'lucario', name:'Lucario', group:'Pokemon', bg:'#08131b', panel:'#0e2430', panelAlt:'#173646', border:'#2b5a6d', text:'#e9fbff', textDim:'#8ab8c9', accent:'#38bdf8', accentText:'#071d2a'},
-    {id:'greninja', name:'Greninja', group:'Pokemon', bg:'#050f18', panel:'#0a1d2b', panelAlt:'#103145', border:'#20536a', text:'#e8faff', textDim:'#76aec3', accent:'#22d3ee', accentText:'#06252c'},
-    {id:'rayquaza', name:'Rayquaza', group:'Pokemon', bg:'#06130e', panel:'#0d2419', panelAlt:'#143424', border:'#2c5a3f', text:'#edfff5', textDim:'#87c19f', accent:'#22c55e', accentText:'#06230f'},
-    {id:'mewtwo', name:'Mewtwo', group:'Pokemon', bg:'#100d18', panel:'#1c1727', panelAlt:'#2b2339', border:'#4e3f63', text:'#f6f0ff', textDim:'#b8a6cb', accent:'#c084fc', accentText:'#251039'},
-    {id:'eevee', name:'Eevee', group:'Pokemon', bg:'#17100a', panel:'#2a1b0e', panelAlt:'#3b2816', border:'#664727', text:'#fff4df', textDim:'#d5ae7b', accent:'#c08457', accentText:'#2b170a'},
-    {id:'sylveon', name:'Sylveon', group:'Pokemon', bg:'#170c13', panel:'#28121e', panelAlt:'#3a1b2b', border:'#643449', text:'#fff1f8', textDim:'#e5a5bf', accent:'#67e8f9', accentText:'#1d2430'},
-    {id:'scizor', name:'Scizor', group:'Pokemon', bg:'#170608', panel:'#290c10', panelAlt:'#3b1319', border:'#6a242e', text:'#ffedf0', textDim:'#d88991', accent:'#ef4444', accentText:'#2c080d'},
-    {id:'metagross', name:'Metagross', group:'Pokemon', bg:'#091116', panel:'#111f28', panelAlt:'#19303c', border:'#31596b', text:'#edfaff', textDim:'#91afbb', accent:'#60a5fa', accentText:'#091b2a'},
-    {id:'dragapult', name:'Dragapult', group:'Pokemon', bg:'#081015', panel:'#101d24', panelAlt:'#172d35', border:'#2d5660', text:'#e8ffff', textDim:'#83bec2', accent:'#2dd4bf', accentText:'#062523'},
-    {id:'mimikyu', name:'Mimikyu', group:'Pokemon', bg:'#12110a', panel:'#211e12', panelAlt:'#302c19', border:'#5a5130', text:'#fffbe6', textDim:'#c7bb82', accent:'#eab308', accentText:'#211904'},
-    {id:'dialga', name:'Dialga', group:'Pokemon', bg:'#08121c', panel:'#102636', panelAlt:'#17384e', border:'#2d607c', text:'#eaf9ff', textDim:'#8ab7c8', accent:'#60a5fa', accentText:'#071c30'},
-    {id:'palkia', name:'Palkia', group:'Pokemon', bg:'#120814', panel:'#211021', panelAlt:'#321936', border:'#5a2e5d', text:'#fff0ff', textDim:'#c899cf', accent:'#d946ef', accentText:'#2b0b2f'},
-    {id:'giratina', name:'Giratina', group:'Pokemon', bg:'#0b090e', panel:'#17121c', panelAlt:'#241b29', border:'#493445', text:'#fff4cf', textDim:'#c8aa64', accent:'#f59e0b', accentText:'#261703'},
-    {id:'zacian', name:'Zacian', group:'Pokemon', bg:'#07101a', panel:'#0d1d30', panelAlt:'#15304a', border:'#2c567c', text:'#eaf6ff', textDim:'#8eb5d5', accent:'#60a5fa', accentText:'#07192b'},
-    {id:'zamazenta', name:'Zamazenta', group:'Pokemon', bg:'#13070b', panel:'#230d13', panelAlt:'#36151d', border:'#632633', text:'#ffedf1', textDim:'#d08b9b', accent:'#ef4444', accentText:'#2a080e'},
-    {id:'kyogre', name:'Kyogre', group:'Pokemon', bg:'#04101a', panel:'#092032', panelAlt:'#0e3148', border:'#205e7a', text:'#e6faff', textDim:'#70bdd6', accent:'#0ea5e9', accentText:'#04202e'},
-    {id:'groudon', name:'Groudon', group:'Pokemon', bg:'#170805', panel:'#2a1008', panelAlt:'#3c1710', border:'#6b2b18', text:'#fff0e5', textDim:'#dc9474', accent:'#ef4444', accentText:'#2d0904'},
+    {id:'pikachu', name:'Pikachu', group:'Pokemon', bg:'#171405', panel:'#29200a', panelAlt:'#3c2d0c', border:'#70551a', text:'#fff9d6', textDim:'#d8c36b', accent:'#facc15', accentText:'#221800'},
+    {id:'charizard', name:'Charizard', group:'Pokemon', bg:'#1b0705', panel:'#321008', panelAlt:'#49150b', border:'#7d2a16', text:'#fff2e8', textDim:'#e3a17c', accent:'#f97316', accentText:'#2c0903'},
+    {id:'blastoise', name:'Blastoise', group:'Pokemon', bg:'#06121a', panel:'#0b2730', panelAlt:'#12404b', border:'#256776', text:'#e8fbff', textDim:'#83c0ca', accent:'#38bdf8', accentText:'#05212d'},
+    {id:'venusaur', name:'Venusaur', group:'Pokemon', bg:'#071208', panel:'#112b18', panelAlt:'#1d3d23', border:'#3c6941', text:'#efffe9', textDim:'#9bc58e', accent:'#4ade80', accentText:'#07200d'},
+    {id:'gengar', name:'Gengar', group:'Pokemon', bg:'#100719', panel:'#21102f', panelAlt:'#321647', border:'#5a3475', text:'#faefff', textDim:'#c1a0d5', accent:'#a855f7', accentText:'#1b092b'},
+    {id:'umbreon', name:'Umbreon', group:'Pokemon', bg:'#07080c', panel:'#14151b', panelAlt:'#222329', border:'#4b4c4f', text:'#fff6d5', textDim:'#b9ae82', accent:'#facc15', accentText:'#191603'},
+    {id:'espeon', name:'Espeon', group:'Pokemon', bg:'#16091a', panel:'#2b1530', panelAlt:'#402044', border:'#70406d', text:'#fff0ff', textDim:'#dda7cf', accent:'#e879f9', accentText:'#33102f'},
+    {id:'lucario', name:'Lucario', group:'Pokemon', bg:'#07121a', panel:'#0d2834', panelAlt:'#154253', border:'#2b6877', text:'#eafcff', textDim:'#8bbdc9', accent:'#38bdf8', accentText:'#06202d'},
+    {id:'greninja', name:'Greninja', group:'Pokemon', bg:'#050c18', panel:'#0a2035', panelAlt:'#103c54', border:'#235f79', text:'#e8faff', textDim:'#79b7c9', accent:'#ef4444', accentText:'#30070b'},
+    {id:'rayquaza', name:'Rayquaza', group:'Pokemon', bg:'#07150b', panel:'#12301a', panelAlt:'#1d4221', border:'#6a5d18', text:'#fff9cf', textDim:'#c4bd75', accent:'#e11d48', accentText:'#fff5e8'},
+    {id:'mewtwo', name:'Mewtwo', group:'Pokemon', bg:'#100a18', panel:'#21152b', panelAlt:'#352040', border:'#65447a', text:'#f8f0ff', textDim:'#c1a5d0', accent:'#c084fc', accentText:'#251038'},
+    {id:'eevee', name:'Eevee', group:'Pokemon', bg:'#171009', panel:'#2b1a0d', panelAlt:'#3f2814', border:'#714827', text:'#fff3dd', textDim:'#d5ae7b', accent:'#c08457', accentText:'#2b170a'},
+    {id:'sylveon', name:'Sylveon', group:'Pokemon', bg:'#170912', panel:'#2a1020', panelAlt:'#40182f', border:'#71385a', text:'#fff0f8', textDim:'#e6a7c2', accent:'#67e8f9', accentText:'#17202a'},
+    {id:'scizor', name:'Scizor', group:'Pokemon', bg:'#160507', panel:'#2d0c10', panelAlt:'#43151b', border:'#7b2932', text:'#fff0f1', textDim:'#dc8e95', accent:'#ef4444', accentText:'#2d080d'},
+    {id:'metagross', name:'Metagross', group:'Pokemon', bg:'#091015', panel:'#14232d', panelAlt:'#1d3946', border:'#416b78', text:'#effcff', textDim:'#99b8c2', accent:'#60a5fa', accentText:'#091a28'},
+    {id:'dragapult', name:'Dragapult', group:'Pokemon', bg:'#071015', panel:'#10232b', panelAlt:'#193944', border:'#2e6570', text:'#eaffff', textDim:'#8ac5c8', accent:'#2dd4bf', accentText:'#062522'},
+    {id:'mimikyu', name:'Mimikyu', group:'Pokemon', bg:'#121007', panel:'#28210f', panelAlt:'#3d3218', border:'#6f5b25', text:'#fffbe5', textDim:'#cdbb78', accent:'#eab308', accentText:'#221a03'},
+    {id:'dialga', name:'Dialga', group:'Pokemon', bg:'#07121b', panel:'#102a3b', panelAlt:'#18445a', border:'#3b7086', text:'#eafaff', textDim:'#8fb9c8', accent:'#facc15', accentText:'#1f1700'},
+    {id:'palkia', name:'Palkia', group:'Pokemon', bg:'#120711', panel:'#25112a', panelAlt:'#3b1942', border:'#71345f', text:'#fff0ff', textDim:'#d09acb', accent:'#22d3ee', accentText:'#06262a'},
+    {id:'giratina', name:'Giratina', group:'Pokemon', bg:'#0b080f', panel:'#1b1220', panelAlt:'#2a1b2f', border:'#523c52', text:'#fff4cf', textDim:'#c9ac68', accent:'#f59e0b', accentText:'#271703'},
+    {id:'zacian', name:'Ho-Oh', group:'Pokemon', bg:'#140805', panel:'#2a1208', panelAlt:'#43200d', border:'#7d4a19', text:'#fff3d5', textDim:'#dcae68', accent:'#ef4444', accentText:'#fff3d5'},
+    {id:'zamazenta', name:'Lugia', group:'Pokemon', bg:'#07111a', panel:'#10273a', panelAlt:'#183f56', border:'#3c7188', text:'#eefcff', textDim:'#9abecb', accent:'#e2e8f0', accentText:'#15212b'},
+    {id:'kyogre', name:'Gardevoir', group:'Pokemon', bg:'#140a16', panel:'#271329', panelAlt:'#3d1c40', border:'#6e3c72', text:'#fff0ff', textDim:'#d4a7d0', accent:'#34d399', accentText:'#05271d'},
+    {id:'groudon', name:'Zoroark', group:'Pokemon', bg:'#0c0b0f', panel:'#1c151c', panelAlt:'#32212c', border:'#66354b', text:'#fff0f3', textDim:'#c8a0ad', accent:'#ef4444', accentText:'#2b070d'},
     {id:'amber', name:'Amber', bg:'#0e1218', panel:'#161c26', panelAlt:'#1c2432', border:'#2a3444', text:'#e8edf5', textDim:'#8996a8', accent:'#ffb454', accentText:'#1a1206'}
   ];
   // Single shared source of truth for every theme preset on the site.
@@ -88,7 +88,7 @@
   // window.SBL_THEMES instead of keeping their own copy, so a theme only
   // ever needs to be added in one place.
   window.SBL_THEMES = THEMES;
-  window.SBL_THEMES_VERSION = '2026-08-23-pokemon';
+  window.SBL_THEMES_VERSION = '2026-08-24-pokemon-contrast';
   const THEME_KEY='sbl_dashboard_theme';
   const CUSTOM_KEY='sbl_dashboard_custom_theme';
   const TEAL='#5eead4', RED='#ff7a7a';
