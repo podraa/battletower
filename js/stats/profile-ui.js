@@ -78,7 +78,7 @@
     const killRows = (Array.isArray(s.killLog) ? s.killLog : []).map(x=>normalizeProfileLog(x,'kill')).sort((a,b)=>(a.replayDate-b.replayDate)||(a.turn-b.turn));
     const assistRows = (Array.isArray(s.assistLog) ? s.assistLog : []).map(x=>normalizeProfileLog(x,'assist')).sort((a,b)=>(a.replayDate-b.replayDate)||(a.turn-b.turn));
     const deathRows = (Array.isArray(s.deathLog) ? s.deathLog : []).map(x=>normalizeProfileLog(x,'death')).sort((a,b)=>(a.replayDate-b.replayDate)||(a.turn-b.turn));
-    const killPanel = killRows.length ? `<table><thead><tr><th>Week</th><th>Matchup</th><th>Turn</th><th>Victim</th><th>Cause</th><th>Replay</th></tr></thead><tbody>${killRows.map(x=>`<tr><td>${escapeHtml(safeReplayContext(x.replayId).week)}</td><td>${escapeHtml(safeReplayContext(x.replayId).matchup)}</td><td>${x.turn}</td><td>${x.victim ? safeEventPokemon(x.victim) : '?'}</td><td>${escapeHtml(safeCause(x.cause))}</td><td>${x.replayId ? `<a class="nav-link" href="${escapeHtml(replayViewUrl(x.replayId, x.turn))}" target="_blank" rel="noopener">View</a>` : '<span class="note">Unavailable</span>'}</td></tr>`).join('')}</tbody></table>` : `<div class="empty-state">No kills.</div>`;
+    const killPanel = killRows.length ? `<table><thead><tr><th>Week</th><th>Matchup</th><th>Turn</th><th>Victim</th><th>Cause</th><th>Replay</th></tr></thead><tbody>${killRows.map(x=>`<tr><td>${escapeHtml(safeReplayContext(x.replayId).week)}</td><td>${escapeHtml(safeReplayContext(x.replayId).matchup)}</td><td>${x.turn}</td><td>${x.victim ? safeEventPokemon(x.victim) : '?'}</td><td>${escapeHtml(safeCause(x.cause))}</td><td>${x.replayId ? `<a class="nav-link" href="${escapeHtml(replayViewUrl(x.replayId, x.turn))}" target="_blank" rel="noopener">View</a>` : '<span class="note">Unavailable</span>'}</td></tr>`).join('')}</tbody></table>` : `<div class="empty-state">No knockouts.</div>`;
     const assistPanel = assistRows.length ? `<table><thead><tr><th>Week</th><th>Matchup</th><th>Turn</th><th>Victim</th><th>Damage</th><th>Share</th><th>Reason</th><th>Killer</th><th>Replay</th></tr></thead><tbody>${assistRows.map(x=>`<tr><td>${escapeHtml(safeReplayContext(x.replayId).week)}</td><td>${escapeHtml(safeReplayContext(x.replayId).matchup)}</td><td>${x.turn}</td><td>${x.victim ? safeEventPokemon(x.victim) : '?'}</td><td class="num dealt">${Number(x.damage||0).toFixed(1)}</td><td class="num">${Number(x.percent||0).toFixed(1)}%</td><td>${escapeHtml(safeCause(x.cause||'damage'))}</td><td>${x.killer ? safeEventPokemon(x.killer) : '?'}</td><td>${x.replayId ? `<a class="nav-link" href="${escapeHtml(replayViewUrl(x.replayId, x.turn))}" target="_blank" rel="noopener">View</a>` : '<span class="note">Unavailable</span>'}</td></tr>`).join('')}</tbody></table>` : `<div class="empty-state">No assists.</div>`;
     const deathPanel = deathRows.length ? `<table><thead><tr><th>Week</th><th>Matchup</th><th>Turn</th><th>Killer</th><th>Replay</th></tr></thead><tbody>${deathRows.map(x=>`<tr><td>${escapeHtml(safeReplayContext(x.replayId).week)}</td><td>${escapeHtml(safeReplayContext(x.replayId).matchup)}</td><td>${x.turn}</td><td>${x.killer ? safeEventPokemon(x.killer,'Unattributed') : 'Unattributed'}</td><td>${x.replayId ? `<a class="nav-link" href="${escapeHtml(replayViewUrl(x.replayId, x.turn))}" target="_blank" rel="noopener">View</a>` : '<span class="note">Unavailable</span>'}</td></tr>`).join('')}</tbody></table>` : `<div class="empty-state">No deaths.</div>`;
     return `<div class="panel pokemon-profile">
@@ -91,7 +91,7 @@
         <button type="button" class="profile-section-tab active" data-profile-tab="overview">Overview</button>
         <button type="button" class="profile-section-tab" data-profile-tab="damage">Damage</button>
         <button type="button" class="profile-section-tab" data-profile-tab="usage">Usage</button>
-        <button type="button" class="profile-section-tab" data-profile-tab="kills">Kills (${s.kills})</button>
+        <button type="button" class="profile-section-tab" data-profile-tab="kills">Knockouts (${s.kills})</button>
         <button type="button" class="profile-section-tab" data-profile-tab="assists">Assists (${s.assists||0})</button>
         <button type="button" class="profile-section-tab" data-profile-tab="deaths">Deaths (${s.deaths})</button>
       </div>
@@ -100,12 +100,12 @@
         <h3 class="mini-heading">Battle overview</h3>
         <div class="profile-summary-grid">
           <div><span>Games</span><strong>${s.games}</strong></div>
-          <div><span>Kills</span><strong class="kills">${s.kills}</strong></div>
+          <div><span>Knockouts</span><strong class="kills">${s.kills}</strong></div>
           <div><span>Assists</span><strong>${s.assists||0}</strong></div>
           <div><span>Deaths</span><strong class="taken">${s.deaths}</strong></div>
           <div><span>K/D</span><strong>${kd}</strong></div>
           <div><span>Avg dmg/game</span><strong>${avg}</strong></div>
-          <div><span>Kills / Game</span><strong>${s.games?(s.kills/s.games).toFixed(2):'0.00'}</strong></div>
+          <div><span>Knockouts / Game</span><strong>${s.games?(s.kills/s.games).toFixed(2):'0.00'}</strong></div>
           ${luckRank ? `<div><span>Luck Rank</span><strong>${luckRankLabel}</strong><div class="note">${luckRank.score>=0?'+':''}${luckRank.score.toFixed(2)} luck</div></div>` : ''}
         </div>
       </section>
@@ -132,7 +132,7 @@
         </div>
       </section>
 
-      <section class="profile-section-panel" data-profile-section="kills" hidden><h3 class="mini-heading">Kill record</h3>${killPanel}</section>
+      <section class="profile-section-panel" data-profile-section="kills" hidden><h3 class="mini-heading">Knockout record</h3>${killPanel}</section>
       <section class="profile-section-panel" data-profile-section="assists" hidden><h3 class="mini-heading">Assist record</h3>${assistPanel}</section>
       <section class="profile-section-panel" data-profile-section="deaths" hidden><h3 class="mini-heading">Death record</h3>${deathPanel}</section>
     </div>`;
