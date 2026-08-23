@@ -14,6 +14,9 @@
   const getSavedThemeId = () => window.SBLTheme?.getSavedId?.() || localStorage.getItem(THEME_STORAGE_KEY) || 'amber';
   const getCustomTheme = () => window.SBLTheme?.getCustom?.() || null;
   const applyTheme = (id, persist=true) => window.SBLTheme?.apply ? window.SBLTheme.apply(id, persist) : null;
+  const themeFavorites = () => window.SBLTheme?.getFavorites?.() || [];
+  const themeRecent = () => window.SBLTheme?.getRecent?.() || [];
+  const themeEscape = v => SBL.pokemon.escapeHtml(String(v ?? ''));
   applyTheme(getSavedThemeId(), false);
 
   const appEl = document.getElementById('app');
@@ -1274,8 +1277,9 @@
   function renderAccount(){
     const status = String(profile?.status || 'unknown').toLowerCase();
     const statusLabel = status === 'approved' ? 'Approved' : status === 'pending' ? 'Pending approval' : status === 'rejected' ? 'Rejected' : status;
-    const themes = Array.isArray(window.SBL_THEMES) ? window.SBL_THEMES : [];
     const savedTheme = window.SBLTheme?.getSavedId?.() || document.documentElement.dataset.sblTheme || 'amber';
+    const themes = Array.isArray(window.SBL_THEMES) ? window.SBL_THEMES.slice() : [];
+    if(savedTheme==='custom'){ const c=window.SBLTheme?.resolve?.('custom'); if(c) themes.push(c); }
     const currentTheme = themes.find(t => t.id === savedTheme) || themes[0];
     const themeGroup = theme => {
       if(String(theme?.group || '').toLowerCase() === 'pokemon') return 'Pokemon';
@@ -1299,14 +1303,18 @@
       return 'Other';
     };
     const themeGroups = themes.reduce((groups,t)=>{ const g=themeGroup(t); (groups[g] ||= []).push(t); return groups; }, {});
-    const themeGroupOrder=['Red','Orange','Yellow','Green','Cyan','Blue','Purple','Pink','Neutral','Pokemon'];
-    const savedThemeGroup = themeGroup(currentTheme);
-    const initialThemeGroup = themeGroups[savedThemeGroup]?.length ? savedThemeGroup : themeGroupOrder.find(g=>themeGroups[g]?.length) || 'Neutral';
+    const themeGroupOrder=['Recent','Favorites','Cyber','Red','Orange','Yellow','Green','Cyan','Blue','Purple','Pink','Neutral','Pokemon','Unhinged','Elemental','Other'];
+    const savedThemeGroup = savedTheme==='custom' ? 'Other' : themeGroup(currentTheme);
+    const initialThemeGroup = savedTheme==='custom' ? 'Other' : (themeGroups[savedThemeGroup]?.length ? savedThemeGroup : themeGroupOrder.find(g=>themeGroups[g]?.length) || 'Neutral');
     const spriteStyle = window.SBL?.pokemon?.getSpriteStyle?.() || document.documentElement.dataset.sblSpriteStyle || '3d';
-    const renderThemeSwatches = (group) => {
-      const list = themeGroups[group] || [];
-      if(!list.length) return '<div class="empty-state">No themes in this colour group.</div>';
-      return `<div class="account-theme-group"><div class="account-theme-group-label">${SBL.pokemon.escapeHtml(group)} themes</div><div class="account-theme-swatch-grid">${list.map(t => `<button type="button" class="theme-swatch${t.id===savedTheme?' active':''}" data-theme-id="${SBL.pokemon.escapeHtml(t.id)}" aria-label="Use ${SBL.pokemon.escapeHtml(t.name)} theme"><span class="preview" style="background:${SBL.pokemon.escapeHtml(t.bg)};border-color:${SBL.pokemon.escapeHtml(t.border)}"><span style="background:${SBL.pokemon.escapeHtml(t.accent)}"></span><span style="background:${SBL.pokemon.escapeHtml(t.panel)}"></span><span style="background:${SBL.pokemon.escapeHtml(t.panelAlt)}"></span></span><span class="label-row"><span>${SBL.pokemon.escapeHtml(t.name)}</span><span class="check">✓</span></span></button>`).join('')}</div></div>`;
+    const favoriteSet = new Set(themeFavorites());
+    const recentSet = new Set(themeRecent());
+    const renderThemeSwatches = (group, query='') => {
+      let list = group==='Favorites' ? themes.filter(t=>favoriteSet.has(t.id)) : group==='Recent' ? themes.filter(t=>recentSet.has(t.id)) : (themeGroups[group] || []);
+      const q=String(query||'').trim().toLowerCase();
+      if(q) list=list.filter(t=>`${t.name} ${t.id} ${t.group||''}`.toLowerCase().includes(q));
+      if(!list.length) return '<div class="empty-state">No themes match that filter.</div>';
+      return `<div class="account-theme-group"><div class="account-theme-group-label">${themeEscape(group)} themes · ${list.length}</div><div class="account-theme-swatch-grid">${list.map(t => `<button type="button" class="theme-swatch${t.id===savedTheme?' active':''}" data-theme-id="${themeEscape(t.id)}" aria-label="Use ${themeEscape(t.name)} theme"><span class="preview" style="background:${themeEscape(t.bg)};border-color:${themeEscape(t.border)}"><span style="background:${themeEscape(t.accent)}"></span><span style="background:${themeEscape(t.panel)}"></span><span style="background:${themeEscape(t.panelAlt)}"></span></span><span class="label-row"><span>${themeEscape(t.name)}</span><span class="theme-card-actions"><span class="favorite-dot${favoriteSet.has(t.id)?' on':''}" data-favorite-id="${themeEscape(t.id)}" title="Favorite">★</span><span class="check">✓</span></span></span></button>`).join('')}</div></div>`;
     };
     contentEl.innerHTML = `<div class="account-page">
       <div class="account-hero panel">
@@ -1344,20 +1352,29 @@
       </div>
 
       <section class="panel account-card account-theme-card">
-        <div class="account-card-head"><div><div class="account-card-kicker">Appearance</div><h3>Theme</h3><div class="note">Pick a colour group or Pokémon, then choose from only the themes in that group.</div></div></div>
+        <div class="account-card-head"><div><div class="account-card-kicker">Appearance</div><h3>Theme Studio</h3><div class="note">Browse the full theme library, favorite the good ones, randomize, or build your own.</div></div><button type="button" class="ghost theme-random-btn" id="accountRandomTheme">🎲 Random</button></div>
         <div class="account-theme-picker">
-          <div class="account-theme-select-row account-theme-select-full">
-            <label for="accountThemeGroupSelect">Theme colour</label>
-            <select id="accountThemeGroupSelect" aria-describedby="accountThemeHelp">
+          <div class="account-theme-tools">
+            <input id="accountThemeSearch" type="search" placeholder="Search 130+ themes…" autocomplete="off" aria-label="Search themes">
+            <select id="accountThemeGroupSelect" aria-label="Theme category">
+              <option value="Recent">Recently used</option><option value="Favorites">Favorites</option>
               ${themeGroupOrder.filter(group => themeGroups[group]?.length).map(group => `<option value="${SBL.pokemon.escapeHtml(group)}" ${group===initialThemeGroup?'selected':''}>${SBL.pokemon.escapeHtml(group)}</option>`).join('')}
             </select>
           </div>
+          <div class="account-theme-quick-actions"><button type="button" class="ghost" id="accountSurpriseTheme">✨ Surprise me</button><button type="button" class="ghost" id="accountCreateTheme">🎨 Create theme</button><button type="button" class="ghost" id="accountExportTheme">↗ Export</button><button type="button" class="ghost" id="accountImportTheme">↙ Import</button><input id="accountImportThemeFile" type="file" accept="application/json,.json" hidden></div>
           <div class="account-theme-current" id="accountThemeCurrent" aria-live="polite">
             <span class="theme-swatch-preview" style="background:${SBL.pokemon.escapeHtml(currentTheme?.bg||'transparent')};border-color:${SBL.pokemon.escapeHtml(currentTheme?.border||'var(--border)')}"><i style="background:${SBL.pokemon.escapeHtml(currentTheme?.accent||'var(--amber)')}"></i><b style="background:${SBL.pokemon.escapeHtml(currentTheme?.panel||'var(--panel)')}"></b></span>
             <span id="accountThemeName">${SBL.pokemon.escapeHtml(currentTheme?.name || 'Theme')}</span>
           </div>
           <div class="account-theme-swatches" id="accountThemeSwatches">${renderThemeSwatches(initialThemeGroup)}</div>
-          <div class="note" id="accountThemeHelp">Choose a colour above to filter the swatches. Your selected theme is remembered on this browser.</div>
+          <div class="note" id="accountThemeHelp">Choose a category or search the library. Your selected theme, favorites, and recent themes are remembered on this browser.</div>
+          <div class="custom-theme-panel" id="customThemePanel" hidden>
+            <div class="custom-theme-title">Custom theme creator</div><div class="custom-theme-help">Start from a theme, then tune the core palette. Your custom theme stays local to this browser.</div>
+            <div class="custom-theme-grid">
+              ${[['name','Name','text'],['bg','Background','color'],['panel','Surface','color'],['panelAlt','Elevated surface','color'],['border','Border','color'],['text','Text','color'],['textDim','Muted text','color'],['accent','Accent','color'],['accentText','Accent text','color']].map(([key,label,type])=>type==='text'?`<label class="custom-field"><span>${label}</span><input id="custom_${key}" type="text" value="${themeEscape(key==='name'?'My Theme':(currentTheme?.[key]||''))}"></label>`:`<label class="custom-color-row"><span>${label}</span><input id="custom_${key}" type="color" value="${themeEscape(currentTheme?.[key]||'#888888')}"><code id="custom_${key}_hex">${themeEscape(currentTheme?.[key]||'#888888')}</code></label>`).join('')}
+            </div>
+            <div class="foot-actions"><button type="button" class="ghost" id="customThemeCancel">Cancel</button><button type="button" class="primary" id="customThemeSave">Save & apply</button></div>
+          </div>
         </div>
       </section>
 
@@ -1372,25 +1389,30 @@
       });
       renderAccount();
     });
+    const rerenderThemeLibrary = (group=document.getElementById('accountThemeGroupSelect')?.value || initialThemeGroup, query=document.getElementById('accountThemeSearch')?.value || '') => {
+      const swatches=document.getElementById('accountThemeSwatches'); if(swatches) swatches.innerHTML=renderThemeSwatches(group,query);
+    };
     document.getElementById('accountThemeSwatches')?.addEventListener('click', e=>{
+      const fav=e.target.closest('[data-favorite-id]');
+      if(fav){ e.preventDefault(); e.stopPropagation(); window.SBLTheme?.toggleFavorite?.(fav.dataset.favoriteId); favoriteSet.clear(); themeFavorites().forEach(x=>favoriteSet.add(x)); rerenderThemeLibrary(); return; }
       const btn=e.target.closest('[data-theme-id]'); if(!btn) return;
-      const theme=themes.find(t=>t.id===btn.dataset.themeId);
-      if(!theme || !window.SBLTheme?.apply) return;
-      window.SBLTheme.apply(theme.id,true);
+      const theme=themes.find(t=>t.id===btn.dataset.themeId); if(!theme) return;
+      window.SBLTheme?.apply?.(theme.id,true);
       const label=document.getElementById('accountThemeName'); if(label) label.textContent=theme.name||theme.id;
-      const current=document.getElementById('accountThemeCurrent');
-      if(current){
-        current.querySelector('.theme-swatch-preview')?.setAttribute('style', `background:${theme.bg};border-color:${theme.border}`);
-        const accent=current.querySelector('.theme-swatch-preview i'); if(accent) accent.style.background=theme.accent;
-        const panel=current.querySelector('.theme-swatch-preview b'); if(panel) panel.style.background=theme.panel;
-      }
-      document.querySelectorAll('#accountThemeSwatches [data-theme-id]').forEach(x=>x.classList.toggle('active',x.dataset.themeId===theme.id));
+      rerenderThemeLibrary();
     });
-    document.getElementById('accountThemeGroupSelect')?.addEventListener('change', e=>{
-      const group=e.target.value;
-      const swatches=document.getElementById('accountThemeSwatches');
-      if(swatches) swatches.innerHTML=renderThemeSwatches(group);
-    });
+    document.getElementById('accountThemeGroupSelect')?.addEventListener('change', ()=>rerenderThemeLibrary());
+    document.getElementById('accountThemeSearch')?.addEventListener('input', ()=>rerenderThemeLibrary());
+    const randomTheme=()=>{const pool=themes.filter(t=>t.id!==savedTheme); const t=pool[Math.floor(Math.random()*pool.length)]; if(t){window.SBLTheme?.apply?.(t.id,true); renderAccount();}};
+    document.getElementById('accountRandomTheme')?.addEventListener('click',randomTheme);
+    document.getElementById('accountSurpriseTheme')?.addEventListener('click',()=>{randomTheme();});
+    document.getElementById('accountExportTheme')?.addEventListener('click',()=>{const blob=new Blob([window.SBLTheme.exportTheme()],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`sbl-theme-${getSavedThemeId()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500);});
+    document.getElementById('accountImportTheme')?.addEventListener('click',()=>document.getElementById('accountImportThemeFile')?.click());
+    document.getElementById('accountImportThemeFile')?.addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;try{const text=await f.text();window.SBLTheme.importTheme(text);renderAccount();}catch(err){alert('Could not import that theme: '+err.message);}});
+    document.getElementById('accountCreateTheme')?.addEventListener('click',()=>{const panel=document.getElementById('customThemePanel');if(panel)panel.hidden=!panel.hidden;});
+    document.getElementById('customThemeCancel')?.addEventListener('click',()=>{const panel=document.getElementById('customThemePanel');if(panel)panel.hidden=true;});
+    document.querySelectorAll('#customThemePanel input[type=color]').forEach(inp=>inp.addEventListener('input',()=>{const hex=document.getElementById(inp.id+'_hex');if(hex)hex.textContent=inp.value;}));
+    document.getElementById('customThemeSave')?.addEventListener('click',()=>{const get=id=>document.getElementById('custom_'+id)?.value; const t={id:'custom',name:get('name')||'My Theme',base:getSavedThemeId(),bg:get('bg'),panel:get('panel'),panelAlt:get('panelAlt'),border:get('border'),text:get('text'),textDim:get('textDim'),accent:get('accent'),accentText:get('accentText')}; window.SBLTheme.saveCustom(t); renderAccount();});
     document.getElementById('accountLogoutBtn')?.addEventListener('click', async ()=>{try{await SBL.auth.signOut();}catch(e){console.error('Logout failed:',e);}session=null;profile=null;activeTab='myteam';render();});
   }
 
