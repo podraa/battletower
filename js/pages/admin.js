@@ -475,20 +475,49 @@
   }
 
   async function fetchReplayForImport(id){
-    await SBL.replays.ensureMoveAccuracyData();
-    const resp = await fetch(`https://replay.pokemonshowdown.com/${id}.json`);
-    if(!resp.ok) throw new Error('replay not found (' + resp.status + ')');
-    const json = await resp.json();
-    const parsed = SBL.replays.parseLog(json, id);
-    parsed.uploadtime = json.uploadtime;
-    parsed.weekOverride = false;
-    parsed.processedAt = Date.now();
-    return parsed;
+    if(!SBL.replays || typeof SBL.replays.parseLog !== 'function' || typeof SBL.replays.extractReplayId !== 'function'){
+      throw new Error('Replay service is unavailable. Reload the page and try again.');
+    }
+    // Accuracy data is optional enrichment. The importer must never depend on
+    // a third-party data file being reachable.
+    try { await SBL.replays.ensureMoveAccuracyData?.(); } catch (_) {}
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 20000) : null;
+    try {
+      const resp = await fetch(`https://replay.pokemonshowdown.com/${encodeURIComponent(id)}.json`, {
+        signal: controller?.signal,
+        cache: 'no-store'
+      });
+      if(!resp.ok) throw new Error('replay not found (' + resp.status + ')');
+      const json = await resp.json();
+      if(!json || typeof json !== 'object') throw new Error('invalid replay response');
+      const parsed = SBL.replays.parseLog(json, id);
+      if(!parsed || typeof parsed !== 'object') throw new Error('replay parser returned no data');
+      parsed.uploadtime = json.uploadtime || parsed.uploadtime || null;
+      parsed.weekOverride = false;
+      parsed.processedAt = Date.now();
+      return parsed;
+    } catch(e) {
+      if(e?.name === 'AbortError') throw new Error('request timed out after 20 seconds');
+      throw e;
+    } finally {
+      if(timer) clearTimeout(timer);
+    }
   }
 
   async function processUrls(urlsRaw, logEl){
-    await SBL.replays.ensureMoveAccuracyData();
-    const rawLines = urlsRaw.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    if(!SBL.replays || typeof SBL.replays.extractReplayId !== 'function' || typeof SBL.replays.parseLog !== 'function'){
+      appendLog(logEl, 'Replay service failed to load. Reload the admin page before processing replays.', true);
+      return;
+    }
+    // Move accuracy data is enrichment only. A temporary Showdown data/network
+    // failure must never prevent the replay importer itself from running.
+    try{
+      try { await SBL.replays.ensureMoveAccuracyData?.(); } catch (_) { /* optional enrichment */ }
+    }catch(e){
+      appendLog(logEl, `Move data unavailable — continuing without accuracy-sensitive luck: ${e.message}`, true);
+    }
+    const rawLines = String(urlsRaw || '').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
     if(rawLines.length === 0){ appendLog(logEl, 'No links provided.', true); return; }
 
     // De-duplicate IDs before fetching, while preserving the order in which the
@@ -498,7 +527,7 @@
     const seen = new Set();
     let invalid = 0, skipped = 0;
     for(const url of rawLines){
-      const id = SBL.util.extractReplayId(url);
+      const id = SBL.replays.extractReplayId(url);
       if(!id){ appendLog(logEl, `Could not read a replay id from: ${url}`, true); invalid++; continue; }
       if(seen.has(id) || STATE.replays[id]){
         if(STATE.replays[id] && Number(STATE.replays[id].parserVersion||0) < 7){
@@ -543,15 +572,23 @@
 
     // Assign ALL automatic weeks only after the complete bulk is loaded. This
     // makes the result deterministic regardless of paste order or fetch timing.
+    let persisted = true;
     if(added > 0){
       assignAutomaticWeeks();
-      await saveSettings();
-      await saveReplays();
+      try {
+        await saveSettings();
+        await saveReplays();
+      } catch(e) {
+        persisted = false;
+        appendLog(logEl, `⚠ ${added} replay(s) parsed but could not be saved: ${e?.message || e}`, true);
+      }
     }
+    const persistenceNote = persisted ? '' : ' Persistence failed; do not leave this page until the data is recovered.';
+    appendLog(logEl, `Done. ${added} added, ${skipped} already had, ${invalid} invalid, ${failed} failed.${persistenceNote}`, !persisted);
     await logAdminAction(
       'process_replays',
-      `Processed replays: ${added} added, ${skipped} skipped, ${invalid} invalid, ${failed} failed.`,
-      {added, skipped, invalid, failed}
+      `Processed replays: ${added} added, ${skipped} skipped, ${invalid} invalid, ${failed} failed, persisted=${persisted}.`,
+      {added, skipped, invalid, failed, persisted}
     );
     appendLog(logEl, `Done. ${added} added, ${skipped} already had, ${invalid} invalid, ${failed} failed.`, false);
     renderTicker();
@@ -950,12 +987,20 @@
     `;
     document.getElementById('processBtn').addEventListener('click', async ()=>{
       const btn = document.getElementById('processBtn');
-      const urls = document.getElementById('urlsInput').value;
+      const input = document.getElementById('urlsInput');
       const logEl = document.getElementById('processLog');
+      if(!btn || !input || !logEl) return;
+      const urls = input.value || '';
       logEl.innerHTML = '';
       btn.disabled = true;
-      await processUrls(urls, logEl);
-      btn.disabled = false;
+      try{
+        await processUrls(urls, logEl);
+      }catch(e){
+        console.error('Process replays failed:', e);
+        appendLog(logEl, `Process replays failed: ${e?.message || e}`, true);
+      }finally{
+        btn.disabled = false;
+      }
     });
     const weekFilter = document.getElementById('replayWeekFilter');
     const franchiseFilter = document.getElementById('replayFranchiseFilter');
@@ -989,7 +1034,7 @@
     if(!logEl) logEl = document.getElementById('processLog');
     appendLog(logEl, 'Starting replay reprocessing…', false, true);
     try{
-      await SBL.replays.ensureMoveAccuracyData();
+      try { await SBL.replays.ensureMoveAccuracyData?.(); } catch (_) { /* optional enrichment */ }
     }catch(e){
       appendLog(logEl, `Move data unavailable — continuing without accuracy-sensitive luck: ${e.message}`, true);
       MOVE_DATA = {};

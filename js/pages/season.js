@@ -232,12 +232,12 @@
   }
 
   async function processUrls(urlsRaw, week, logEl){
-    await SBL.replays.ensureMoveAccuracyData();
+    try { await SBL.replays.ensureMoveAccuracyData?.(); } catch (_) { /* optional enrichment */ }
     const urls = urlsRaw.split('\n').map(s=>s.trim()).filter(Boolean);
     if(urls.length === 0){ appendLog(logEl, 'No links provided.', true); return; }
     let added = 0, skipped = 0, failed = 0;
     for(const url of urls){
-      const id = SBL.util.extractReplayId(url);
+      const id = SBL.replays.extractReplayId(url);
       if(!id){ appendLog(logEl, `Could not read a replay id from: ${url}`, true); failed++; continue; }
       if(STATE.replays[id]){ appendLog(logEl, `Already processed: ${id} — skipped`, false); skipped++; continue; }
       try{
@@ -1227,7 +1227,7 @@
   }
 
   async function reprocessAll(logEl){
-    await SBL.replays.ensureMoveAccuracyData();
+    try { await SBL.replays.ensureMoveAccuracyData?.(); } catch (_) { /* optional enrichment */ }
     const ids = Object.keys(STATE.replays);
     let ok=0, failed=0;
     for(const id of ids){
