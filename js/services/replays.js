@@ -112,6 +112,36 @@
     return !!id && !SPECIAL_IDS.has(id);
   }
 
+  // Normalize a pasted Pokémon Showdown replay URL (or bare replay ID) into the ID used by the replay JSON endpoint.
+  function extractReplayId(value) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    const valid = id => {
+      try { return !!id && /^[a-z0-9][a-z0-9-]*-[0-9]+$/i.test(decodeURIComponent(String(id))); }
+      catch (_) { return false; }
+    };
+    const clean = id => {
+      try { return decodeURIComponent(String(id)).replace(/\.json$/i, '').trim(); }
+      catch (_) { return ''; }
+    };
+    if (valid(raw)) return clean(raw);
+    try {
+      const url = new URL(raw, window.location.href);
+      const host = String(url.hostname || '').toLowerCase();
+      if (host === 'replay.pokemonshowdown.com' || host === 'pokemonshowdown.com') {
+        const parts = url.pathname.split('/').filter(Boolean);
+        const candidates = parts[0] === 'replay' ? parts.slice(1,2) : parts.slice(-1);
+        for (const candidate of candidates) {
+          if (valid(candidate)) return clean(candidate);
+        }
+      }
+    } catch (_) {}
+    // Last-resort parsing also handles pasted JSON endpoint URLs and URLs with
+    // query/hash suffixes. Never return an unvalidated string to the importer.
+    const match = raw.match(/(?:^|\/)([a-z0-9][a-z0-9-]*-[0-9]+)(?:\.json)?(?:[/?#]|$)/i);
+    return match && valid(match[1]) ? clean(match[1]) : '';
+  }
+
   function getSpecialIds() {
     return {
       state: STATE_ID,
@@ -127,6 +157,7 @@
     load,
     partition,
     isReplayId,
+    extractReplayId,
     getSpecialIds,
     invalidateCache: invalidateLoadCache,
     clearCache: invalidateLoadCache
@@ -143,6 +174,9 @@
   'use strict';
   window.SBL=window.SBL||{};
   const SBL=window.SBL;
+  // Keep the replay namespace stable even if this service is bundled or loaded
+  // in a different order in a future page.
+  SBL.replays=SBL.replays||{};
   function normName(n){ return String(n??'').trim().toLowerCase().replace(/-/g,' ').replace(/_/g,' ').replace(/\s+/g,' '); }
   function parseHP(token){
     if(!token) return 0;
@@ -1792,19 +1826,7 @@
 
     for(const m of Object.values(aggregatedMons)){
       m.appearances = 1;
-      // A parsed replay is exactly one game. Item counts in the replay-level
-      // record must therefore be binary: an item was observed/inferred in this
-      // game, or it was not. Never carry event/stint counts into the game-set.
-      const gameItems={};
-      const gameConfirmed={};
-      const gameInferred={};
-      for(const item of Object.keys(m.items||{})) gameItems[item]=1;
-      for(const item of Object.keys(m.confirmedItems||{})) gameConfirmed[item]=1;
-      for(const item of Object.keys(m.inferredItems||{})) gameInferred[item]=1;
-      m.items=gameItems;
-      m.confirmedItems=gameConfirmed;
-      m.inferredItems=gameInferred;
-      m.gameSets=[{replayId: String(replayId||''), moves:{...(m.moves||{})}, items:{...gameItems}, confirmedItems:{...gameConfirmed}, inferredItems:{...gameInferred}, itemEvidence:{...(m.itemEvidence||{})}, sentOut:Number(m.sentOut||0), led:Number(m.leads||0)>0 ? 1 : 0}];
+      m.gameSets=[{moves:{...(m.moves||{})}, items:{...(m.items||{})}, confirmedItems:{...(m.confirmedItems||{})}, inferredItems:{...(m.inferredItems||{})}, itemEvidence:{...(m.itemEvidence||{})}, sentOut:Number(m.sentOut||0), led:Number(m.leads||0)>0 ? 1 : 0}];
     }
 
     // Some replays end without an explicit sideend event. Finalize any screen
