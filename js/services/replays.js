@@ -116,30 +116,19 @@
   function extractReplayId(value) {
     const raw = String(value ?? '').trim();
     if (!raw) return '';
-    const valid = id => {
-      try { return !!id && /^[a-z0-9][a-z0-9-]*-[0-9]+$/i.test(decodeURIComponent(String(id))); }
-      catch (_) { return false; }
-    };
-    const clean = id => {
-      try { return decodeURIComponent(String(id)).replace(/\.json$/i, '').trim(); }
-      catch (_) { return ''; }
-    };
-    if (valid(raw)) return clean(raw);
+    if (/^[a-z0-9][a-z0-9-]*-[0-9]+$/i.test(raw)) return raw;
     try {
       const url = new URL(raw, window.location.href);
       const host = String(url.hostname || '').toLowerCase();
       if (host === 'replay.pokemonshowdown.com' || host === 'pokemonshowdown.com') {
-        const parts = url.pathname.split('/').filter(Boolean);
-        const candidates = parts[0] === 'replay' ? parts.slice(1,2) : parts.slice(-1);
-        for (const candidate of candidates) {
-          if (valid(candidate)) return clean(candidate);
-        }
+        const match = url.pathname.match(/^\/replay\/([^/]+?)(?:\.json)?\/?$/i);
+        if (match) return decodeURIComponent(match[1]);
+        const direct = url.pathname.match(/^\/([^/]+?)(?:\.json)?\/?$/i);
+        if (direct && /^[a-z0-9][a-z0-9-]*-[0-9]+$/i.test(direct[1])) return decodeURIComponent(direct[1]);
       }
     } catch (_) {}
-    // Last-resort parsing also handles pasted JSON endpoint URLs and URLs with
-    // query/hash suffixes. Never return an unvalidated string to the importer.
     const match = raw.match(/(?:^|\/)([a-z0-9][a-z0-9-]*-[0-9]+)(?:\.json)?(?:[/?#]|$)/i);
-    return match && valid(match[1]) ? clean(match[1]) : '';
+    return match ? match[1] : '';
   }
 
   function getSpecialIds() {
@@ -174,9 +163,6 @@
   'use strict';
   window.SBL=window.SBL||{};
   const SBL=window.SBL;
-  // Keep the replay namespace stable even if this service is bundled or loaded
-  // in a different order in a future page.
-  SBL.replays=SBL.replays||{};
   function normName(n){ return String(n??'').trim().toLowerCase().replace(/-/g,' ').replace(/_/g,' ').replace(/\s+/g,' '); }
   function parseHP(token){
     if(!token) return 0;
@@ -1943,6 +1929,7 @@
     }], db);
   }
 
+  SBL.replays.extractReplayId=extractReplayId;
   SBL.replays.parseLog=parseLog;
   SBL.replays.upsertRows=upsertRows;
   SBL.replays.deleteIds=deleteIds;
