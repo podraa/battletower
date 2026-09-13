@@ -38,6 +38,7 @@
 
   const NAV_CACHE_PREFIX = 'navPerms:';
   const NAV_LAST_UID_KEY = 'navLastUid';
+  const FINALS_NAV_CACHE_KEY = 'sbl_finals_nav_released';
 
   function getClient() {
     try {
@@ -110,6 +111,29 @@
     nav.dataset.sblBehaviorInstalled = 'true';
 
     let ticking = false;
+
+    // Theme-aware page transitions. Glitch gets a short RGB-split/static
+    // transition; other themes keep normal instant navigation.
+    if (!nav.dataset.sblTransitionInstalled) {
+      nav.dataset.sblTransitionInstalled = 'true';
+      nav.addEventListener('click', function (event) {
+        const link = event.target.closest('a[href]');
+        if (!link) return;
+        if (event.defaultPrevented || event.button !== 0) return;
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        const href = link.getAttribute('href') || '';
+        if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+        if (link.target && link.target !== '_self') return;
+        let target;
+        try { target = new URL(href, location.href); } catch (_) { return; }
+        if (target.origin !== location.origin) return;
+        const theme = document.documentElement.dataset.sblTheme || '';
+        if (theme !== 'glitch') return;
+        event.preventDefault();
+        document.body.classList.add('sbl-glitch-transition-out');
+        window.setTimeout(() => { location.href = target.href; }, 185);
+      });
+    }
 
     function isVisible(el) {
       if (!el) return false;
@@ -340,6 +364,47 @@
     }
   }
 
+  async function refreshSeasonNavLabel() {
+    const nav = getNav();
+    if (!nav) return;
+    const seasonLink = nav.querySelector('a[data-page="season.html"]');
+    if (!seasonLink) return;
+
+    // On the Season page, also prime the page heading from the cached state.
+    // The page controller will replace this with the full season-specific title
+    // once the shared state has loaded.
+    if (currentFile === 'season.html' && localStorage.getItem(FINALS_NAV_CACHE_KEY) === '1') {
+      const titleEl = document.getElementById('seasonTitle');
+      if (titleEl) titleEl.textContent = 'SBL Finals';
+      const subEl = document.querySelector('#app > header .sub');
+      if (subEl) subEl.textContent = 'Season Finals · single elimination';
+    }
+
+    // Use the last known Finals state immediately so the navigation does not
+    // briefly flash back to "Season" while the shared state request is loading.
+    let finalsReleased = localStorage.getItem(FINALS_NAV_CACHE_KEY) === '1';
+    try {
+      const client = getClient();
+      if (client) {
+        const { data, error } = await client
+          .from('replays')
+          .select('replay_data')
+          .eq('replay_id', '__dashboard_state__')
+          .maybeSingle();
+        if (!error) {
+          const finals = data?.replay_data?.settings?.finals;
+          finalsReleased = !!(finals && finals.status !== 'inactive' && Array.isArray(finals.rounds) && finals.rounds.length);
+          localStorage.setItem(FINALS_NAV_CACHE_KEY, finalsReleased ? '1' : '0');
+        }
+      }
+    } catch (error) {
+      console.warn('SBL navigation: finals label check failed.', error);
+    }
+
+    seasonLink.textContent = finalsReleased ? 'Finals' : 'Season';
+    seasonLink.dataset.sblFinalsReleased = finalsReleased ? 'true' : 'false';
+  }
+
   function setActive(file) {
     const target = String(file || '').toLowerCase();
     const nav = getNav();
@@ -374,8 +439,11 @@
     return true;
   };
 
+  SBL.ui.refreshSeasonNavLabel = refreshSeasonNavLabel;
+
   function boot() {
     const nav = renderNav();
+    refreshSeasonNavLabel();
 
     /*
      * Restore the last-known permission state immediately. This prevents the
@@ -404,11 +472,13 @@
     document.addEventListener('sbl:auth-ready', () => {
       const readyClient = getClient();
       if (readyClient) setupPermissions(readyClient);
+      refreshSeasonNavLabel();
     }, { once: false });
 
     document.addEventListener('sbl:auth-changed', () => {
       const readyClient = getClient();
       if (readyClient) setupPermissions(readyClient);
+      refreshSeasonNavLabel();
     }, { once: false });
 
     if (client) {
@@ -423,6 +493,7 @@
 
         if (session?.user) setupPermissions(client);
         else hidePrivilegedLinks();
+        refreshSeasonNavLabel();
       });
     } else {
       hidePrivilegedLinks();
