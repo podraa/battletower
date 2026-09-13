@@ -88,12 +88,13 @@
        STATE.settings.activeSeason = STATE.settings.activeSeason || DEFAULT_SEASON;
        STATE.settings.seasonArchives = (STATE.settings.seasonArchives && typeof STATE.settings.seasonArchives === 'object') ? STATE.settings.seasonArchives : {};
        STATE.settings.leagueUpdates = Array.isArray(STATE.settings.leagueUpdates) ? STATE.settings.leagueUpdates : [];
+       STATE.settings.finals = SBL.finals.normalizeFinalsState(STATE.settings.finals);
        loaded = true;
      }catch(e){
        console.error('Supabase load failed:', e);
        STATE.replays = {};
        STATE.teamMap = {};
-       STATE.settings = {caseInsensitiveNames:true, rosters:{}, franchises:{}, conferenceNames:{a:'Conference A',b:'Conference B'}, draft:defaultDraftState(), activeSeason:DEFAULT_SEASON, seasonArchives:{}, leagueUpdates:[]};
+       STATE.settings = {caseInsensitiveNames:true, rosters:{}, franchises:{}, conferenceNames:{a:'Conference A',b:'Conference B'}, draft:defaultDraftState(), activeSeason:DEFAULT_SEASON, seasonArchives:{}, leagueUpdates:[], finals:SBL.finals.defaultFinalsState()};
        loaded = true;
        throw e;
      }finally{
@@ -806,7 +807,30 @@
   // ---------- rendering ----------
   const contentEl = document.getElementById('content');
   const tabsEl = document.getElementById('tabs');
-  let activeTab = 'process';
+  const appEl = document.getElementById('app');
+  const sidebarToggle = document.getElementById('adminSidebarToggle');
+  let activeTab = 'overview';
+
+  // Sidebar collapse is a local UI preference; it never touches league data.
+  const SIDEBAR_KEY = 'sbl_admin_sidebar_collapsed';
+  let sidebarCollapsed = localStorage.getItem(SIDEBAR_KEY) === '1';
+  function applySidebarState(){
+    if(!appEl) return;
+    appEl.classList.toggle('admin-sidebar-collapsed', sidebarCollapsed);
+    if(sidebarToggle){
+      sidebarToggle.setAttribute('aria-expanded', String(!sidebarCollapsed));
+      sidebarToggle.setAttribute('aria-label', sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
+      sidebarToggle.title = sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+      const icon = sidebarToggle.querySelector('.admin-sidebar-toggle-icon');
+      if(icon) icon.textContent = sidebarCollapsed ? '›' : '‹';
+    }
+  }
+  applySidebarState();
+  sidebarToggle?.addEventListener('click', ()=>{
+    sidebarCollapsed = !sidebarCollapsed;
+    localStorage.setItem(SIDEBAR_KEY, sidebarCollapsed ? '1' : '0');
+    applySidebarState();
+  });
 
   tabsEl.addEventListener('click', (e)=>{
     const groupToggle = e.target.closest('.admin-nav-group-toggle');
@@ -917,7 +941,7 @@
   // jump to another tab programmatically
   function goToTab(tab){
     activeTab = tab;
-    [...tabsEl.children].forEach(b=>b.classList.toggle('active', b.dataset.tab===activeTab));
+    tabsEl.querySelectorAll('.admin-nav-item').forEach(b=>b.classList.toggle('active', b.dataset.tab===activeTab));
     render();
   }
 
@@ -926,30 +950,49 @@
     const franchises = configuredFranchises();
     const users = new Set();
     Object.values(STATE.replays||{}).forEach(r=>{ ['p1','p2'].forEach(side=>{ const u=String(r?.players?.[side]||'').trim(); if(u) users.add(u); }); });
-    const currentWeek = weeksList().length ? weeksList()[weeksList().length-1] : 'No weeks assigned';
-    const top = globalPokemonStats('ALL').slice(0,5);
+    const weeks = weeksList();
+    const currentWeek = weeks.length ? weeks[weeks.length-1] : 'No week set';
+    const finals = SBL.finals.normalizeFinalsState(STATE.settings.finals);
+    const finalsGenerated = !!(finals && Array.isArray(finals.rounds) && finals.rounds.length && finals.status !== 'inactive');
+    const finalsChampion = finals?.champion || '';
+    const finalsStatus = finalsChampion ? `Champion: ${finalsChampion}` : finalsGenerated ? 'Finals in progress' : 'Not generated';
+
     contentEl.innerHTML = `
-      <div class="admin-section">
-        <div class="admin-section-title"><div><h2>Overview</h2><div class="note">A quick snapshot of the current league state and the most important admin actions.</div></div></div>
-        <div class="panel">
-          <div class="admin-subsection"><h3>System</h3><div class="stats-grid">
-            <div class="stat-card"><div class="lbl">Season</div><div class="val">${SBL.pokemon.escapeHtml(STATE.settings.activeSeason||DEFAULT_SEASON)}</div></div>
-            <div class="stat-card"><div class="lbl">Current week</div><div class="val">${SBL.pokemon.escapeHtml(currentWeek)}</div></div>
-            <div class="stat-card"><div class="lbl">Franchises</div><div class="val">${franchises.length}</div></div>
-            <div class="stat-card"><div class="lbl">Users in replays</div><div class="val">${users.size}</div></div>
-            <div class="stat-card"><div class="lbl">Processed replays</div><div class="val">${replayCount}</div></div>
-          </div></div>
-          <div class="admin-subsection"><h3>Quick Actions</h3><div class="foot-actions">
-            <button class="primary" data-overview-tab="process">Process Replays</button>
-            <button class="ghost" data-overview-tab="seasonsetup">Season Management</button>
-            <button class="ghost" data-overview-tab="settings">Franchises &amp; Users</button>
-          </div></div>
+      <div class="admin-dashboard-hero">
+        <div>
+          <div class="admin-dashboard-kicker">League administration</div>
+          <h2>${SBL.pokemon.escapeHtml(STATE.settings.activeSeason||DEFAULT_SEASON)}</h2>
+          <div class="note">A calm overview of what is happening now, with the admin actions you are most likely to need.</div>
         </div>
+        <div class="admin-dashboard-meta"><strong>${SBL.pokemon.escapeHtml(currentWeek)}</strong><span class="note">Current week</span></div>
       </div>
-      <div class="admin-section"><div class="panel"><div class="admin-subsection"><h3>Top Pokémon by damage dealt</h3>
-        ${top.length ? `<table><thead><tr><th>#</th><th>Pokémon</th><th class="num">Damage</th><th class="num">KOs</th></tr></thead><tbody>${top.map((s,i)=>`<tr><td>${i+1}</td><td><div class="pname-cell">${SBL.pokemon.spriteMarkup(s.species,'sprite')}${SBL.pokemon.escapeHtml(SBL.pokemon.displayName(s.species))}</div></td><td class="num">${s.dealt.toFixed(1)}</td><td class="num">${s.kills}</td></tr>`).join('')}</tbody></table>` : `<div class="empty-state">No games processed yet.</div>`}
-      </div></div></div>`;
-    contentEl.querySelectorAll('[data-overview-tab]').forEach(btn=>btn.addEventListener('click',()=>{ activeTab=btn.dataset.overviewTab; tabsEl.querySelectorAll('.admin-nav-item').forEach(b=>b.classList.toggle('active',b.dataset.tab===activeTab)); render(); }));
+
+      <div class="admin-dashboard-grid">
+        <section class="admin-dashboard-card">
+          <h3>At a glance</h3>
+          <div class="admin-dashboard-stats">
+            <div class="admin-dashboard-stat"><div class="lbl">Franchises</div><div class="val">${franchises.length}</div></div>
+            <div class="admin-dashboard-stat"><div class="lbl">Users</div><div class="val">${users.size}</div></div>
+            <div class="admin-dashboard-stat"><div class="lbl">Processed replays</div><div class="val">${replayCount}</div></div>
+            <div class="admin-dashboard-stat"><div class="lbl">Finals</div><div class="val">${SBL.pokemon.escapeHtml(finalsChampion ? 'Complete' : finalsGenerated ? 'Active' : 'Setup')}</div></div>
+          </div>
+          <div style="margin-top:14px;">
+            <div class="admin-dashboard-status"><span class="note">Season</span><strong>${SBL.pokemon.escapeHtml(STATE.settings.activeSeason||DEFAULT_SEASON)}</strong></div>
+            <div class="admin-dashboard-status"><span class="note">Finals status</span><strong>${SBL.pokemon.escapeHtml(finalsStatus)}</strong></div>
+          </div>
+        </section>
+
+        <section class="admin-dashboard-card">
+          <h3>Quick actions</h3>
+          <div class="admin-quick-actions">
+            <button class="admin-quick-action" data-overview-tab="process"><strong>Process replay</strong><span>→</span></button>
+            <button class="admin-quick-action" data-overview-tab="seasonsetup"><strong>Manage season</strong><span>→</span></button>
+            <button class="admin-quick-action" data-overview-tab="commissioner"><strong>User control</strong><span>→</span></button>
+            <button class="admin-quick-action" data-overview-tab="settings"><strong>Franchises &amp; users</strong><span>→</span></button>
+          </div>
+        </section>
+      </div>`;
+    contentEl.querySelectorAll('[data-overview-tab]').forEach(btn=>btn.addEventListener('click',()=>goToTab(btn.dataset.overviewTab)));
   }
 
   function renderProcess(){
@@ -1898,11 +1941,9 @@ function renderDraft(){ return drawDraft(); }
           </div>
           <div>
             <label>Pick</label>
-            <select id="adminDraftPickPokemon">
-              <option value="">Select an available Pokémon below</option>
-              ${d.pool.filter(m => !m.drafted).sort((x,y)=>y.points-x.points||x.name.localeCompare(y.name)).map(m =>
-                `<option value="${SBL.pokemon.escapeHtml(m.id)}">${SBL.pokemon.escapeHtml(m.name)} — ${m.points} pts</option>`
-              ).join('')}
+            <input type="search" id="adminDraftPokemonSearch" placeholder="Search Pokémon…" autocomplete="off">
+            <select id="adminDraftPickPokemon" size="1">
+              <option value="">Search above to choose a Pokémon</option>
             </select>
           </div>
           <div style="flex:0"><button class="primary" id="adminMakePickBtn">Make pick</button></div>
@@ -1926,17 +1967,11 @@ function renderDraft(){ return drawDraft(); }
         </div>
         <div id="draftBoardStatus" style="margin-top:8px"></div>
         ` : ''}
-        <div style="max-height:420px;overflow:auto;margin-top:12px">
-          ${d.pool.length ? `<table><thead><tr><th>Pokémon</th><th>Types</th><th class="num">Points</th><th>Status</th>${editable ? '<th></th>' : ''}</tr></thead><tbody>
-            ${[...d.pool].sort((a,b)=>b.points-a.points||a.name.localeCompare(b.name)).map(m => `
-              <tr>
-                <td>${SBL.pokemon.escapeHtml(m.name)}</td>
-                <td>${(m.types || []).map(SBL.pokemon.escapeHtml).join(' / ') || '<span class="note" style="margin:0">—</span>'}</td>
-                <td class="num">${m.points}</td>
-                <td>${m.drafted ? `<span class="badge">→ ${SBL.pokemon.escapeHtml(m.draftedBy || '')}</span>` : '<span class="note" style="margin:0">Available</span>'}</td>
-                ${editable ? `<td><button class="ghost small danger-btn" data-remove-mon="${SBL.pokemon.escapeHtml(m.id)}">Remove</button></td>` : ''}
-              </tr>`).join('')}
-          </tbody></table>` : '<div class="empty-state">No Pokémon on the board yet.</div>'}
+        <div style="margin-top:12px">
+          <input type="search" id="draftBoardSearch" placeholder="Search Pokémon to view the board…" autocomplete="off" aria-label="Search draft board">
+          <div id="draftBoardResults" style="max-height:420px;overflow:auto;margin-top:10px">
+            <div class="empty-state">Search for a Pokémon to view matching entries. The full board remains stored but is not rendered until you search.</div>
+          </div>
         </div>
       </div>
 
@@ -2075,6 +2110,28 @@ function renderDraft(){ return drawDraft(); }
     });
 
     // -- draft board panel --
+    const renderPokemonSearchResults = (query, targetId, includeDrafted=true) => {
+      const target = document.getElementById(targetId);
+      if(!target) return;
+      const q = String(query || '').trim().toLowerCase();
+      if(!q){
+        target.innerHTML = '<div class="empty-state">Search for a Pokémon to view matching entries. The full board remains stored but is not rendered until you search.</div>';
+        return;
+      }
+      const matches = d.pool.filter(m => (includeDrafted || !m.drafted) && m.name.toLowerCase().includes(q)).sort((a,b)=>a.name.localeCompare(b.name)).slice(0,60);
+      if(!matches.length){ target.innerHTML='<div class="empty-state">No Pokémon match that search.</div>'; return; }
+      if(target.tagName === 'SELECT'){
+        target.innerHTML='<option value="">Select a Pokémon</option>'+matches.map(m=>`<option value="${SBL.pokemon.escapeHtml(m.id)}">${SBL.pokemon.escapeHtml(m.name)} — ${m.points} pts</option>`).join('');
+      }else{
+        target.innerHTML='<table><thead><tr><th>Pokémon</th><th>Types</th><th class="num">Points</th><th>Status</th>'+(editable ? '<th></th>' : '')+'<\/tr><\/thead><tbody>'+matches.map(m=>`<tr><td>${SBL.pokemon.escapeHtml(m.name)}</td><td>${(m.types||[]).map(SBL.pokemon.escapeHtml).join(' / ')||'<span class="note">—</span>'}</td><td class="num">${m.points}</td><td>${m.drafted?`<span class="badge">→ ${SBL.pokemon.escapeHtml(m.draftedBy||'')}</span>`:'<span class="note">Available</span>'}</td>${editable?`<td><button class="ghost small danger-btn" data-remove-mon="${SBL.pokemon.escapeHtml(m.id)}">Remove</button></td>`:''}</tr>`).join('')+'</tbody></table>'+(d.pool.length>matches.length?'<div class="note" style="margin-top:8px">Showing up to 60 matching Pokémon.</div>':'');
+        target.querySelectorAll('[data-remove-mon]').forEach(btn=>btn.addEventListener('click', async () => {
+          const status = document.getElementById('draftBoardStatus');
+          try{ const removed=d.pool.find(m=>m.id===btn.dataset.removeMon); d.pool=d.pool.filter(m=>m.id!==btn.dataset.removeMon); await saveDraft(); await logAdminAction('remove_draft_pokemon',`Removed ${removed?.name||btn.dataset.removeMon} from the draft board.`,{id:btn.dataset.removeMon,name:removed?.name||null}); drawDraft(); }catch(e){ if(status) status.innerHTML=`<div class="note danger">${SBL.pokemon.escapeHtml(e.message)}</div>`; }
+        }));
+      }
+    };
+    document.getElementById('draftBoardSearch')?.addEventListener('input', e=>renderPokemonSearchResults(e.target.value,'draftBoardResults',true));
+    document.getElementById('adminDraftPokemonSearch')?.addEventListener('input', e=>renderPokemonSearchResults(e.target.value,'adminDraftPickPokemon',false));
     document.getElementById('importDraftBoard')?.addEventListener('click', async () => {
       const file = document.getElementById('draftBoardFile').files?.[0];
       const status = document.getElementById('draftBoardStatus');
@@ -2138,19 +2195,6 @@ function renderDraft(){ return drawDraft(); }
         drawDraft();
       }catch(e){ status.innerHTML = `<div class="note danger">${SBL.pokemon.escapeHtml(e.message)}</div>`; }
     });
-    contentEl.querySelectorAll('[data-remove-mon]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const status = document.getElementById('draftBoardStatus');
-        try{
-          const removed = d.pool.find(m => m.id === btn.dataset.removeMon);
-          d.pool = d.pool.filter(m => m.id !== btn.dataset.removeMon);
-          await saveDraft();
-          await logAdminAction('remove_draft_pokemon', `Removed ${removed?.name || btn.dataset.removeMon} from the draft board.`, {id:btn.dataset.removeMon, name:removed?.name || null});
-          drawDraft();
-        }catch(e){ if(status) status.innerHTML = `<div class="note danger">${SBL.pokemon.escapeHtml(e.message)}</div>`; }
-      });
-    });
-
     document.getElementById('adminMakePickBtn')?.addEventListener('click', async () => {
       const err = document.getElementById('adminDraftPickErr');
       const btn = document.getElementById('adminMakePickBtn');
@@ -2365,7 +2409,8 @@ function renderDraft(){ return drawDraft(); }
   // accepted trades. Team-to-team acceptance remains handled by accept_trade().
   let COMM_PROFILES = null;
   let COMM_TRADES = null;
-  let COMM_TRADE_FILTER = 'pending';
+  // Which section of the Trades workspace is showing.
+  let COMM_TRADES_VIEW = 'pending';
   let ADMIN_TRADE_SEASON = new Date().getFullYear();
 
   let COMM_TRADE_LIMITS = [];
@@ -2455,32 +2500,34 @@ function renderDraft(){ return drawDraft(); }
     const isFA = (t.target_team == null || String(t.target_team).trim() === '');
     const canCredit = t.status === 'pending';
     const canRejectFA = isFA && t.status === 'pending';
+    const offered = (t.mons_offered||[]).map(SBL.pokemon.escapeHtml).join(', ') || '—';
+    const requested = (t.mons_requested||[]).map(SBL.pokemon.escapeHtml).join(', ') || '—';
 
     return `<div class="trade-card">
       <div class="trade-head">
-        <div>
-          <div class="trade-teams">${SBL.pokemon.escapeHtml(t.proposer_team)} → ${isFA ? 'Free Agency' : SBL.pokemon.escapeHtml(t.target_team)}</div>
-          <div class="trade-sub">${new Date(t.created_at).toLocaleString()}</div>
+        <div class="trade-head-main">
+          <span class="trade-kind-badge ${isFA ? 'fa' : 'team'}">${isFA ? 'Free Agency' : 'Team Trade'}</span>
+          <div class="trade-teams">${SBL.pokemon.escapeHtml(t.proposer_team)}${isFA ? '' : ` &nbsp;⇄&nbsp; ${SBL.pokemon.escapeHtml(t.target_team)}`}</div>
         </div>
         <span class="status-pill ${t.status}">${t.status}</span>
       </div>
+      <div class="trade-sub">${new Date(t.created_at).toLocaleString()}</div>
       <div class="trade-cols">
-        <div class="trade-col"><h4>Offered</h4><div class="note">${(t.mons_offered||[]).map(SBL.pokemon.escapeHtml).join(', ') || 'Nothing'}</div></div>
-        <div class="trade-col"><h4>Requested</h4><div class="note">${(t.mons_requested||[]).map(SBL.pokemon.escapeHtml).join(', ') || 'Nothing'}</div></div>
-      </div>
-      <div class="note" style="margin-top:10px;">
-        ${t.status === 'accepted'
-          ? 'Trade is already credited to the teams.'
-          : t.status === 'pending'
-            ? 'Use “Credit trade” to manually apply this trade on behalf of the players.'
-            : 'This trade is not currently actionable.'}
+        <div class="trade-col">
+          <h4>${SBL.pokemon.escapeHtml(t.proposer_team)} sends</h4>
+          <div class="trade-mons">${offered}</div>
+        </div>
+        ${isFA ? '' : `<div class="trade-col">
+          <h4>${SBL.pokemon.escapeHtml(t.target_team)} sends</h4>
+          <div class="trade-mons">${requested}</div>
+        </div>`}
       </div>
       ${(canCredit || canRejectFA || canRevoke || canRevert) ? `<div class="foot-actions">
-        ${canCredit ? `<button class="teal small" data-trade-action="credit" data-trade-id="${t.id}">Credit trade to players</button>` : ''}
+        ${canCredit ? `<button class="teal small" data-trade-action="credit" data-trade-id="${t.id}" title="Manually apply this trade on the players' behalf">Credit trade</button>` : ''}
         ${canRejectFA ? `<button class="danger small" data-trade-action="reject-fa" data-trade-id="${t.id}">Reject</button>` : ''}
-        ${canRevert ? `<button class="ghost small danger-btn" data-trade-action="revert" data-trade-id="${t.id}">Revert &amp; end trade</button>` : ''}
+        ${canRevert ? `<button class="ghost small danger-btn" data-trade-action="revert" data-trade-id="${t.id}" title="Undo the roster swap and end this trade">Revert &amp; end</button>` : ''}
         ${canRevoke ? `<button class="ghost small" data-trade-action="revoke" data-trade-id="${t.id}">Reset to pending</button>` : ''}
-      </div>` : ''}
+      </div>` : `<div class="note trade-inactive-note">This trade isn't currently actionable.</div>`}
       <div class="note danger" id="tradeCommErr-${t.id}"></div>
     </div>`;
   }
@@ -2548,7 +2595,7 @@ function renderDraft(){ return drawDraft(); }
       </tr>`;
     }).join('');
     return `<div class="panel">
-      <h2>Trade Manager</h2>
+      <h2>Team Trade Limits</h2>
       <div class="note">Each franchise has <strong>two separate allowances</strong>: 8 team-to-team trades and 8 Free Agency trades by default. Edit the <strong>trades remaining</strong> directly below for each player/franchise; the underlying total allowance is adjusted automatically to preserve that remaining number after trades already used.</div>
       <div style="overflow:auto;margin-top:14px;">
         ${rows ? `<table><thead><tr><th>Player / Franchise</th><th class="num">Team trades used</th><th class="num">Team trades remaining</th><th class="num">FA trades used</th><th class="num">FA trades remaining</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty-state">No approved franchises yet.</div>'}
@@ -2556,37 +2603,72 @@ function renderDraft(){ return drawDraft(); }
     </div>`;
   }
 
-  function drawTrades(){
-    const filteredTrades = COMM_TRADES.filter(t=>{
-      if(COMM_TRADE_FILTER === 'pending') return t.status === 'pending';
-      if(COMM_TRADE_FILTER === 'completed') return t.status !== 'pending';
-      if(COMM_TRADE_FILTER === 'freeagency') return (t.target_team == null || String(t.target_team).trim() === '');
-      return true;
-    });
-    const pendingFA = COMM_TRADES.filter(t=>(t.target_team == null || String(t.target_team).trim() === '') && t.status === 'pending').length;
+
+
+  function tradeSubNav(){
+    const pendingCount = COMM_TRADES.filter(t=>t.status==='pending').length;
+    const views = [
+      {id:'pending', label:'Pending', count:pendingCount},
+      {id:'history', label:'History', count:null},
+      {id:'limits', label:'Team Limits', count:null},
+      {id:'credits', label:'Manual Credits', count:null}
+    ];
+    return `<div class="trade-subnav" role="tablist" aria-label="Trades view">
+      ${views.map(v=>`<button type="button" class="trade-subnav-item ${COMM_TRADES_VIEW===v.id?'active':''}" data-trade-view="${v.id}" role="tab" aria-selected="${COMM_TRADES_VIEW===v.id}">
+        ${v.label}${v.count ? ` <span class="badge">${v.count}</span>` : ''}
+      </button>`).join('')}
+    </div>`;
+  }
+
+  function drawTradesPendingView(){
+    const pending = COMM_TRADES.filter(t=>t.status==='pending');
+    return `<div class="panel">
+      <div class="section-head-row">
+        <div>
+          <h2>Pending Trades</h2>
+          <div class="note">Awaiting a response, or ready for you to credit on the players' behalf.</div>
+        </div>
+      </div>
+      <div class="trade-list">
+        ${pending.length ? pending.map(commTradeRow).join('') : '<div class="empty-state">No pending trades right now.</div>'}
+      </div>
+    </div>`;
+  }
+
+  function drawTradesHistoryView(){
+    const history = COMM_TRADES.filter(t=>t.status!=='pending')
+      .sort((a,b)=> new Date(b.created_at) - new Date(a.created_at));
+    return `<div class="panel">
+      <div class="section-head-row">
+        <div>
+          <h2>Trade History</h2>
+          <div class="note">Completed, rejected, and reverted trades.</div>
+        </div>
+      </div>
+      <div class="trade-list">
+        ${history.length ? history.map(commTradeRow).join('') : '<div class="empty-state">No trade history yet.</div>'}
+      </div>
+    </div>`;
+  }  function drawTrades(){
+    let body;
+    if(COMM_TRADES_VIEW === 'history') body = drawTradesHistoryView();
+    else if(COMM_TRADES_VIEW === 'limits') body = tradeManagerRows();
+    else if(COMM_TRADES_VIEW === 'credits') body = drawManualTradeCredits();
+    else body = drawTradesPendingView();
 
     contentEl.innerHTML = `
-      ${drawManualTradeCredits()}
-      ${tradeManagerRows()}
-      <div class="panel">
-        <div class="trade-tab-head">
-          <div>
-            <h2>Trade Management <span class="badge">${COMM_TRADES.length}</span></h2>
-            <div class="note">All trade actions live here. “Credit trade to players” manually applies a pending trade on behalf of the teams.</div>
-          </div>
-          <div>
-            <label for="commTradeFilter">View</label>
-            <select id="commTradeFilter" style="min-width:180px;">
-              <option value="pending" ${COMM_TRADE_FILTER==='pending'?'selected':''}>Pending${pendingFA ? ` (${pendingFA} FA)` : ''}</option>
-              <option value="completed" ${COMM_TRADE_FILTER==='completed'?'selected':''}>Completed</option>
-              <option value="freeagency" ${COMM_TRADE_FILTER==='freeagency'?'selected':''}>Free Agency</option>
-            </select>
-          </div>
-        </div>
-        <div style="margin-top:14px;">
-          ${filteredTrades.length ? filteredTrades.map(commTradeRow).join('') : '<div class="empty-state">No trades in this view.</div>'}
-        </div>
-      </div>`;
+      <div class="trade-workspace-head">
+        <h2 class="trade-workspace-title">Trades <span class="badge">${COMM_TRADES.length} total</span></h2>
+      </div>
+      ${tradeSubNav()}
+      ${body}`;
+
+    contentEl.querySelectorAll('button[data-trade-view]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        COMM_TRADES_VIEW = btn.dataset.tradeView;
+        drawTrades();
+      });
+    });
 
     document.getElementById('creditManualTrades')?.addEventListener('click', async ()=>{
       const playerId = document.getElementById('manualTradePlayer')?.value;
@@ -2647,11 +2729,6 @@ function renderDraft(){ return drawDraft(); }
           if(activeTab==='trades') drawTrades();
         }catch(e){if(errEl)errEl.textContent=e.message;btn.disabled=false;}
       });
-    });
-
-    document.getElementById('commTradeFilter')?.addEventListener('change', e=>{
-      COMM_TRADE_FILTER = e.target.value;
-      drawTrades();
     });
 
     contentEl.querySelectorAll('button[data-trade-action]').forEach(btn=>{
@@ -3027,6 +3104,107 @@ function renderDraft(){ return drawDraft(); }
         }
       });
     });
+  }
+
+  // ---------- Finals Mode ----------
+  function finalsTeamFor(username){
+    const k=String(username||'').trim().toLowerCase();
+    return STATE.teamMap[k] || String(username||'').trim();
+  }
+  function finalsReplayScore(r){
+    const score={p1:0,p2:0};
+    for(const side of ['p1','p2']){
+      const roster=Array.isArray(r?.teamRoster?.[side])?r.teamRoster[side]:[];
+      const unique=new Set(roster.map(x=>String(typeof x==='string'?x:(x?.species||x?.name||'')).trim().toLowerCase()).filter(Boolean));
+      if(!unique.size){ score[side]=0; continue; }
+      const fainted=new Set(Object.values(r.mons||{}).filter(m=>m?.side===side && Number(m.deaths||0)>0).map(m=>String(m.species||'').trim().toLowerCase()).filter(Boolean));
+      score[side]=Math.max(0,unique.size-fainted.size);
+    }
+    return score;
+  }
+  function finalsFixtureResult(week,home,away){
+    for(const r of Object.values(STATE.replays||{})){
+      if(!r?.players || String(r.week||'')!==String(week||'')) continue;
+      const a=finalsTeamFor(r.players.p1), b=finalsTeamFor(r.players.p2);
+      const same=(x,y)=>String(x||'').trim().toLowerCase()===String(y||'').trim().toLowerCase();
+      if(!((same(a,home)&&same(b,away))||(same(a,away)&&same(b,home)))) continue;
+      const score=finalsReplayScore(r); const p1=String(r.winner||'').trim().toLowerCase();
+      const winner=same(p1,r.players.p1)?a:same(p1,r.players.p2)?b:null;
+      return winner?{winner,score}:null;
+    }
+    return null;
+  }
+  function finalsStandings(){
+    const map={};
+    const rosters=STATE.settings.rosters||{};
+    Object.keys(rosters).forEach(team=>{ map[String(team).trim().toLowerCase()]={team,wins:0,losses:0,diff:0,dealt:0}; });
+    const fixture=STATE.settings.fixture||{};
+    for(const round of (fixture.rounds||[])) for(const m of (round.matches||[])){
+      const r=(()=>{
+        for(const replay of Object.values(STATE.replays||{})){
+          if(!replay?.players || String(replay.week||'')!==String(round.week||'')) continue;
+          const a=finalsTeamFor(replay.players.p1), b=finalsTeamFor(replay.players.p2);
+          const same=(x,y)=>String(x||'').trim().toLowerCase()===String(y||'').trim().toLowerCase();
+          if(!((same(a,m.home)&&same(b,m.away))||(same(a,m.away)&&same(b,m.home)))) continue;
+          const w=String(replay.winner||'').trim().toLowerCase();
+          return same(w,replay.players.p1)?{winner:a,score:finalsReplayScore(replay)}:same(w,replay.players.p2)?{winner:b,score:finalsReplayScore(replay)}:null;
+        }
+        return null;
+      })();
+      if(!r?.winner) continue;
+      const hk=String(m.home).trim().toLowerCase(), ak=String(m.away).trim().toLowerCase(), wk=String(r.winner).trim().toLowerCase();
+      const lk=wk===hk?ak:hk, margin=Math.max(0,Number(Math.max(r.score.p1,r.score.p2))-Number(Math.min(r.score.p1,r.score.p2)));
+      if(map[wk]){map[wk].wins++;map[wk].diff+=margin;} if(map[lk]){map[lk].losses++;map[lk].diff-=margin;}
+    }
+    const sort=(a,b)=>b.wins-a.wins || b.diff-a.diff || b.dealt-a.dealt || a.team.localeCompare(b.team,undefined,{sensitivity:'base'});
+    const assignments=STATE.settings.franchises||{};
+    const conf=t=>{ const exact=assignments[t.team]; if(exact==='a'||exact==='b')return exact; const k=t.team.toLowerCase(); const found=Object.keys(assignments).find(x=>x.toLowerCase()===k); return found?assignments[found]:''; };
+    const a=Object.values(map).filter(x=>conf(x)==='a').sort(sort), b=Object.values(map).filter(x=>conf(x)==='b').sort(sort);
+    return {a,b};
+  }
+  function openAdminFinalsScore(roundKey, matchId){
+    const finals=SBL.finals.resolveMatchups(STATE.settings.finals||SBL.finals.defaultFinalsState());
+    const round=finals.rounds.find(r=>r.key===roundKey), m=round?.matches.find(x=>x.id===matchId); if(!m||!m.teamA||!m.teamB)return;
+    const overlay=document.createElement('div'); overlay.className='admin-score-overlay'; overlay.innerHTML=`<div class="admin-score-modal"><button type="button" class="modal-close" aria-label="Close">×</button><div class="finals-kicker">${SBL.pokemon.escapeHtml(round.name)}</div><h2>${SBL.pokemon.escapeHtml(m.teamA)} <span>vs</span> ${SBL.pokemon.escapeHtml(m.teamB)}</h2><div class="admin-score-grid"><label class="finals-score-team"><span class="finals-score-team-name">${SBL.pokemon.escapeHtml(m.teamA)}</span><input class="score-number finals-score-input-a" type="number" min="0" step="1" inputmode="numeric" value="${m.scoreA??''}" aria-label="${SBL.pokemon.escapeHtml(m.teamA)} score"></label><label class="finals-score-team"><span class="finals-score-team-name">${SBL.pokemon.escapeHtml(m.teamB)}</span><input class="score-number finals-score-input-b" type="number" min="0" step="1" inputmode="numeric" value="${m.scoreB??''}" aria-label="${SBL.pokemon.escapeHtml(m.teamB)} score"></label></div><div class="note">The higher score determines the winner. Saving advances the bracket immediately.</div><div class="foot-actions"><button type="button" class="primary" data-admin-score-save>Save score</button></div></div>`;
+    document.body.appendChild(overlay);
+    const close=()=>overlay.remove(); overlay.querySelector('.modal-close').addEventListener('click',close); overlay.addEventListener('click',e=>{if(e.target===overlay)close();});
+    overlay.querySelectorAll('.score-number').forEach(input=>input.addEventListener('input',()=>{if(input.value!==''&&Number(input.value)<0)input.value='0';})); overlay.querySelector('[data-admin-score-save]').addEventListener('click',async()=>{const btn=overlay.querySelector('[data-admin-score-save]');const a=overlay.querySelector('.finals-score-input-a').value,b=overlay.querySelector('.finals-score-input-b').value;if(a===''||b===''){alert('Enter both scores.');return;}btn.disabled=true;try{STATE.settings.finals=SBL.finals.setResult(STATE.settings.finals,roundKey,matchId,{scoreA:a,scoreB:b});await saveSettings();await logAdminAction('set_finals_score',`Entered Finals score for ${matchId}.`,{round:roundKey,match:matchId,scoreA:Number(a),scoreB:Number(b)});close();renderSeasonSetup();}catch(err){alert('Could not save score: '+err.message);btn.disabled=false;}});
+  }
+
+  function renderFinalsAdminPanel(){
+    const finals=SBL.finals.resolveMatchups(STATE.settings.finals||SBL.finals.defaultFinalsState());
+    const monday=finals.startMonday || SBL.finals.mondayISO(new Date(Date.now()+7*86400000));
+    const teams=[...new Set(Object.values(STATE.teamMap||{}).map(v=>String(v||'').trim()).filter(Boolean))]
+      .sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}));
+
+    // Build the automatic seed order for the initial editor. Once Finals exist,
+    // the saved seed order becomes the editor's starting point instead.
+    const autoStandings=finalsStandings();
+    const autoSeeds=SBL.finals.makeSeedList(autoStandings.a.slice(0,6),autoStandings.b.slice(0,6));
+    const seedSource=finals.seeds.length ? finals.seeds : autoSeeds;
+    const selected=new Map(seedSource.map(s=>[Number(s.seed),String(s.team||'')]));
+
+    const seedEditor=Array.from({length:12},(_,i)=>{
+      const seed=i+1, value=selected.get(seed)||'';
+      const options=teams.map(team=>`<option value="${SBL.pokemon.escapeHtml(team)}" ${team===value?'selected':''}>${SBL.pokemon.escapeHtml(team)}</option>`).join('');
+      const bye=seed<=4?'QF bye':'';
+      return `<div class="finals-seed-editor-row"><div class="finals-seed-number">#${seed}</div><select class="finals-seed-select" data-finals-seed="${seed}"><option value="">Select team…</option>${options}</select><span class="finals-seed-note">${bye}</span></div>`;
+    }).join('');
+
+    const matchRows=finals.rounds.map(r=>`<div class="panel finals-admin-round-panel"><h3 class="finals-admin-round-head">${SBL.pokemon.escapeHtml(r.name)} <span class="badge">${SBL.pokemon.escapeHtml(r.label)}</span></h3>${r.matches.map((m,mi)=>{
+      const canPick=m.teamA&&m.teamB;
+      const a=SBL.pokemon.escapeHtml(m.teamA||'TBD'), b=SBL.pokemon.escapeHtml(m.teamB||'TBD');
+      const ready=m.teamA&&m.teamB;
+      return `<div class="finals-admin-match-row" data-finals-admin-match="${m.id}"><button type="button" class="finals-admin-match-main" data-open-finals-score="${r.key}" data-open-finals-match="${m.id}"><span class="finals-admin-match-label">${r.key==='playin'?`PI ${mi+1}`:r.key==='quarterfinals'?`QF ${mi+1}`:r.key==='semifinals'?`SF ${mi+1}`:'FINAL'}</span><span class="finals-admin-teams"><strong>${a}</strong><span>vs</span><strong>${b}</strong></span><span class="finals-admin-score">${m.scoreA!=null&&m.scoreB!=null?`${m.scoreA} – ${m.scoreB}`:'—'}</span><span class="note">${m.winner?`Winner: ${SBL.pokemon.escapeHtml(m.winner)}`:ready?'Click to enter score':'Waiting'}</span></button>${canPick&&ready?`<select class="finals-winner-select" data-finals-round="${r.key}" data-finals-match="${m.id}"><option value="">Set winner…</option><option value="${a}" ${m.winner===m.teamA?'selected':''}>${a}</option><option value="${b}" ${m.winner===m.teamB?'selected':''}>${b}</option></select>`:'<span class="badge">Waiting</span>'}</div>`;
+    }).join('')}</div>`).join('');
+
+    const currentSeedCount=[...selected.values()].filter(Boolean).length;
+    const isGenerated=finals.status!=='inactive' && finals.rounds.length>0;
+    const seedNote=isGenerated
+      ? 'Edit any autogenerated seed below, then use Regenerate Finals to rebuild the bracket with the new order. You do not need to re-enter all 12 teams.'
+      : 'Seeds are autogenerated from the top 6 in each conference using the Finals seeding rules. You can edit any seed before generating the bracket.';
+
+    return `<div class="panel"><h2>Finals Mode</h2><div class="note">${seedNote} Seeds 1–4 receive quarterfinal byes. Seeds 5–12 play the single-round play-in: 5v12, 6v11, 7v10, 8v9. After all four play-ins are decided, the lowest-seeded winner plays #1, the next-lowest plays #2, then #3 and #4. Every round runs Monday–Sunday.</div><div class="row finals-admin-start-row"><div><label>Finals start Monday</label><input type="date" id="finalsStartMonday" value="${monday}"></div><button class="primary" id="generateFinalsBtn">${isGenerated?'Regenerate Finals':'Generate Finals'}</button>${isGenerated?`<button class="ghost danger-btn" id="clearFinalsBtn">Clear Finals</button>`:''}</div><div id="finalsAdminStatus" class="note"></div><div class="finals-seed-editor"><div class="finals-seed-editor-head"><div><h3 class="finals-admin-round-head">Finals Seeds</h3><div class="note">${currentSeedCount}/12 seeds selected. Pick each team once.</div></div><span class="badge">${isGenerated?'Editable bracket seeds':'Auto-generated seeds'}</span></div>${seedEditor}</div>${isGenerated?`<div class="finals-admin-results-head"><div><h3 class="finals-admin-round-head">Finals Results</h3><div class="note finals-admin-results-note">Enter scores in the matchup popup or choose the winner directly here. Winner selection is admin-only; saving resolves the bracket immediately.</div></div><button class="primary" id="saveFinalsResultsBtn">Save Results</button></div><div id="finalsResultsStatus" class="note"></div>${matchRows}${finals.champion?`<div class="panel finals-admin-champion"><strong>Champion:</strong> ${SBL.pokemon.escapeHtml(finals.champion)}</div>`:''}`:''}</div>`;
   }
 
   // Franchise names are derived from the Player -> Team name mapping.
@@ -3645,6 +3823,7 @@ function renderDraft(){ return drawDraft(); }
           </label>
         </div>
       </div>
+      ${renderFinalsAdminPanel()}
       ${(()=>{
         const fxTeamNames = franchises.map(f=>f.name);
         const fxConfA = franchises.filter(f=>f.conference==='a').map(f=>f.name);
@@ -3694,21 +3873,157 @@ function renderDraft(){ return drawDraft(); }
     let pendingRosterUpload = null;
     const rosterStatus = document.getElementById('rosterUploadStatus');
     const rosterPreview = document.getElementById('rosterPreview');
-    // Organize the existing controls into clearer admin subsections without changing their behavior.
+    // Season Management uses two levels of lightweight navigation:
+    // major tools first, then a small local sub-navigation where several
+    // closely related controls belong together. Existing panels, IDs,
+    // handlers and data operations are deliberately left untouched.
     const seasonPanels = Array.from(contentEl.querySelectorAll(':scope > .panel'));
-    const seasonGroups = [
-      {title:'Season Management', help:'Season lifecycle, archived seasons, and safe season-level actions.', indexes:[0]},
-      {title:'Roster & Player Pool', help:'Publish and review the current season roster data.', indexes:[1]},
-      {title:'Standings & Qualification', help:'Conference assignments, manual ladder corrections, and playoff visibility.', indexes:[2,3,4]},
-      {title:'Schedule & Weeks', help:'Build, upload, validate, and reconcile the season fixture.', indexes:[5]}
+    const seasonPrimary = [
+      {title:'Season', help:'Season lifecycle and archives.', indexes:[0]},
+      {title:'Rosters', help:'Publish the current rosters.', indexes:[1]},
+      {title:'Competition', help:'Standings, conferences and qualification.', indexes:[2,3,4], sub:[
+        {title:'Standings', index:2},
+        {title:'Conferences', index:3},
+        {title:'Qualification', index:4}
+      ]},
+      {title:'Finals', help:'Bracket, seeding and results.', indexes:[5]},
+      {title:'Schedule', help:'Fixture generation and matching.', indexes:[6]}
     ];
-    seasonGroups.forEach(group=>{
-      const section=document.createElement('div'); section.className='admin-section';
-      section.innerHTML=`<div class="admin-section-title"><div><h2>${SBL.pokemon.escapeHtml(group.title)}</h2><div class="note">${SBL.pokemon.escapeHtml(group.help)}</div></div></div>`;
-      const panels=group.indexes.map(i=>seasonPanels[i]).filter(Boolean); panels.forEach(panel=>section.appendChild(panel));
-      if(panels.length) contentEl.appendChild(section);
+
+    const workspace=document.createElement('div'); workspace.className='season-admin-workspace';
+    const header=document.createElement('div'); header.className='season-admin-workspace-head';
+    header.innerHTML=`<div><div class="season-admin-eyebrow">Season Management</div><h2>${SBL.pokemon.escapeHtml(STATE.settings.activeSeason || DEFAULT_SEASON)}</h2></div><div class="season-admin-head-meta">${Object.keys(STATE.replays||{}).length} replay${Object.keys(STATE.replays||{}).length===1?'':'s'} processed</div>`;
+    const nav=document.createElement('div'); nav.className='season-admin-local-nav';
+    const main=document.createElement('div'); main.className='season-admin-content';
+
+    seasonPrimary.forEach((group,index)=>{
+      const button=document.createElement('button');
+      button.type='button'; button.dataset.seasonPrimary=String(index); button.className=`season-admin-local-tab ${index===0?'active':''}`;
+      button.innerHTML=`<strong>${SBL.pokemon.escapeHtml(group.title)}</strong><span>${SBL.pokemon.escapeHtml(group.help)}</span>`;
+      nav.appendChild(button);
+
+      const pane=document.createElement('section'); pane.className=`season-admin-pane ${index===0?'active':''}`; pane.dataset.seasonPrimaryPane=String(index); pane.setAttribute('aria-label',group.title);
+      const panels=group.indexes.map(i=>seasonPanels[i]).filter(Boolean);
+      if(group.sub){
+        const subnav=document.createElement('div'); subnav.className='season-admin-subnav';
+        const subcontent=document.createElement('div'); subcontent.className='season-admin-subcontent';
+        group.sub.forEach((sub,subIndex)=>{
+          const sb=document.createElement('button'); sb.type='button'; sb.className=`season-admin-subtab ${subIndex===0?'active':''}`; sb.dataset.seasonSub=String(subIndex); sb.textContent=sub.title; subnav.appendChild(sb);
+          const sp=document.createElement('div'); sp.className=`season-admin-subpane ${subIndex===0?'active':''}`; sp.dataset.seasonSubPane=String(subIndex);
+          if(seasonPanels[sub.index]) sp.appendChild(seasonPanels[sub.index]);
+          subcontent.appendChild(sp);
+        });
+        pane.appendChild(subnav); pane.appendChild(subcontent);
+      }else{
+        panels.forEach(panel=>pane.appendChild(panel));
+      }
+      main.appendChild(pane);
     });
+
+    workspace.appendChild(header); workspace.appendChild(nav); workspace.appendChild(main); contentEl.appendChild(workspace);
     seasonPanels.forEach(panel=>{ if(panel.parentElement===contentEl) panel.remove(); });
+
+    nav.querySelectorAll('[data-season-primary]').forEach(btn=>btn.addEventListener('click',()=>{
+      const target=btn.dataset.seasonPrimary;
+      nav.querySelectorAll('[data-season-primary]').forEach(b=>{const active=b===btn;b.classList.toggle('active',active);b.setAttribute('aria-current',active?'page':'false');});
+      main.querySelectorAll('.season-admin-pane').forEach(p=>p.classList.toggle('active',p.dataset.seasonPrimaryPane===target));
+    }));
+    main.querySelectorAll('.season-admin-pane').forEach(pane=>{
+      pane.querySelectorAll('[data-season-sub]').forEach(btn=>btn.addEventListener('click',()=>{
+        const target=btn.dataset.seasonSub;
+        pane.querySelectorAll('[data-season-sub]').forEach(b=>b.classList.toggle('active',b===btn));
+        pane.querySelectorAll('.season-admin-subpane').forEach(p=>p.classList.toggle('active',p.dataset.seasonSubPane===target));
+      }));
+    });
+
+    // Finals controls use delegated events so they remain clickable even after
+    // the Season Management panels are regrouped/re-rendered. This also keeps
+    // the controls resilient to later admin-panel additions.
+    if(contentEl.__finalsControlsHandler) contentEl.removeEventListener('click', contentEl.__finalsControlsHandler);
+    if(contentEl.__finalsChangeHandler) contentEl.removeEventListener('change', contentEl.__finalsChangeHandler);
+    contentEl.__finalsControlsHandler = async (event)=>{
+      const generateBtn = event.target.closest?.('#generateFinalsBtn');
+      if(generateBtn){
+        event.preventDefault();
+        if(generateBtn.disabled) return;
+        const start=SBL.finals.mondayISO(document.getElementById('finalsStartMonday')?.value || new Date());
+        if(STATE.settings.finals?.status!=='inactive' && !confirm('Regenerate Finals? This replaces the current bracket and clears all finals results.')) return;
+        const seedSelects=[...contentEl.querySelectorAll('.finals-seed-select')];
+        const seeds=seedSelects.map((el,i)=>({seed:i+1,team:el.value}));
+        try{ SBL.finals.validateSeeds(seeds); }catch(err){ alert(err.message); return; }
+        generateBtn.disabled=true;
+        try{
+          STATE.settings.finals=SBL.finals.generate(start,seeds);
+          await saveSettings();
+          await logAdminAction('generate_finals',`Generated Finals beginning ${start}.`,{startMonday:start,seeds});
+          renderSeasonSetup();
+        }catch(err){
+          alert('Could not generate Finals: '+err.message);
+          generateBtn.disabled=false;
+        }
+        return;
+      }
+      const clearBtn = event.target.closest?.('#clearFinalsBtn');
+      if(clearBtn){
+        event.preventDefault();
+        if(!confirm('Clear Finals Mode and all current finals results?')) return;
+        clearBtn.disabled=true;
+        try{
+          STATE.settings.finals=SBL.finals.defaultFinalsState();
+          await saveSettings();
+          await logAdminAction('clear_finals','Cleared Finals Mode.',{});
+          renderSeasonSetup();
+        }catch(err){
+          alert('Could not clear Finals: '+err.message);
+          clearBtn.disabled=false;
+        }
+      }
+    };
+    contentEl.__finalsChangeHandler = null;
+
+    const saveResultsBtn = contentEl.querySelector('#saveFinalsResultsBtn');
+    if(saveResultsBtn){
+      saveResultsBtn.addEventListener('click', async ()=>{
+        if(saveResultsBtn.disabled) return;
+        const status=document.getElementById('finalsResultsStatus');
+        const selects=[...contentEl.querySelectorAll('.finals-winner-select')];
+        const current=SBL.finals.resolveMatchups(STATE.settings.finals||SBL.finals.defaultFinalsState());
+        const changes=[];
+        for(const row of contentEl.querySelectorAll('.finals-admin-match-row')){
+          const roundKey=row.querySelector('[data-finals-round]')?.dataset.finalsRound;
+          const matchId=row.dataset.finalsAdminMatch;
+          const match=current.rounds.find(r=>r.key===roundKey)?.matches.find(m=>m.id===matchId);
+          if(!match) continue;
+          const select=row.querySelector('.finals-winner-select');
+          const scoreA=row.querySelector('.finals-score-input-a')?.value;
+          const scoreB=row.querySelector('.finals-score-input-b')?.value;
+          if(select?.value || scoreA!==undefined || scoreB!==undefined){
+            const changedWinner=select?.value && select.value!==String(match.winner||'');
+            const changedScore=(scoreA!==undefined && String(scoreA)!==String(match.scoreA??'')) || (scoreB!==undefined && String(scoreB)!==String(match.scoreB??''));
+            if(changedWinner||changedScore) changes.push({roundKey,matchId,winner:select?.value||null,scoreA,scoreB});
+          }
+        }
+        if(!changes.length){ if(status) status.textContent='No new results to save.'; return; }
+        saveResultsBtn.disabled=true; if(status) status.textContent=`Saving ${changes.length} result${changes.length===1?'':'s'}…`;
+        try{
+          const roundOrder={playin:0,quarterfinals:1,semifinals:2,grandfinal:3};
+          changes.sort((a,b)=>(roundOrder[a.roundKey]??99)-(roundOrder[b.roundKey]??99));
+          for(const change of changes){
+            const payload={};
+            if(change.scoreA!==undefined && change.scoreA!=='' || change.scoreB!==undefined && change.scoreB!==''){ payload.scoreA=change.scoreA; payload.scoreB=change.scoreB; }
+            else if(change.winner) payload.winner=change.winner;
+            STATE.settings.finals=SBL.finals.setResult(STATE.settings.finals,change.roundKey,change.matchId,payload);
+            await logAdminAction('set_finals_result',`Set Finals result for ${change.matchId}.`,{round:change.roundKey,match:change.matchId,winner:STATE.settings.finals.rounds.find(r=>r.key===change.roundKey)?.matches.find(m=>m.id===change.matchId)?.winner||null,scoreA:change.scoreA??null,scoreB:change.scoreB??null});
+          }
+          await saveSettings(); renderSeasonSetup();
+        }catch(err){ if(status) status.textContent='Could not save Finals result: '+err.message; saveResultsBtn.disabled=false; }
+      });
+    }
+
+    // Matchup click opens the same score editor used by the public Finals display.
+    contentEl.querySelectorAll('[data-open-finals-score]').forEach(btn=>btn.addEventListener('click',()=>openAdminFinalsScore(btn.dataset.openFinalsScore,btn.dataset.openFinalsMatch)));
+
+    contentEl.addEventListener('click', contentEl.__finalsControlsHandler);
 
     const rosterFile = document.getElementById('rosterFile');
     const loadRosterFileBtn = document.getElementById('loadRosterFileBtn');
@@ -3858,7 +4173,7 @@ function fixtureMatchCount(fixtureData){const f=Array.isArray(fixtureData)?fixtu
     window.drawFixtureSummary = drawFixtureSummary;
     drawFixtureSummary();
 
-    document.getElementById('generateFixtureBtn').addEventListener('click', async ()=>{
+    document.getElementById('generateFixtureBtn')?.addEventListener('click', async ()=>{
       const franchiseList = configuredFranchises();
       const teamNames = franchiseList.map(f=>f.name);
       if(teamNames.length < 2){ alert('Add at least 2 franchises to the Player → Team name mapping before generating a fixture.'); return; }
@@ -3886,7 +4201,7 @@ function fixtureMatchCount(fixtureData){const f=Array.isArray(fixtureData)?fixtu
       }
     });
 
-    document.getElementById('matchReplaysBtn').addEventListener('click', async ()=>{
+    document.getElementById('matchReplaysBtn')?.addEventListener('click', async ()=>{
       const status = document.getElementById('matchReplaysStatus');
       const fixture = STATE.settings.fixture;
       const rounds = Array.isArray(fixture?.rounds) ? fixture.rounds : [];
@@ -4004,7 +4319,7 @@ function fixtureMatchCount(fixtureData){const f=Array.isArray(fixtureData)?fixtu
       }
     });
 
-    document.getElementById('clearFixtureBtn').addEventListener('click', async ()=>{
+    document.getElementById('clearFixtureBtn')?.addEventListener('click', async ()=>{
       if(!STATE.settings.fixture) return;
       if(!confirm('Clear the saved fixture? This cannot be undone.')) return;
       await saveFixture(null, null);
@@ -4012,7 +4327,7 @@ function fixtureMatchCount(fixtureData){const f=Array.isArray(fixtureData)?fixtu
       renderSeasonSetup();
     });
 
-    document.getElementById('newSeasonBtn').addEventListener('click', async ()=>{
+    document.getElementById('newSeasonBtn')?.addEventListener('click', async ()=>{
       const btn = document.getElementById('newSeasonBtn');
       btn.disabled = true;
       try{
@@ -4055,7 +4370,7 @@ function fixtureMatchCount(fixtureData){const f=Array.isArray(fixtureData)?fixtu
       });
     });
 
-    document.getElementById('saveConferenceNames').addEventListener('click', async ()=>{
+    document.getElementById('saveConferenceNames')?.addEventListener('click', async ()=>{
       const a = document.getElementById('conferenceNameA').value.trim() || 'Conference A';
       const b = document.getElementById('conferenceNameB').value.trim() || 'Conference B';
       STATE.settings.conferenceNames = {a,b};
@@ -4082,7 +4397,7 @@ function fixtureMatchCount(fixtureData){const f=Array.isArray(fixtureData)?fixtu
       });
     });
 
-    document.getElementById('qualificationToggle').addEventListener('change', async (e)=>{
+    document.getElementById('qualificationToggle')?.addEventListener('change', async (e)=>{
       STATE.settings.qualificationEnabled = e.target.checked;
       await saveSettings();
       await logAdminAction('set_qualification_enabled', `Qualification tab ${e.target.checked ? 'enabled' : 'disabled'} on the Season page.`, {enabled:e.target.checked});
@@ -4188,7 +4503,7 @@ function fixtureMatchCount(fixtureData){const f=Array.isArray(fixtureData)?fixtu
     }
     drawDupTeams();
 
-    document.getElementById('addMap').addEventListener('click', async ()=>{
+    document.getElementById('addMap')?.addEventListener('click', async ()=>{
       const rawUser = document.getElementById('newUser').value.trim();
       const u = rawUser.toLowerCase();
       const t = document.getElementById('newTeam').value.trim();

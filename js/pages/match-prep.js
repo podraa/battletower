@@ -2,27 +2,9 @@
 /* ===== Extracted inline Match Prep block 1 ===== */
 
 (function(){
-  // Keep the calculator self-contained: these helpers intentionally do not
-  // depend on private functions from the main Match Prep script.
-  const dcNorm=v=>String(v??'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'');
-  const dcSameTeam=(a,b)=>dcNorm(a)===dcNorm(b);
-  const dcRosterMonName=mon=>{
-    if(typeof mon==='string') return mon.trim();
-    return String(mon?.name ?? mon?.species ?? mon?.pokemon ?? '').trim();
-  };
-  function escCalc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
-  function readEVs(prefix){
-    const out={};
-    ['hp','atk','def','spa','spd','spe'].forEach(stat=>{
-      const el=document.getElementById(prefix+stat.charAt(0).toUpperCase()+stat.slice(1));
-      const n=Math.max(0,Math.min(252,Number(el?.value)||0));
-      out[stat]=n;
-    });
-    return out;
-  }
-  function calcGen(){
-    try{return window.calc?.Generations?.get(9)||null;}catch(e){return null;}
-  }
+  // Shared calculator engine loader. The Damage Calculator has been removed,
+  // but the Switch-In Analyser still needs @smogon/calc, so this loader is
+  // kept and exposed on window for the rest of Match Prep to use.
   let calcEnginePromise=null;
   function normalizeCalcModule(mod){
     const candidates=[mod,mod?.default,mod?.default?.default];
@@ -46,877 +28,11 @@
     }
     return calcEnginePromise;
   }
-  // Match Prep switch-in analysis runs from the main Match Prep scope.
-  // Expose the same calculator loader used by the Damage Calculator.
+  // Match Prep's Switch-In Analyser runs from the main Match Prep scope.
   window.getCalcEngine = getCalcEngine;
-  const DC_STORAGE_KEY='sbl_damage_calculator_state_v1';
-  const DC_LAST_SESSION_KEY='sbl_damage_calculator_last_session_v1';
-
-  // A fresh page load must never restore Damage Calculator form state.
-  // Clear the calculator's persisted state synchronously, before
-  // openDamageCalcModal() can call loadCalcState(). This is important because
-  // clearing on `pageshow` happens too late: the modal can already have read
-  // the old EV values by then.
-  try{
-    localStorage.removeItem(DC_STORAGE_KEY);
-    localStorage.removeItem(DC_LAST_SESSION_KEY);
-  }catch(e){}
-  function loadCalcState(){ try{ const raw=localStorage.getItem(DC_STORAGE_KEY); return raw?JSON.parse(raw):{}; }catch(e){ return {}; } }
-  function loadLastCalcSession(){ try{ const raw=localStorage.getItem(DC_LAST_SESSION_KEY); return raw?JSON.parse(raw):null; }catch(e){ return null; } }
-
-  // Normal page loads must start the Damage Calculator empty. The only time
-  // persisted calculator values are allowed back into the form is when the
-  // user explicitly chooses "Restore previous session".
-  try{
-    localStorage.removeItem(DC_STORAGE_KEY);
-    localStorage.removeItem(DC_LAST_SESSION_KEY);
-  }catch(e){}
-  function saveLastCalcSession(state){ try{ if(state&&Object.keys(state).length) localStorage.setItem(DC_LAST_SESSION_KEY,JSON.stringify(state)); }catch(e){} }
-  function clearLastCalcSession(){ try{ localStorage.removeItem(DC_LAST_SESSION_KEY); }catch(e){} }
-  function saveCalcState(host){
-    if(!host) return;
-    const ids=['dcAtkTeam','dcAtkSet','dcAtk','dcAtkLevel','dcAtkItem','dcAtkAbility','dcAtkNature','dcAtkStatus','dcAtkBoostHp','dcAtkBoostAtk','dcAtkBoostDef','dcAtkBoostSpa','dcAtkBoostSpd','dcAtkBoostSpe','dcAtkEvHp','dcAtkEvAtk','dcAtkEvDef','dcAtkEvSpa','dcAtkEvSpd','dcAtkEvSpe','dcDefTeam','dcDefSet','dcDef','dcDefLevel','dcDefItem','dcDefAbility','dcDefNature','dcDefStatus','dcDefBoostHp','dcDefBoostAtk','dcDefBoostDef','dcDefBoostSpa','dcDefBoostSpd','dcDefBoostSpe','dcDefEvHp','dcDefEvAtk','dcDefEvDef','dcDefEvSpa','dcDefEvSpd','dcDefEvSpe','dcMove1','dcMove2','dcMove3','dcMove4','dcBP1','dcBP2','dcBP3','dcBP4','dcHits1','dcHits2','dcHits3','dcHits4','dcWeather','dcTerrain','dcReflect','dcLightScreen','dcAuroraVeil','dcRuinBeads','dcRuinTablets','dcRuinSword','dcRuinVessel'];
-    const state={}; ids.forEach(id=>{const el=host.querySelector('#'+id); if(el) state[id]=el.type==='checkbox' ? String(!!el.checked) : el.value;});
-    try{localStorage.setItem(DC_STORAGE_KEY,JSON.stringify(state));}catch(e){}
-  }
-  function getSaved(state,id,fallback=''){ return state[id]!==undefined ? state[id] : fallback; }
-  window.clearDamageCalcSavedState=function(){try{localStorage.removeItem(DC_STORAGE_KEY);}catch(e){}};
-  window.clearDamageCalcLastSession=function(){clearLastCalcSession();};
-  window.openDamageCalcModal=function(preset={}){
-    const old=document.getElementById('damageCalcModal'); if(old)old.remove();
-    const saved=preset.restoreSession ? (loadLastCalcSession()||{}) : {};
-    let appliedImportedSets={atk:null,def:null};
-    const applyImportedSet=(side,set)=>{
-      if(!set || (side!=='atk' && side!=='def')) return;
-
-      const prefix = side==='atk' ? 'dcAtk' : 'dcDef';
-      appliedImportedSets[side] = set;
-
-      const get = id => host.querySelector('#'+id);
-      const setVal = (id,v) => {
-        const el=get(id);
-        if(el && v!==undefined) el.value = v==null ? '' : String(v);
-      };
-
-      // Every imported-set field is explicitly scoped to the selected side.
-      const mon=get(prefix);
-      if(mon){
-        const species=set.species||set.name||'';
-        if(species && Array.from(mon.options).some(o=>dcSameTeam(o.value,species))){
-          mon.value=species;
-        }
-      }
-
-      setVal(prefix+'Level', set.level||100);
-      setVal(prefix+'Item', set.item||'');
-      setVal(prefix+'Ability', set.ability||'');
-      setVal(prefix+'Nature', set.nature||'');
-      if(typeof fillPokemonAbilities==='function'){ const a=host.querySelector('#'+prefix+'Ability'); a?.removeAttribute('data-manual-selection'); fillPokemonAbilities(prefix+'Ability', mon?.value || set.species || '', set.ability || ''); }
-
-      const evs=normaliseImportedStats(set.evs);
-      const evIds = {
-        hp:  prefix+'EvHp',
-        atk: prefix+'EvAtk',
-        def: prefix+'EvDef',
-        spa: prefix+'EvSpa',
-        spd: prefix+'EvSpd',
-        spe: prefix+'EvSpe'
-      };
-      Object.keys(evIds).forEach(stat=>setVal(evIds[stat], evs[stat]||''));
-
-      appliedImportedSets[side] = {
-        ...set,
-        evs,
-        ivs:normaliseImportedStats(set.ivs)
-      };
-
-      // Imported attacker moves belong to the shared Moves section.
-      // Defender imports never touch those controls.
-      if(side==='atk' && Array.isArray(set.moves)){
-        set.moves.slice(0,4).forEach((m,i)=>{
-          const move=get('dcMove'+(i+1));
-          if(move) move.value=m;
-        });
-        for(let i=set.moves.length;i<4;i++){
-          const move=get('dcMove'+(i+1));
-          if(move) move.value='';
-        }
-      }
-
-      get(prefix+'Nature')?.dispatchEvent(new Event('change'));
-      saveCalcState(host);
-    };
-    const teams=(typeof window.__dashboardGetTeams==='function' ? window.__dashboardGetTeams() : (typeof window.__dashboardTeamNames==='function' ? window.__dashboardTeamNames() : []));
-    const escOpt=v=>escCalc(v);
-    const teamOptions=(selected)=>teams.map(t=>`<option value="${escOpt(t)}" ${dcSameTeam(t,selected||'')?'selected':''}>${escOpt(t)}</option>`).join('');
-    const rosterNames=(team)=>{ const fn=window.__dashboardGetRosterNames; if(typeof fn==='function') return fn(team); const raw=typeof window.__dashboardRosterForTeam==='function'?window.__dashboardRosterForTeam(team):[]; const mons=Array.isArray(raw)?raw:(raw&&typeof raw==='object'?(Array.isArray(raw.mons)?raw.mons:Array.isArray(raw.pokemon)?raw.pokemon:Object.values(raw)):[]); return [...new Set(mons.map(dcRosterMonName).filter(Boolean))]; };
-    const monOptions=(team,selected)=>rosterNames(team).map(n=>`<option value="${escOpt(n)}" ${dcSameTeam(n,selected||'')?'selected':''}>${escOpt(n)}</option>`).join('');
-    const host=document.createElement('div');
-    host.id='damageCalcModal';host.className='damage-calc-modal';host.style.display='flex';
-    const userFranchise=(typeof window.__dashboardProfileTeam==='function' ? window.__dashboardProfileTeam() : '');
-    const atkTeam=preset.attackerTeam||getSaved(saved,'dcAtkTeam',userFranchise||teams[0]||'');
-    const scheduledOpponent=typeof window.__dashboardNextOpponent==='function' ? (window.__dashboardNextOpponent(atkTeam)||'') : '';
-    const defTeam=preset.defenderTeam||getSaved(saved,'dcDefTeam',(scheduledOpponent&&teams.some(t=>dcSameTeam(t,scheduledOpponent))?teams.find(t=>dcSameTeam(t,scheduledOpponent)):'')||teams.find(t=>!dcSameTeam(t,atkTeam))||teams[0]||'');
-    const atkMon=preset.attacker||getSaved(saved,'dcAtk','');
-    const defMon=preset.defender||getSaved(saved,'dcDef','');
-    host.innerHTML=`<div class="damage-calc-card" role="dialog" aria-modal="true" aria-label="Damage Calculator">
-      <div class="damage-calc-head"><div><h2>Damage Calculator</h2><p>Choose your team and your opponent, then select the Pokémon to calculate.</p></div><div class="damage-calc-head-actions"><button type="button" id="dcSwapSides" class="dc-side-swap">↔ Swap sides</button><button type="button" id="dcImportShowdown" class="dc-secondary-btn">Import Showdown Set</button><button type="button" id="damageCalcClose">Close ✕</button></div></div>
-      <div class="dc-pokemon-grid">\n        <section class="dc-pokemon-card dc-atk-card">
-          <div class="dc-pokemon-card-head">
-            <div><div class="dc-pokemon-kicker">YOUR SIDE</div><h3>Your Pokémon</h3></div>
-            <span class="dc-pokemon-badge">ATTACKER</span>
-          </div>
-          <div class="dc-pokemon-primary">
-            <label>Team<select id="dcAtkTeam">${teamOptions(atkTeam)}</select></label>
-            <label>Pokémon<select id="dcAtk">${monOptions(atkTeam,atkMon)}</select></label>
-          </div>
-          <div class="dc-set-picker">
-            <label>Imported Showdown set<select id="dcAtkSet">${window.importedSetOptions(getSaved(saved,'dcAtkSet',''))}</select></label>
-            <button type="button" class="dc-apply-set" data-side="atk">Use set</button>
-          </div>
-
-          <div class="dc-pokemon-controls">
-            <div class="dc-pokemon-row dc-pokemon-row-main">
-              <label>Ability<select id="dcAtkAbility"><option value="">Loading abilities…</option></select></label>
-              <label>Item<select id="dcAtkItem"><option value="">No Item</option></select></label>
-            </div>
-            <div class="dc-pokemon-row dc-pokemon-row-secondary">
-              <label>Level<input id="dcAtkLevel" type="number" min="1" max="100" value="${escOpt(getSaved(saved,'dcAtkLevel','100'))}"></label>
-              <label>Status<select id="dcAtkStatus">
-                <option value="">Healthy</option><option value="brn">Burned</option><option value="par">Paralyzed</option>
-                <option value="psn">Poisoned</option><option value="tox">Badly Poisoned</option><option value="slp">Asleep</option><option value="frz">Frozen</option>
-              </select></label>
-              <label>Nature<select id="dcAtkNature"></select><span id="dcAtkNatureInfo" class="nature-info"></span></label><div class="dc-stage-panel"><span class="dc-stage-title">Stat stages</span><div class="dc-stage-grid"><label>HP<select id="dcAtkBoostHp"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Atk<select id="dcAtkBoostAtk"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Def<select id="dcAtkBoostDef"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>SpA<select id="dcAtkBoostSpa"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>SpD<select id="dcAtkBoostSpd"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Spe<select id="dcAtkBoostSpe"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label></div></div>
-            </div>
-          </div>
-          <div class="dc-ev-panel">
-            <div class="ev-grid">
-              <div class="ev-title">EVs</div>
-              <div class="ev-item"><span class="ev-label">HP</span><div class="ev-cell">
-        <button type="button" class="ev-step" data-ev="dcAtkEvHp" data-delta="-4" aria-label="Decrease HP EV">−</button>
-        <input id="dcAtkEvHp" type="number" min="0" max="252" step="4" value="${escOpt(getSaved(saved,'dcAtkEvHp',''))}" inputmode="numeric" aria-label="HP EV">
-        <button type="button" class="ev-step" data-ev="dcAtkEvHp" data-delta="4" aria-label="Increase HP EV">+</button>
-        </div></div><div class="ev-item"><span class="ev-label">Atk</span><div class="ev-cell">
-        <button type="button" class="ev-step" data-ev="dcAtkEvAtk" data-delta="-4" aria-label="Decrease Atk EV">−</button>
-        <input id="dcAtkEvAtk" type="number" min="0" max="252" step="4" value="${escOpt(getSaved(saved,'dcAtkEvAtk',''))}" inputmode="numeric" aria-label="Atk EV">
-        <button type="button" class="ev-step" data-ev="dcAtkEvAtk" data-delta="4" aria-label="Increase Atk EV">+</button>
-        </div></div><div class="ev-item"><span class="ev-label">Def</span><div class="ev-cell">
-        <button type="button" class="ev-step" data-ev="dcAtkEvDef" data-delta="-4" aria-label="Decrease Def EV">−</button>
-        <input id="dcAtkEvDef" type="number" min="0" max="252" step="4" value="${escOpt(getSaved(saved,'dcAtkEvDef',''))}" inputmode="numeric" aria-label="Def EV">
-        <button type="button" class="ev-step" data-ev="dcAtkEvDef" data-delta="4" aria-label="Increase Def EV">+</button>
-        </div></div><div class="ev-item"><span class="ev-label">Sp. Atk</span><div class="ev-cell">
-        <button type="button" class="ev-step" data-ev="dcAtkEvSpa" data-delta="-4" aria-label="Decrease Sp. Atk EV">−</button>
-        <input id="dcAtkEvSpa" type="number" min="0" max="252" step="4" value="${escOpt(getSaved(saved,'dcAtkEvSpa',''))}" inputmode="numeric" aria-label="Sp. Atk EV">
-        <button type="button" class="ev-step" data-ev="dcAtkEvSpa" data-delta="4" aria-label="Increase Sp. Atk EV">+</button>
-        </div></div><div class="ev-item"><span class="ev-label">Sp. Def</span><div class="ev-cell">
-        <button type="button" class="ev-step" data-ev="dcAtkEvSpd" data-delta="-4" aria-label="Decrease Sp. Def EV">−</button>
-        <input id="dcAtkEvSpd" type="number" min="0" max="252" step="4" value="${escOpt(getSaved(saved,'dcAtkEvSpd',''))}" inputmode="numeric" aria-label="Sp. Def EV">
-        <button type="button" class="ev-step" data-ev="dcAtkEvSpd" data-delta="4" aria-label="Increase Sp. Def EV">+</button>
-        </div></div><div class="ev-item"><span class="ev-label">Spe</span><div class="ev-cell">
-        <button type="button" class="ev-step" data-ev="dcAtkEvSpe" data-delta="-4" aria-label="Decrease Spe EV">−</button>
-        <input id="dcAtkEvSpe" type="number" min="0" max="252" step="4" value="${escOpt(getSaved(saved,'dcAtkEvSpe',''))}" inputmode="numeric" aria-label="Spe EV">
-        <button type="button" class="ev-step" data-ev="dcAtkEvSpe" data-delta="4" aria-label="Increase Spe EV">+</button>
-        </div></div>
-            </div>
-          </div>
-          <div id="dcAtkActualStats" class="dc-actual-stats"><span>Actual stats</span><div>HP — · Atk — · Def — · SpA — · SpD — · Spe —</div></div>
-        </section>
-        <section class="dc-pokemon-card dc-def-card">
-          <div class="dc-pokemon-card-head">
-            <div><div class="dc-pokemon-kicker">OPPONENT</div><h3>Opponent Pokémon</h3></div>
-            <span class="dc-pokemon-badge">DEFENDER</span>
-          </div>
-          <div class="dc-pokemon-primary">
-            <label>Team<select id="dcDefTeam">${teamOptions(defTeam)}</select></label>
-            <label>Pokémon<select id="dcDef">${monOptions(defTeam,defMon)}</select></label>
-          </div>
-          <div class="dc-set-picker">
-            <label>Imported Showdown set<select id="dcDefSet">${window.importedSetOptions(getSaved(saved,'dcDefSet',''))}</select></label>
-            <button type="button" class="dc-apply-set" data-side="def">Use set</button>
-          </div>
-
-          <div class="dc-pokemon-controls">
-            <div class="dc-pokemon-row dc-pokemon-row-main">
-              <label>Ability<select id="dcDefAbility"><option value="">Loading abilities…</option></select></label>
-              <label>Item<select id="dcDefItem"><option value="">No Item</option></select></label>
-            </div>
-            <div class="dc-pokemon-row dc-pokemon-row-secondary">
-              <label>Level<input id="dcDefLevel" type="number" min="1" max="100" value="${escOpt(getSaved(saved,'dcDefLevel','100'))}"></label>
-              <label>Status<select id="dcDefStatus">
-                <option value="">Healthy</option><option value="brn">Burned</option><option value="par">Paralyzed</option>
-                <option value="psn">Poisoned</option><option value="tox">Badly Poisoned</option><option value="slp">Asleep</option><option value="frz">Frozen</option>
-              </select></label>
-              <label>Nature<select id="dcDefNature"></select><span id="dcDefNatureInfo" class="nature-info"></span></label><div class="dc-stage-panel"><span class="dc-stage-title">Stat stages</span><div class="dc-stage-grid"><label>HP<select id="dcDefBoostHp"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Atk<select id="dcDefBoostAtk"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Def<select id="dcDefBoostDef"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>SpA<select id="dcDefBoostSpa"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>SpD<select id="dcDefBoostSpd"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label><label>Spe<select id="dcDefBoostSpe"><option value="0" selected>+0</option><option value="-1">-1</option><option value="-2">-2</option><option value="-3">-3</option><option value="-4">-4</option><option value="-5">-5</option><option value="-6">-6</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option><option value="4">+4</option><option value="5">+5</option><option value="6">+6</option></select></label></div></div>
-            </div>
-          </div>
-          <div class="dc-ev-panel">
-            <div class="ev-grid">
-              <div class="ev-title">EVs</div>
-              <div class="ev-item"><span class="ev-label">HP</span><div class="ev-cell">
-        <button type="button" class="ev-step" data-ev="dcDefEvHp" data-delta="-4" aria-label="Decrease HP EV">−</button>
-        <input id="dcDefEvHp" type="number" min="0" max="252" step="4" value="${escOpt(getSaved(saved,'dcDefEvHp',''))}" inputmode="numeric" aria-label="HP EV">
-        <button type="button" class="ev-step" data-ev="dcDefEvHp" data-delta="4" aria-label="Increase HP EV">+</button>
-        </div></div><div class="ev-item"><span class="ev-label">Atk</span><div class="ev-cell">
-        <button type="button" class="ev-step" data-ev="dcDefEvAtk" data-delta="-4" aria-label="Decrease Atk EV">−</button>
-        <input id="dcDefEvAtk" type="number" min="0" max="252" step="4" value="${escOpt(getSaved(saved,'dcDefEvAtk',''))}" inputmode="numeric" aria-label="Atk EV">
-        <button type="button" class="ev-step" data-ev="dcDefEvAtk" data-delta="4" aria-label="Increase Atk EV">+</button>
-        </div></div><div class="ev-item"><span class="ev-label">Def</span><div class="ev-cell">
-        <button type="button" class="ev-step" data-ev="dcDefEvDef" data-delta="-4" aria-label="Decrease Def EV">−</button>
-        <input id="dcDefEvDef" type="number" min="0" max="252" step="4" value="${escOpt(getSaved(saved,'dcDefEvDef',''))}" inputmode="numeric" aria-label="Def EV">
-        <button type="button" class="ev-step" data-ev="dcDefEvDef" data-delta="4" aria-label="Increase Def EV">+</button>
-        </div></div><div class="ev-item"><span class="ev-label">Sp. Atk</span><div class="ev-cell">
-        <button type="button" class="ev-step" data-ev="dcDefEvSpa" data-delta="-4" aria-label="Decrease Sp. Atk EV">−</button>
-        <input id="dcDefEvSpa" type="number" min="0" max="252" step="4" value="${escOpt(getSaved(saved,'dcDefEvSpa',''))}" inputmode="numeric" aria-label="Sp. Atk EV">
-        <button type="button" class="ev-step" data-ev="dcDefEvSpa" data-delta="4" aria-label="Increase Sp. Atk EV">+</button>
-        </div></div><div class="ev-item"><span class="ev-label">Sp. Def</span><div class="ev-cell">
-        <button type="button" class="ev-step" data-ev="dcDefEvSpd" data-delta="-4" aria-label="Decrease Sp. Def EV">−</button>
-        <input id="dcDefEvSpd" type="number" min="0" max="252" step="4" value="${escOpt(getSaved(saved,'dcDefEvSpd',''))}" inputmode="numeric" aria-label="Sp. Def EV">
-        <button type="button" class="ev-step" data-ev="dcDefEvSpd" data-delta="4" aria-label="Increase Sp. Def EV">+</button>
-        </div></div><div class="ev-item"><span class="ev-label">Spe</span><div class="ev-cell">
-        <button type="button" class="ev-step" data-ev="dcDefEvSpe" data-delta="-4" aria-label="Decrease Spe EV">−</button>
-        <input id="dcDefEvSpe" type="number" min="0" max="252" step="4" value="${escOpt(getSaved(saved,'dcDefEvSpe',''))}" inputmode="numeric" aria-label="Spe EV">
-        <button type="button" class="ev-step" data-ev="dcDefEvSpe" data-delta="4" aria-label="Increase Spe EV">+</button>
-        </div></div>
-            </div>
-          </div>
-          <div id="dcDefActualStats" class="dc-actual-stats"><span>Actual stats</span><div>HP — · Atk — · Def — · SpA — · SpD — · Spe —</div></div>
-        </section>
-      </div>\n      <section id="dcConditionsSection" class="damage-calc-side" style="margin-top:12px"><div class="damage-calc-form">
-        <div class="wide dc-move-group"><span class="dc-field-group-label">Moves</span><div class="dc-move-grid">${[1,2,3,4].map(slot=>`<div class="dc-move-slot"><div class="dc-move-slot-head"><span>Move ${slot}</span><button type="button" class="dc-crit-btn" data-move="${slot}" aria-pressed="false">Crit</button><button type="button" class="dc-z-btn" data-move="${slot}" aria-pressed="false" title="Use as a Z-Move">Z</button><button type="button" class="dc-max-btn" data-move="${slot}" aria-pressed="false" title="Use as a Max Move">Max</button></div><select id="dcMove${slot}"><option value="">Select a move</option></select><div class="dc-move-slot-extra"><label class="dc-move-extra-field dc-bp-field">BP<input id="dcBP${slot}" type="number" min="1" max="1000" placeholder="Auto"></label><label class="dc-move-extra-field dc-hit-field" id="dcHitField${slot}" hidden>Hits<select id="dcHits${slot}"><option value="">Auto</option>${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}">${n}</option>`).join('')}</select></label></div></div>`).join('')}</div></div>
-        <div class="wide dc-field-group"><span class="dc-field-group-label">Weather</span><input type="hidden" id="dcWeather" value=""><div class="dc-toggle-row dc-weather-row"><button type="button" class="dc-condition-toggle active" data-input="dcWeather" data-value="">Clear</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Rain">Rain</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Sun">Sun</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Sand">Sand</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Snow">Snow</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Hail">Hail</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Strong Winds">Strong Winds</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Heavy Rain">Heavy Rain</button><button type="button" class="dc-condition-toggle" data-input="dcWeather" data-value="Harsh Sunshine">Harsh Sunshine</button></div></div>
-        <div class="wide dc-field-group"><span class="dc-field-group-label">Terrain</span><input type="hidden" id="dcTerrain" value=""><div class="dc-toggle-row dc-terrain-row"><button type="button" class="dc-condition-toggle active" data-input="dcTerrain" data-value="">None</button><button type="button" class="dc-condition-toggle" data-input="dcTerrain" data-value="Electric">Electric</button><button type="button" class="dc-condition-toggle" data-input="dcTerrain" data-value="Grassy">Grassy</button><button type="button" class="dc-condition-toggle" data-input="dcTerrain" data-value="Misty">Misty</button><button type="button" class="dc-condition-toggle" data-input="dcTerrain" data-value="Psychic">Psychic</button></div></div>
-        <div class="wide dc-field-group"><span class="dc-field-group-label">Defender screens</span><div class="dc-toggle-row dc-screen-row"><label class="dc-screen-toggle"><input id="dcReflect" type="checkbox"> Reflect</label><label class="dc-screen-toggle"><input id="dcLightScreen" type="checkbox"> Light Screen</label><label class="dc-screen-toggle"><input id="dcAuroraVeil" type="checkbox"> Aurora Veil</label></div></div>
-        <div class="wide dc-field-group"><span class="dc-field-group-label">Active Ruin abilities</span><div class="dc-toggle-row dc-screen-row"><label class="dc-screen-toggle"><input id="dcRuinBeads" type="checkbox"> Beads of Ruin</label><label class="dc-screen-toggle"><input id="dcRuinTablets" type="checkbox"> Tablets of Ruin</label><label class="dc-screen-toggle"><input id="dcRuinSword" type="checkbox"> Sword of Ruin</label><label class="dc-screen-toggle"><input id="dcRuinVessel" type="checkbox"> Vessel of Ruin</label></div><span class="muted">These are field effects from other Pokémon on the field.</span></div>
-      </div><div class="damage-calc-actions"><button id="dcResetAll" class="dc-reset-btn">Clear All</button><span class="dc-auto-status" aria-live="polite">Auto-calculates as you edit</span></div><div class="damage-calc-help">Pokémon choices come directly from the published rosters for the selected teams.</div></section>
-      <div id="dcResult" class="damage-calc-result"><div class="dc-results-heading">Results</div><div class="muted">Choose both Pokémon and add at least one move.</div></div>
-    </div>`;
-    document.body.appendChild(host);
-    host.querySelector('#dcSwapSides')?.addEventListener('click',()=>{
-      const swapValue=(a,b)=>{const ae=host.querySelector('#'+a),be=host.querySelector('#'+b);if(!ae||!be)return;const v=ae.value;ae.value=be.value;be.value=v;};
-      const oldAtkMon=host.querySelector('#dcAtk')?.value||'';
-      const oldDefMon=host.querySelector('#dcDef')?.value||'';
-      swapValue('dcAtkTeam','dcDefTeam');
-      syncMons('dcAtkTeam','dcAtk',oldDefMon);
-      syncMons('dcDefTeam','dcDef',oldAtkMon);
-      const fields=[['dcAtkLevel','dcDefLevel'],['dcAtkItem','dcDefItem'],['dcAtkAbility','dcDefAbility'],['dcAtkNature','dcDefNature'],['dcAtkStatus','dcDefStatus'],['dcAtkEvHp','dcDefEvHp'],['dcAtkEvAtk','dcDefEvAtk'],['dcAtkEvDef','dcDefEvDef'],['dcAtkEvSpa','dcDefEvSpa'],['dcAtkEvSpd','dcDefEvSpd'],['dcAtkEvSpe','dcDefEvSpe']];
-      fields.forEach(([a,b])=>swapValue(a,b));
-      const atkSet=host.querySelector('#dcAtkSet'),defSet=host.querySelector('#dcDefSet');
-      if(atkSet&&defSet){const v=atkSet.value;atkSet.value=defSet.value;defSet.value=v;}
-      const tmp=appliedImportedSets.atk;appliedImportedSets.atk=appliedImportedSets.def;appliedImportedSets.def=tmp;
-      saveCalcState(host);
-      scheduleDamageCalculation(0);
-    });
-
-    // Force a truly clean calculator on every normal page load/open.
-    // This also defeats browser form-state restoration (BFCache/autofill), which
-    // can repopulate number inputs even after localStorage has been cleared.
-    if(!preset.restoreSession){
-      ['dcAtkEvHp','dcAtkEvAtk','dcAtkEvDef','dcAtkEvSpa','dcAtkEvSpd','dcAtkEvSpe','dcDefEvHp','dcDefEvAtk','dcDefEvDef','dcDefEvSpa','dcDefEvSpd','dcDefEvSpe'].forEach(id=>{
-        const el=host.querySelector('#'+id);
-        if(el) el.value='';
-      });
-      appliedImportedSets={atk:null,def:null};
-    }
-
-    // Damage calculator layout.
-    // Keep the actual calculator sections in one explicit DOM order instead of
-    // relying on the old tab/navigation code to move or hide them:
-    //
-    //   heading
-    //   results
-    //   moves
-    //   your Pokémon + opponent Pokémon
-    //   field
-    //
-    // Existing nodes are moved, not recreated, so all IDs and existing
-    // listeners remain intact.
-    {
-      const card = host.querySelector('.damage-calc-card');
-      const head = card?.querySelector('.damage-calc-head');
-      const result = card?.querySelector('#dcResult');
-      const teamGrid = card?.querySelector('.dc-pokemon-grid, .damage-calc-grid');
-      const conditions = card?.querySelector('#dcConditionsSection');
-      const moveGroup = card?.querySelector('.dc-move-group');
-      const actions = card?.querySelector('.damage-calc-actions');
-      const help = card?.querySelector('.damage-calc-help');
-
-      if (card && head && result && teamGrid && conditions && moveGroup) {
-        // Remove the experimental tab/navigation element completely. The
-        // calculator is now one continuous page with all four sections visible.
-        card.querySelectorAll('.dc-calc-nav').forEach(el => el.remove());
-        card.querySelectorAll('[data-dc-panel]').forEach(el => el.removeAttribute('data-dc-panel'));
-        card.querySelectorAll('.dc-calc-section-hidden').forEach(el => {
-          el.classList.remove('dc-calc-section-hidden');
-          el.hidden = false;
-        });
-
-        // The move controls originally live inside the field section. Move
-        // that existing node into its own section without cloning anything.
-        const movesSection = document.createElement('section');
-        movesSection.id = 'dcMovesSection';
-        movesSection.className = 'damage-calc-side';
-        const movesForm = document.createElement('div');
-        movesForm.className = 'damage-calc-form';
-        const movesTitle = document.createElement('h3');
-        movesTitle.textContent = 'Moves';
-        movesForm.appendChild(movesTitle);
-        movesForm.appendChild(moveGroup);
-        movesSection.appendChild(movesForm);
-
-        // Put every major section back into the card in the exact requested
-        // order. appendChild() physically relocates the existing elements.
-        card.appendChild(head);
-        card.appendChild(result);
-        card.appendChild(movesSection);
-        card.appendChild(teamGrid);
-        card.appendChild(conditions);
-
-        // Keep the field section's action/help controls at its bottom.
-        if (actions && actions.parentElement !== conditions) conditions.appendChild(actions);
-        if (help && help.parentElement !== conditions) conditions.appendChild(help);
-
-        // Explicit order is only a safety net; DOM order above is authoritative.
-        head.style.order = '1';
-        result.style.order = '2';
-        movesSection.style.order = '3';
-        teamGrid.style.order = '4';
-        conditions.style.order = '5';
-
-        // Advanced stats are linked: opening either side opens the other side,
-        // and closing either side closes the other. A guard prevents the two
-        // native `toggle` events from bouncing back and forth.
-        const atkAdvanced = card.querySelector('.dc-atk-card .dc-advanced');
-        const defAdvanced = card.querySelector('.dc-def-card .dc-advanced');
-        let syncingAdvanced = false;
-        const syncAdvanced = (source, target) => {
-          if (!source || !target) return;
-          source.addEventListener('toggle', () => {
-            if (syncingAdvanced) return;
-            syncingAdvanced = true;
-            target.open = source.open;
-            syncingAdvanced = false;
-          });
-        };
-        syncAdvanced(atkAdvanced, defAdvanced);
-        syncAdvanced(defAdvanced, atkAdvanced);
-      }
-    }
-
-    host.querySelector('#dcImportShowdown')?.addEventListener('click',()=>window.openShowdownImportModal());
-    ['dcAtkEvHp','dcAtkEvAtk','dcAtkEvDef','dcAtkEvSpa','dcAtkEvSpd','dcAtkEvSpe','dcDefEvHp','dcDefEvAtk','dcDefEvDef','dcDefEvSpa','dcDefEvSpd','dcDefEvSpe','dcWeather','dcTerrain','dcAtkStatus','dcDefStatus'].forEach(id=>{const el=host.querySelector('#'+id); if(el&&saved[id]!==undefined) el.value=saved[id];});
-
-    // Populate the large Showdown option sets once the calculator modal exists.
-    // Preserve preset selections when opened from a Pokémon scout popup.
-    const fillChoice = (id, list, placeholder, selected='') => {
-      const el = host.querySelector('#'+id);
-      if(!el) return;
-      el.innerHTML = `<option value="">${escCalc(placeholder)}</option>` + list.map(x=>`<option value="${escCalc(x.name)}" ${dcSameTeam(x.name,selected)?'selected':''}>${escCalc(x.name)}</option>`).join('');
-    };
-    // Load the option lists asynchronously so the modal never depends on a
-    // particular Showdown global-variable implementation.
-    fillChoice('dcAtkItem', [], 'Loading items…');
-    fillChoice('dcDefItem', [], 'Loading items…');
-
-    // Abilities are Pokémon-specific. Populate each dropdown from the selected
-    // Pokémon's actual abilities instead of using the global ability list.
-    // The first real ability is selected automatically, so the calculator
-    // never starts on a misleading "Default / None" state.
-    // Populate the ability dropdown from the selected Pokémon only.  The
-    // dropdown itself stays interactive; async loading must never leave it
-    // permanently disabled or allow an older request to overwrite a newer
-    // Pokémon selection.
-    const abilityLoadTokens = Object.create(null);
-
-    // Ability selection uses the full global ability list (every ability in
-    // the game), independent of which Pokémon is selected. The list does not
-    // narrow or refresh when the Pokémon changes — this is intentional so any
-    // ability can be tested against any Pokémon. The `species` argument is
-    // kept in the signature (and ignored) so every existing call site keeps
-    // working unchanged.
-    const fillPokemonAbilities = async (selectId, species, preferred='') => {
-      const el=host.querySelector('#'+selectId);
-      if(!el)return;
-
-      const token=(abilityLoadTokens[selectId]||0)+1;
-      abilityLoadTokens[selectId]=token;
-      const previous=el.value;
-      const manual=el.getAttribute('data-manual-selection')==='true';
-
-      // Never make the control unusable while data loads.
-      el.disabled=false;
-      if(!el.options.length || !el.value){
-        el.innerHTML='<option value="">Loading abilities…</option>';
-      }
-
-      let abilities=[];
-      try{
-        const choices=typeof window.__showdownCalcChoices==='function' ? await window.__showdownCalcChoices() : {abilities:[]};
-        abilities=(choices.abilities||[]).map(a=>a.name||a).filter(Boolean);
-      }catch(e){}
-
-      if(abilityLoadTokens[selectId]!==token)return;
-
-      if(!abilities.length){
-        // Keep the select functional even if the data source is unavailable.
-        el.innerHTML='<option value="">Default / None</option>';
-        el.value='';
-        return;
-      }
-
-      const wanted=manual?previous:(preferred||previous);
-      const selected=abilities.find(a=>dcSameTeam(a,wanted))||'';
-
-      el.innerHTML='<option value="">Default / None</option>'+abilities.map(a=>`<option value="${escCalc(a)}">${escCalc(a)}</option>`).join('');
-      el.value=selected;
-      el.disabled=false;
-    };
-
-    Promise.resolve(typeof window.__showdownCalcChoices === 'function' ? window.__showdownCalcChoices() : {items:[],moves:[],abilities:[]}).then(choices=>{
-      fillChoice('dcAtkItem', choices.items, 'No Item', preset.attackerItem || getSaved(saved,'dcAtkItem',''));
-      fillChoice('dcDefItem', choices.items, 'No Item', preset.defenderItem || getSaved(saved,'dcDefItem',''));
-      for(let i=1;i<=4;i++) fillChoice('dcMove'+i, choices.moves, 'Select a move', preset['move'+i] || getSaved(saved,'dcMove'+i,''));
-      fillPokemonAbilities('dcAtkAbility', host.querySelector('#dcAtk')?.value, preset.attackerAbility || getSaved(saved,'dcAtkAbility',''));
-      fillPokemonAbilities('dcDefAbility', host.querySelector('#dcDef')?.value, preset.defenderAbility || getSaved(saved,'dcDefAbility',''));
-    });
-    const natureEffects = {
-      Hardy:[null,null], Lonely:['atk','def'], Adamant:['atk','spa'], Naughty:['atk','spd'], Brave:['atk','spe'],
-      Bold:['def','atk'], Docile:[null,null], Impish:['def','spa'], Lax:['def','spd'], Relaxed:['def','spe'],
-      Modest:['spa','atk'], Mild:['spa','def'], Bashful:[null,null], Rash:['spa','spd'], Quiet:['spa','spe'],
-      Calm:['spd','atk'], Gentle:['spd','def'], Careful:['spd','spa'], Quirky:[null,null], Sassy:['spd','spe'],
-      Timid:['spe','atk'], Hasty:['spe','def'], Jolly:['spe','spa'], Naive:['spe','spd'], Serious:[null,null]
-    };
-    const statLabels={atk:'Attack',def:'Defence',spa:'Sp. Atk',spd:'Sp. Def',spe:'Speed'};
-    const natureList=Object.keys(natureEffects);
-    const fillNature=(id,infoId,selected='')=>{
-      const el=host.querySelector('#'+id), info=host.querySelector('#'+infoId); if(!el)return;
-      el.innerHTML='<option value="">Select a nature</option>'+natureList.map(n=>{
-        const [up,down]=natureEffects[n];
-        const suffix=up ? ` (+${statLabels[up]}, −${statLabels[down]})` : ' (Neutral)';
-        return `<option value="${escCalc(n)}" ${dcSameTeam(n,selected)?'selected':''}>${escCalc(n+suffix)}</option>`;
-      }).join('');
-      const update=()=>{
-        const n=el.value, [up,down]=natureEffects[n]||[null,null];
-        info.textContent=n ? (up ? `Boosts ${statLabels[up]} • Lowers ${statLabels[down]}` : 'No stat boosted or lowered') : '';
-        info.classList.toggle('neutral',!!n&&!up);
-      };
-      el.addEventListener('change',update); update();
-    };
-    fillNature('dcAtkNature','dcAtkNatureInfo',preset.attackerNature || getSaved(saved,'dcAtkNature',''));
-    fillNature('dcDefNature','dcDefNatureInfo',preset.defenderNature || getSaved(saved,'dcDefNature',''));
-    const savedAtkSet=importedSetForIndex(getSaved(saved,'dcAtkSet','')); const savedDefSet=importedSetForIndex(getSaved(saved,'dcDefSet',''));
-    if(savedAtkSet)applyImportedSet('atk',savedAtkSet); if(savedDefSet)applyImportedSet('def',savedDefSet);
-    ['dcReflect','dcLightScreen','dcAuroraVeil','dcRuinBeads','dcRuinTablets','dcRuinSword','dcRuinVessel'].forEach(id=>{const el=host.querySelector('#'+id); if(el) el.checked=getSaved(saved,id,'false')==='true';});
-    const syncConditionButtons=(inputId)=>{const input=host.querySelector('#'+inputId); if(!input)return; host.querySelectorAll(`.dc-condition-toggle[data-input="${inputId}"]`).forEach(btn=>btn.classList.toggle('active',btn.dataset.value===String(input.value||'')));};
-    host.querySelectorAll('.dc-condition-toggle').forEach(btn=>btn.addEventListener('click',()=>{const input=host.querySelector('#'+btn.dataset.input); if(!input)return; input.value=btn.dataset.value||''; host.querySelectorAll(`.dc-condition-toggle[data-input="${btn.dataset.input}"]`).forEach(b=>b.classList.toggle('active',b===btn)); input.dispatchEvent(new Event('input',{bubbles:true}));}));
-    host.querySelectorAll('.dc-crit-btn').forEach(btn=>btn.addEventListener('click',()=>{
-      const active=btn.getAttribute('aria-pressed')==='true';
-      btn.setAttribute('aria-pressed',String(!active));
-      btn.classList.toggle('active',!active);
-      saveCalcState(host);
-    }));
-    // Z-Move and Max Move are mutually exclusive per slot.
-    host.querySelectorAll('.dc-z-btn,.dc-max-btn').forEach(btn=>btn.addEventListener('click',()=>{
-      const active=btn.getAttribute('aria-pressed')==='true';
-      const slot=btn.dataset.move;
-      const other=btn.classList.contains('dc-z-btn') ? host.querySelector(`.dc-max-btn[data-move="${slot}"]`) : host.querySelector(`.dc-z-btn[data-move="${slot}"]`);
-      if(!active && other){ other.setAttribute('aria-pressed','false'); other.classList.remove('active'); }
-      btn.setAttribute('aria-pressed',String(!active));
-      btn.classList.toggle('active',!active);
-      saveCalcState(host);
-    }));
-    ['dcWeather','dcTerrain'].forEach(syncConditionButtons);
-    host.querySelectorAll('.dc-apply-set').forEach(btn=>btn.addEventListener('click',()=>{
-      const side=btn.dataset.side;
-      const sel=host.querySelector(side==='atk'?'#dcAtkSet':'#dcDefSet');
-      const set=importedSetForIndex(sel?.value);
-      if(!set) return;
-      // Apply strictly to the requested side. The defender side never writes
-      // attacker moves, and attacker-side EVs are never copied to defender.
-      applyImportedSet(side,set);
-      saveCalcState(host); scheduleDamageCalculation(0);
-    }));
-    ['dcAtkSet','dcDefSet'].forEach(id=>host.querySelector('#'+id)?.addEventListener('change',e=>{
-      const side=id==='dcAtkSet'?'atk':'def';
-      const set=importedSetForIndex(e.target.value);
-      if(set){
-        const monId=side==='atk'?'dcAtk':'dcDef';
-        const mon=host.querySelector('#'+monId);
-        const species=set.species||set.name||'';
-        if(mon && species && Array.from(mon.options).some(o=>dcSameTeam(o.value,species))) mon.value=species;
-        applyImportedSet(side,set);
-      } else appliedImportedSets[side]=null;
-      saveCalcState(host); scheduleDamageCalculation(150);
-    }));
-    const refreshImportedSetSelectors=()=>{ ['dcAtkSet','dcDefSet'].forEach(id=>{const el=host.querySelector('#'+id);if(!el)return;const current=el.value;el.innerHTML=window.importedSetOptions(current);}); };
-    window.addEventListener('showdownSetsUpdated',refreshImportedSetSelectors);
-
-
-
-    const close=()=>{
-      const closingState={};
-      const ids=['dcAtkTeam','dcAtkSet','dcAtk','dcAtkLevel','dcAtkItem','dcAtkAbility','dcAtkNature','dcAtkStatus','dcAtkEvHp','dcAtkEvAtk','dcAtkEvDef','dcAtkEvSpa','dcAtkEvSpd','dcAtkEvSpe','dcDefTeam','dcDefSet','dcDef','dcDefLevel','dcDefItem','dcDefAbility','dcDefNature','dcDefStatus','dcDefBoostHp','dcDefBoostAtk','dcDefBoostDef','dcDefBoostSpa','dcDefBoostSpd','dcDefBoostSpe','dcDefEvHp','dcDefEvAtk','dcDefEvDef','dcDefEvSpa','dcDefEvSpd','dcDefEvSpe','dcMove1','dcMove2','dcMove3','dcMove4','dcWeather','dcTerrain','dcReflect','dcLightScreen','dcAuroraVeil','dcRuinBeads','dcRuinTablets','dcRuinSword','dcRuinVessel'];
-      ids.forEach(id=>{const el=host.querySelector('#'+id);if(el) closingState[id]=el.type==='checkbox'?String(!!el.checked):el.value;});
-      clearLastCalcSession();
-      window.clearDamageCalcSavedState();
-      host.classList.remove('open');window.removeEventListener('showdownSetsUpdated',refreshImportedSetSelectors);setTimeout(()=>host.remove(),240);document.removeEventListener('keydown',onKey);
-    };
-    const onKey=e=>{if(e.key==='Escape')close();};
-    host.querySelector('#damageCalcClose').addEventListener('click',function(e){e.preventDefault();e.stopPropagation();close();});
-    host.addEventListener('click',e=>{if(e.target===host)close();});
-    host.querySelector('.damage-calc-card').addEventListener('click',e=>e.stopPropagation());
-    document.addEventListener('keydown',onKey);
-
-    const syncMons=(teamId,monId,preferred)=>{
-      const team=host.querySelector('#'+teamId).value;
-      const select=host.querySelector('#'+monId);
-      const names=rosterNames(team);
-      select.innerHTML=names.length
-        ? names.map(n=>`<option value="${escOpt(n)}" ${dcSameTeam(n,preferred||'')?'selected':''}>${escOpt(n)}</option>`).join('')
-        : '<option value="">No published roster Pokémon</option>';
-    };
-    // Carrying over item/nature/status/EVs from the previously selected
-    // Pokémon onto a newly picked one is exactly the "did I forget to change
-    // this" confusion the calculator should avoid. Clear those fields (but
-    // keep level, which usually stays constant) whenever the species changes.
-    const resetSideFields=prefix=>{
-      const itemEl=host.querySelector('#'+prefix+'Item'); if(itemEl) itemEl.value='';
-      const natureEl=host.querySelector('#'+prefix+'Nature'); if(natureEl){ natureEl.value=''; natureEl.dispatchEvent(new Event('change')); }
-      const statusEl=host.querySelector('#'+prefix+'Status'); if(statusEl) statusEl.value='';
-      ['Hp','Atk','Def','Spa','Spd','Spe'].forEach(stat=>{const ev=host.querySelector('#'+prefix+'Ev'+stat); if(ev) ev.value='';});
-    };
-    host.querySelector('#dcAtkTeam').addEventListener('change',()=>{host.querySelector('#dcAtkAbility')?.removeAttribute('data-manual-selection');syncMons('dcAtkTeam','dcAtk');appliedImportedSets.atk=null;host.querySelector('#dcAtkSet').value='';resetSideFields('dcAtk');fillPokemonAbilities('dcAtkAbility',host.querySelector('#dcAtk')?.value);saveCalcState(host);scheduleDamageCalculation();});
-    host.querySelector('#dcDefTeam').addEventListener('change',()=>{host.querySelector('#dcDefAbility')?.removeAttribute('data-manual-selection');syncMons('dcDefTeam','dcDef');appliedImportedSets.def=null;host.querySelector('#dcDefSet').value='';resetSideFields('dcDef');fillPokemonAbilities('dcDefAbility',host.querySelector('#dcDef')?.value);saveCalcState(host);scheduleDamageCalculation();});
-    host.querySelector('#dcAtk').addEventListener('change',()=>{host.querySelector('#dcAtkAbility')?.removeAttribute('data-manual-selection');appliedImportedSets.atk=null;const sel=host.querySelector('#dcAtkSet');if(sel)sel.value='';resetSideFields('dcAtk');fillPokemonAbilities('dcAtkAbility',host.querySelector('#dcAtk')?.value);saveCalcState(host);scheduleDamageCalculation();});
-    host.querySelector('#dcDef').addEventListener('change',()=>{host.querySelector('#dcDefAbility')?.removeAttribute('data-manual-selection');appliedImportedSets.def=null;const sel=host.querySelector('#dcDefSet');if(sel)sel.value='';resetSideFields('dcDef');fillPokemonAbilities('dcDefAbility',host.querySelector('#dcDef')?.value);saveCalcState(host);scheduleDamageCalculation();});
-
-    host.querySelector('#dcAtkAbility')?.addEventListener('change',()=>{host.querySelector('#dcAtkAbility')?.setAttribute('data-manual-selection','true');saveCalcState(host);scheduleDamageCalculation(0);});
-    host.querySelector('#dcDefAbility')?.addEventListener('change',()=>{host.querySelector('#dcDefAbility')?.setAttribute('data-manual-selection','true');saveCalcState(host);scheduleDamageCalculation(0);});
-
-    const persistedIds=['dcAtkTeam','dcAtk','dcAtkLevel','dcAtkItem','dcAtkAbility','dcAtkNature','dcAtkStatus','dcAtkEvHp','dcAtkEvAtk','dcAtkEvDef','dcAtkEvSpa','dcAtkEvSpd','dcAtkEvSpe','dcDefTeam','dcDef','dcDefLevel','dcDefItem','dcDefAbility','dcDefNature','dcDefStatus','dcDefEvHp','dcDefEvAtk','dcDefEvDef','dcDefEvSpa','dcDefEvSpd','dcDefEvSpe','dcMove1','dcMove2','dcMove3','dcMove4','dcWeather','dcTerrain','dcReflect','dcLightScreen','dcAuroraVeil','dcRuinBeads','dcRuinTablets','dcRuinSword','dcRuinVessel'];
-    persistedIds.forEach(id=>{const el=host.querySelector('#'+id); if(el){el.addEventListener('input',()=>saveCalcState(host));el.addEventListener('change',()=>saveCalcState(host));}});
-    const adjustEv=(btn)=>{ const el=host.querySelector('#'+btn.dataset.ev); if(!el)return; const delta=Number(btn.dataset.delta)||0; const raw=String(el.value??'').trim(); const current=raw===''?0:Math.max(0,Math.min(252,Number(raw)||0)); const next=Math.max(0,Math.min(252,current+delta)); el.value=String(next); el.dispatchEvent(new Event('input',{bubbles:true})); };
-    host.querySelectorAll('.ev-step').forEach(btn=>{
-      let holdTimer=null, repeatTimer=null;
-      const stop=()=>{ if(holdTimer){clearTimeout(holdTimer);holdTimer=null;} if(repeatTimer){clearInterval(repeatTimer);repeatTimer=null;} };
-      const start=()=>{ stop(); adjustEv(btn); holdTimer=setTimeout(()=>{ repeatTimer=setInterval(()=>adjustEv(btn),55); },350); };
-      btn.addEventListener('pointerdown',e=>{e.preventDefault();start();});
-      btn.addEventListener('pointerup',stop); btn.addEventListener('pointercancel',stop); btn.addEventListener('pointerleave',stop);
-      btn.addEventListener('click',e=>e.preventDefault());
-      btn.addEventListener('keydown',e=>{ if((e.key==='+'||e.key==='='||e.key==='-') && !e.repeat){ e.preventDefault(); start(); } });
-      btn.addEventListener('keyup',e=>{ if(e.key==='+'||e.key==='='||e.key==='-'){ e.preventDefault(); stop(); } });
-    });
-    host.querySelectorAll('.ev-cell input').forEach(el=>{ const clamp=()=>{ const raw=String(el.value??'').trim(); if(raw===''){ el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); return; } let v=Number(raw); if(!Number.isFinite(v)) v=0; v=Math.max(0,Math.min(252,Math.round(v/4)*4)); el.value=v===0?'':String(v); el.dispatchEvent(new Event('input',{bubbles:true})); }; el.addEventListener('change',clamp); el.addEventListener('blur',clamp); });
-    host.querySelector('#dcResetAll').addEventListener('click',()=>{
-      const teamsNow=(typeof window.__dashboardGetTeams==='function' ? window.__dashboardGetTeams() : teams);
-      const defaultAtkTeam=(typeof window.__dashboardProfileTeam==='function' ? window.__dashboardProfileTeam() : '')||teamsNow[0]||'';
-      const defaultDefTeam=teamsNow.find(t=>!dcSameTeam(t,defaultAtkTeam))||teamsNow[0]||'';
-      host.querySelector('#dcAtkTeam').value=defaultAtkTeam;
-      host.querySelector('#dcDefTeam').value=defaultDefTeam;
-      syncMons('dcAtkTeam','dcAtk','');
-      syncMons('dcDefTeam','dcDef','');
-      const defaults={dcAtkSet:'',dcDefSet:'',dcAtkLevel:'100',dcDefLevel:'100',dcAtkItem:'',dcDefItem:'',dcAtkAbility:'',dcDefAbility:'',dcAtkNature:'',dcDefNature:'',dcAtkStatus:'',dcDefStatus:'',dcAtkBoostHp:'0',dcAtkBoostAtk:'0',dcAtkBoostDef:'0',dcAtkBoostSpa:'0',dcAtkBoostSpd:'0',dcAtkBoostSpe:'0',dcDefBoostHp:'0',dcDefBoostAtk:'0',dcDefBoostDef:'0',dcDefBoostSpa:'0',dcDefBoostSpd:'0',dcDefBoostSpe:'0',dcMove1:'',dcMove2:'',dcMove3:'',dcMove4:'',dcBP1:'',dcBP2:'',dcBP3:'',dcBP4:'',dcHits1:'',dcHits2:'',dcHits3:'',dcHits4:'',dcWeather:'',dcTerrain:'',dcReflect:'false',dcLightScreen:'false',dcAuroraVeil:'false',dcRuinBeads:'false',dcRuinTablets:'false',dcRuinSword:'false',dcRuinVessel:'false',dcAtkEvHp:'',dcAtkEvAtk:'',dcAtkEvDef:'',dcAtkEvSpa:'',dcAtkEvSpd:'',dcAtkEvSpe:'',dcDefEvHp:'',dcDefEvAtk:'',dcDefEvDef:'',dcDefEvSpa:'',dcDefEvSpd:'',dcDefEvSpe:''};
-      Object.entries(defaults).forEach(([id,value])=>{const el=host.querySelector('#'+id);if(el){if(el.type==='checkbox')el.checked=value==='true';else el.value=value;}});
-      fillPokemonAbilities('dcAtkAbility',host.querySelector('#dcAtk')?.value);
-      fillPokemonAbilities('dcDefAbility',host.querySelector('#dcDef')?.value);
-      ['dcWeather','dcTerrain'].forEach(syncConditionButtons);
-      window.clearDamageCalcSavedState();
-      clearLastCalcSession();
-      host.querySelectorAll('.dc-crit-btn,.dc-z-btn,.dc-max-btn').forEach(btn=>{btn.setAttribute('aria-pressed','false');btn.classList.remove('active');});
-      host.querySelectorAll('[id^="dcHitField"]').forEach(el=>el.hidden=true);
-      host.querySelector('#dcAtkActualStats').innerHTML='<span>Actual stats</span><div>HP — · Atk — · Def — · SpA — · SpD — · Spe —</div>';
-      host.querySelector('#dcDefActualStats').innerHTML='<span>Actual stats</span><div>HP — · Atk — · Def — · SpA — · SpD — · Spe —</div>';
-      host.querySelector('#dcResult').innerHTML='<div class="muted">Calculator reset. Choose both Pokémon and add at least one move.</div>';
-      host.querySelector('#dcAtkNature')?.dispatchEvent(new Event('change'));
-      host.querySelector('#dcDefNature')?.dispatchEvent(new Event('change'));
-      window.clearDamageCalcSavedState();
-      scheduleDamageCalculation(50);
-    });
-    let dcCalcRequest=0;
-    let dcCalcTimer=null;
-    const scheduleDamageCalculation=(delay=120)=>{
-      clearTimeout(dcCalcTimer);
-      dcCalcTimer=setTimeout(()=>runDamageCalculation(),delay);
-    };
-    const runDamageCalculation=async()=>{
-      const requestId=++dcCalcRequest;
-      const result=host.querySelector('#dcResult');
-      if(!result)return;
-      // The calculation sides are ALWAYS the two Pokémon currently selected in the
-      // calculator. Imported sets only supply stats/options for their own side;
-      // they must never replace the opponent used by the calculation.
-      const atkName=(host.querySelector('#dcAtk')?.value||'').trim();
-      const defName=(host.querySelector('#dcDef')?.value||'').trim();
-      const moveSlots=[1,2,3,4];
-      const selectedMoves=moveSlots.map(slot=>({
-        slot,
-        name:(host.querySelector('#dcMove'+slot)?.value||'').trim(),
-        crit:host.querySelector(`.dc-crit-btn[data-move="${slot}"]`)?.getAttribute('aria-pressed')==='true',
-        useZ:host.querySelector(`.dc-z-btn[data-move="${slot}"]`)?.getAttribute('aria-pressed')==='true',
-        useMax:host.querySelector(`.dc-max-btn[data-move="${slot}"]`)?.getAttribute('aria-pressed')==='true',
-        bp:(host.querySelector('#dcBP'+slot)?.value||'').trim(),
-        hits:(host.querySelector('#dcHits'+slot)?.value||'').trim()
-      })).filter(x=>x.name);
-      if(!atkName||!defName||!selectedMoves.length){
-        result.innerHTML='<div class="dc-results-heading">Results</div><div class="muted">Select an attacker, defender, and at least one move.</div>';
-        return;
-      }
-      result.innerHTML='<div class="dc-results-heading">Results</div><div class="muted">Updating damage…</div>';
-      try{
-        const C=await getCalcEngine();
-        if(requestId!==dcCalcRequest)return;
-        const gen=C.Generations.get(9);
-        const atkSet=appliedImportedSets.atk, defSet=appliedImportedSets.def;
-        const readBoosts=prefix=>({hp:Number(host.querySelector('#'+prefix+'BoostHp')?.value)||0,atk:Number(host.querySelector('#'+prefix+'BoostAtk')?.value)||0,def:Number(host.querySelector('#'+prefix+'BoostDef')?.value)||0,spa:Number(host.querySelector('#'+prefix+'BoostSpa')?.value)||0,spd:Number(host.querySelector('#'+prefix+'BoostSpd')?.value)||0,spe:Number(host.querySelector('#'+prefix+'BoostSpe')?.value)||0});
-        const attackerBoosts=readBoosts('dcAtk'), defenderBoosts=readBoosts('dcDef');
-        const attacker=new C.Pokemon(gen,atkName,{level:Number(host.querySelector('#dcAtkLevel')?.value)||100,item:host.querySelector('#dcAtkItem')?.value.trim()||undefined,ability:host.querySelector('#dcAtkAbility')?.value.trim()||undefined,nature:host.querySelector('#dcAtkNature')?.value.trim()||undefined,status:host.querySelector('#dcAtkStatus')?.value.trim()||undefined,evs:readEVs('dcAtkEv'),ivs:atkSet?.ivs||undefined,teraType:atkSet?.teraType||undefined,boosts:attackerBoosts});
-        const defender=new C.Pokemon(gen,defName,{level:Number(host.querySelector('#dcDefLevel')?.value)||100,item:host.querySelector('#dcDefItem')?.value.trim()||undefined,ability:host.querySelector('#dcDefAbility')?.value.trim()||undefined,nature:host.querySelector('#dcDefNature')?.value.trim()||undefined,status:host.querySelector('#dcDefStatus')?.value.trim()||undefined,evs:readEVs('dcDefEv'),ivs:defSet?.ivs||undefined,teraType:defSet?.teraType||undefined,boosts:defenderBoosts});
-        const weather=host.querySelector('#dcWeather')?.value.trim();
-        const terrain=host.querySelector('#dcTerrain')?.value.trim();
-        const defenderSide={};
-        if(host.querySelector('#dcReflect')?.checked) defenderSide.isReflect=true;
-        if(host.querySelector('#dcLightScreen')?.checked) defenderSide.isLightScreen=true;
-        if(host.querySelector('#dcAuroraVeil')?.checked) defenderSide.isAuroraVeil=true;
-        const fieldOptions={};
-        if(weather) fieldOptions.weather=weather;
-        if(terrain) fieldOptions.terrain=terrain;
-        if(Object.keys(defenderSide).length) fieldOptions.defenderSide=defenderSide;
-        if(host.querySelector('#dcRuinBeads')?.checked) fieldOptions.isBeadsOfRuin=true;
-        if(host.querySelector('#dcRuinTablets')?.checked) fieldOptions.isTabletsOfRuin=true;
-        if(host.querySelector('#dcRuinSword')?.checked) fieldOptions.isSwordOfRuin=true;
-        if(host.querySelector('#dcRuinVessel')?.checked) fieldOptions.isVesselOfRuin=true;
-        const field=typeof C.Field==='function' ? new C.Field(fieldOptions) : undefined;
-        // Use the calculator engine's own HP value. Do not call the page-level
-        // fetchPokemonData helper here: that helper lives inside the main dashboard
-        // IIFE and is intentionally not part of the damage-calculator scope.
-        const defenderMaxHp=Number(defender.maxHP)||Number(defender.maxhp)||Number(defender.hp)||
-          Number(defender.stats?.hp)||Number(defender.rawStats?.hp)||0;
-        const moveKey=v=>String(v??'').toLowerCase().replace(/[^a-z0-9]/g,'');
-        const ALWAYS_CRIT_MOVES=['surgingstrikes','wickedblow'];
-        // Meteor Beam and Electro Shot raise the user's Sp. Atk on the same
-        // turn they hit (unlike other charge moves), matching Showdown.
-        const CHARGE_MOVE_BOOSTS={'meteorbeam':{spa:1},'electroshot':{spa:1}};
-        const atkItemName=host.querySelector('#dcAtkItem')?.value.trim()||'';
-        const atkBaseOptions={level:Number(host.querySelector('#dcAtkLevel')?.value)||100,item:atkItemName||undefined,ability:host.querySelector('#dcAtkAbility')?.value.trim()||undefined,nature:host.querySelector('#dcAtkNature')?.value.trim()||undefined,status:host.querySelector('#dcAtkStatus')?.value.trim()||undefined,evs:readEVs('dcAtkEv'),ivs:atkSet?.ivs||undefined,teraType:atkSet?.teraType||undefined,boosts:attackerBoosts};
-        const rows=[];
-        const flattenDamageRolls=value=>{
-          const out=[];
-          const walk=v=>{ if(Array.isArray(v)){v.forEach(walk);} else if(Number.isFinite(Number(v))) out.push(Number(v)); };
-          walk(value); return out;
-        };
-        const totalDamageRolls=value=>{
-          if(!Array.isArray(value)) return Number.isFinite(Number(value))?[Number(value)]:[];
-          if(value.length && Array.isArray(value[0])){
-            const perHit=value.map(hit=>flattenDamageRolls(hit));
-            if(perHit.some(a=>!a.length)) return flattenDamageRolls(value);
-            const totals=[];
-            const maxLen=Math.max(...perHit.map(a=>a.length));
-            for(let i=0;i<maxLen;i++) totals.push(perHit.reduce((sum,a)=>sum+(a[i]??a[a.length-1]??0),0));
-            return totals;
-          }
-          return flattenDamageRolls(value);
-        };
-        for(const entry of selectedMoves){
-          if(requestId!==dcCalcRequest)return;
-          try{
-            const key=moveKey(entry.name);
-            const chargeBoost=CHARGE_MOVE_BOOSTS[key];
-            // Each move gets its own attacker instance so a charge-move stat
-            // boost (Meteor Beam / Electro Shot) never bleeds into other slots.
-            const entryAttacker=chargeBoost ? new C.Pokemon(gen,atkName,{...atkBaseOptions,boosts:chargeBoost}) : attacker;
-            const moveDataRaw=gen.moves.get(entry.name);
-            const multihit=moveDataRaw?.multihit;
-            const hasLoadedDice=atkItemName.toLowerCase()==='loaded dice';
-            let hits;
-            if(key==='surgingstrikes') hits=3;
-            else if(entry.hits) hits=Number(entry.hits);
-            else if(key==='populationbomb') hits=hasLoadedDice?10:10;
-            else if(Array.isArray(multihit)) hits=hasLoadedDice?multihit[1]:Math.round((multihit[0]+multihit[1])/2);
-            else if(typeof multihit==='number') hits=multihit;
-            const isCrit=entry.crit||ALWAYS_CRIT_MOVES.includes(key);
-            const moveOptions={isCrit,hits:multihit?hits:undefined,useZ:entry.useZ||undefined,useMax:entry.useMax||undefined};
-            const overrides={};
-            if(entry.bp) overrides.basePower=Number(entry.bp);
-            // Tera Blast uses the higher attacking stat while Terastallized.
-            if(key==='terablast' && entryAttacker.teraType){
-              const atkStat=Number(entryAttacker.stats?.atk||entryAttacker.rawStats?.atk||0);
-              const spaStat=Number(entryAttacker.stats?.spa||entryAttacker.rawStats?.spa||0);
-              overrides.category=atkStat>=spaStat?'Physical':'Special';
-            }
-            if(Object.keys(overrides).length) moveOptions.overrides=overrides;
-            const move=new C.Move(gen,entry.name,moveOptions);
-            const res=field ? C.calculate(gen,entryAttacker,defender,move,field) : C.calculate(gen,entryAttacker,defender,move);
-            // The calculator's multi-hit result is the total damage. Calculate one
-            // hit separately so the UI can report both per-hit and total ranges.
-            let perHitRolls=[];
-            if(multihit && hits>1){
-              try{
-                const oneHitOptions={isCrit,hits:1,useZ:entry.useZ||undefined,useMax:entry.useMax||undefined};
-                if(Object.keys(overrides).length) oneHitOptions.overrides=overrides;
-                const oneHitMove=new C.Move(gen,entry.name,oneHitOptions);
-                const oneHitRes=field?C.calculate(gen,entryAttacker,defender,oneHitMove,field):C.calculate(gen,entryAttacker,defender,oneHitMove);
-                perHitRolls=flattenDamageRolls(oneHitRes.damage);
-              }catch(e){}
-            }
-            let ko='';
-            try{ko=res.kochance().text||'';}catch(e){}
-            const rolls=totalDamageRolls(res.damage);
-            let pctText='—', minPct=NaN, maxPct=NaN, koChance=null;
-            if(rolls.length){
-              const minDamage=Math.min(...rolls), maxDamage=Math.max(...rolls);
-              if(defenderMaxHp>0){
-                minPct=minDamage/defenderMaxHp*100;
-                maxPct=maxDamage/defenderMaxHp*100;
-                pctText=minPct===maxPct?`${minPct.toFixed(1)}%`:`${minPct.toFixed(1)}–${maxPct.toFixed(1)}%`;
-                const koRolls=rolls.filter(d=>d>=defenderMaxHp).length;
-                koChance=rolls.length?koRolls/rolls.length*100:null;
-              }
-            }
-            const extraLabels=[isCrit?'Critical hit':'',entry.useZ?'Z-Move':'',entry.useMax?'Max Move':'',hits&&hits>1?`${hits} hits`:''].filter(Boolean);
-            const critLabel=extraLabels.join(' · ');
-            const chanceLabel=koChance===null?'KO chance unavailable':`${koChance.toFixed(1)}% chance to KO`;
-            const perHitText=perHitRolls.length?`<div class="dc-result-detail"><strong>Per hit:</strong> ${Math.min(...perHitRolls)}–${Math.max(...perHitRolls)} damage</div>`:'';
-            rows.push(`<article class="dc-result-move"><div class="dc-result-move-head"><div><strong>${escCalc(entry.name)}</strong>${critLabel?`<span class="dc-result-meta">${escCalc(critLabel)}</span>`:''}</div><span class="dc-result-percent">${escCalc(pctText)}</span></div>${perHitText}<div class="dc-result-detail">${ko?escCalc(ko):'No KO information'}</div><div class="dc-result-footer"><span class="dc-result-ko">${escCalc(chanceLabel)}</span></div></article>`);
-          }catch(moveErr){
-            rows.push(`<article class="dc-result-move"><div class="dc-result-move-head"><strong>${escCalc(entry.name)}</strong><span class="dc-result-percent">—</span></div><div class="dc-result-ko-detail">${escCalc(moveErr?.message||'Calculation unavailable')}</div></article>`);
-          }
-        }
-        if(requestId!==dcCalcRequest)return;
-        const stageMultiplier=stage=>{const n=Math.max(-6,Math.min(6,Number(stage)||0));return n<0?2/(2+Math.abs(n)):(2+n)/2;};
-        const statValue=(p,key,boosts)=>{
-          const raw=Number(p?.rawStats?.[key]??p?.stats?.[key]);
-          if(!Number.isFinite(raw)) return '—';
-          if(key==='hp') return raw;
-          const stage=Number(boosts?.[key])||0;
-          return Math.floor(raw*stageMultiplier(stage));
-        };
-        const actualStatsText=(p,boosts)=>`HP ${statValue(p,'hp',boosts)} · Atk ${statValue(p,'atk',boosts)} · Def ${statValue(p,'def',boosts)} · SpA ${statValue(p,'spa',boosts)} · SpD ${statValue(p,'spd',boosts)} · Spe ${statValue(p,'spe',boosts)}`;
-        host.querySelector('#dcAtkActualStats').innerHTML=`<span>Actual stats</span><div>${actualStatsText(attacker,attackerBoosts)}</div>`;
-        host.querySelector('#dcDefActualStats').innerHTML=`<span>Actual stats</span><div>${actualStatsText(defender,defenderBoosts)}</div>`;
-        result.innerHTML=`<div class="dc-results-heading">Damage calculations</div><div class="dc-results-subheading">${escCalc(atkName)} → ${escCalc(defName)}</div><div class="dc-results-list">${rows.join('')}</div>`;
-      }catch(err){
-        if(requestId!==dcCalcRequest)return;
-        result.innerHTML=`<div class="damage-calc-error">Calculation failed: ${escCalc(err?.message||err)}</div>`;
-      }
-    };
-
-    // Recalculate automatically whenever anything relevant changes.
-    const autoCalcIds=['dcAtkTeam','dcAtk','dcAtkLevel','dcAtkItem','dcAtkAbility','dcAtkNature','dcAtkStatus','dcDefTeam','dcDef','dcDefLevel','dcDefItem','dcDefAbility','dcDefNature','dcDefStatus','dcMove1','dcMove2','dcMove3','dcMove4','dcBP1','dcBP2','dcBP3','dcBP4','dcHits1','dcHits2','dcHits3','dcHits4','dcAtkBoostHp','dcAtkBoostAtk','dcAtkBoostDef','dcAtkBoostSpa','dcAtkBoostSpd','dcAtkBoostSpe','dcDefBoostHp','dcDefBoostAtk','dcDefBoostDef','dcDefBoostSpa','dcDefBoostSpd','dcDefBoostSpe','dcWeather','dcTerrain','dcReflect','dcLightScreen','dcAuroraVeil','dcRuinBeads','dcRuinTablets','dcRuinSword','dcRuinVessel','dcAtkEvHp','dcAtkEvAtk','dcAtkEvDef','dcAtkEvSpa','dcAtkEvSpd','dcAtkEvSpe','dcDefEvHp','dcDefEvAtk','dcDefEvDef','dcDefEvSpa','dcDefEvSpd','dcDefEvSpe'];
-    autoCalcIds.forEach(id=>{
-      const el=host.querySelector('#'+id);
-      if(!el)return;
-      el.addEventListener('input',()=>scheduleDamageCalculation());
-      el.addEventListener('change',()=>scheduleDamageCalculation());
-    });
-    host.querySelectorAll('.dc-crit-btn').forEach(btn=>btn.addEventListener('click',()=>scheduleDamageCalculation()));
-    host.querySelectorAll('.dc-z-btn,.dc-max-btn').forEach(btn=>btn.addEventListener('click',()=>scheduleDamageCalculation(0)));
-    const updateHitVisibility=async(slot)=>{
-      const move=host.querySelector('#dcMove'+slot)?.value||'';
-      const field=host.querySelector('#dcHitField'+slot);
-      if(!field)return;
-      let multi=false;
-      try{
-        const C=await getCalcEngine(); const gen=C.Generations.get(9);
-        multi=!!gen.moves.get(move)?.multihit;
-      }catch(e){}
-      field.hidden=!multi;
-      if(!multi){const h=host.querySelector('#dcHits'+slot);if(h)h.value='';}
-    };
-    [1,2,3,4].forEach(slot=>{
-      host.querySelector('#dcMove'+slot)?.addEventListener('change',()=>{updateHitVisibility(slot);scheduleDamageCalculation(0);});
-      updateHitVisibility(slot);
-    });
-    host.querySelectorAll('.dc-condition-toggle').forEach(btn=>btn.addEventListener('click',()=>scheduleDamageCalculation()));
-    host.querySelectorAll('.dc-apply-set').forEach(btn=>btn.addEventListener('click',()=>scheduleDamageCalculation(250)));
-    scheduleDamageCalculation(250);
-    requestAnimationFrame(()=>{host.classList.add('open');host.style.visibility='visible';host.style.opacity='1';});
-  };
-  // Delegated fallback: the Match Prep content is re-rendered dynamically,
-  // so bind the launcher at document level as well.
-  function launchDamageCalc(e){
-    const btn=e.target.closest?.('#openDamageCalc');
-    if(!btn)return;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    try{ window.openDamageCalcModal(); }
-    catch(err){
-      console.error('Damage calculator launcher failed',err);
-      alert('Could not open the Damage Calculator: '+(err?.message||err));
-    }
-  }
-  document.addEventListener('click',launchDamageCalc,true);
-  window.launchDamageCalc=launchDamageCalc;
-  // A full page reload must start the Damage Calculator completely clean.
-  // Clear the calculator's existing persisted state before any calculator
-  // modal/session restoration can reuse it. Saved teams/rosters are untouched.
-  window.addEventListener('pageshow', function(){
-    try{
-      if(typeof window.clearDamageCalcSavedState==='function'){
-        window.clearDamageCalcSavedState();
-      }
-      // Remove any calculator-only browser state used by older/newer builds.
-      ['damageCalcState','damageCalcImportedSet','damageCalcSession',
-       'damageCalcSavedState'].forEach(function(key){
-        try{ sessionStorage.removeItem(key); }catch(e){}
-        try{ localStorage.removeItem(key); }catch(e){}
-      });
-    }catch(err){
-      console.warn('Could not clear calculator reload state:', err);
-    }
-  });
-
 })();
 
 /* ===== End block 1 ===== */
-
-/* ===== Extracted inline Match Prep block 2 ===== */
-
-(function(){
-  // Reliable browser-side option loader. Showdown's current data files are
-  // compiled globals in some builds, so we use PokeAPI's public JSON indexes
-  // for the selectable names and keep the actual damage engine as @smogon/calc.
-  let cache=null, loading=null;
-  const label=id=>String(id||'').split('-').map(x=>x ? x[0].toUpperCase()+x.slice(1) : x).join(' ');
-  const getList=async(type)=>{
-    const r=await fetch(`https://pokeapi.co/api/v2/${type}?limit=2000`,{cache:'force-cache'});
-    if(!r.ok) throw new Error(`${type} list failed (${r.status})`);
-    const j=await r.json();
-    return (j.results||[]).map(x=>({id:x.name,name:label(x.name)})).filter(x=>x.name);
-  };
-  window.__showdownCalcChoices=async function(){
-    if(cache) return cache;
-    if(loading) return loading;
-    loading=Promise.all([getList('move'),getList('ability')]).then(async([moves,abilities])=>{
-      const sort=a=>a.sort((x,y)=>x.name.localeCompare(y.name,undefined,{sensitivity:'base'}));
-      // Pull items from the calc engine's own Gen 9 battle data instead of
-      // PokeAPI's full item catalog. PokeAPI lists every item in the games
-      // (mail, apricorns, Bob's Food Tin, TMs, etc) which just clutters the
-      // dropdown with things that never affect a damage calculation. The
-      // calc engine's item data only contains items with an actual in-battle
-      // effect, which is exactly what's useful here.
-      let items=[];
-      try{
-        const engine=typeof window.getCalcEngine==='function' ? await window.getCalcEngine() : null;
-        const gen=engine?.Generations?.get(9);
-        const genItems=gen?.items;
-        if(genItems){
-          items=[...genItems]
-            .filter(it=>it && it.name && it.exists!==false && !it.isNonstandard)
-            .map(it=>({id:it.id||it.name,name:it.name}));
-        }
-      }catch(err){ console.warn('Falling back to PokeAPI item list',err); }
-      if(!items.length) items=await getList('item');
-      cache={items:sort(items),moves:sort(moves),abilities:sort(abilities)};
-      return cache;
-    }).catch(err=>{
-      console.warn('Calculator option lists failed',err);
-      cache={items:[],moves:[],abilities:[]};
-      return cache;
-    });
-    return loading;
-  };
-})();
-
-/* ===== End block 2 ===== */
 
 /* ===== Extracted inline Match Prep block 3 ===== */
 
@@ -934,32 +50,6 @@ function norm(s){
   if(raw.replace(/\s+/g,'')==='yefmoc') return 'comfey';
   return raw.replace(/\s+/g,' ');
 }
-
-const PREP_POISON_TYPES = new Set(['Poison']);
-function prepIsPoisonSpecies(species){
-  const types=normalizedTypes(typeMapForItemSpecies(species));
-  return types.some(t=>PREP_POISON_TYPES.has(String(t)));
-}
-function typeMapForItemSpecies(species){
-  const key=canonicalSpecies(species);
-  try{
-    if(typeof getPokemonTypes==='function') return getPokemonTypes(key)||[];
-    if(typeof window!=='undefined' && window.POKEMON_TYPES) return window.POKEMON_TYPES[key]||[];
-  }catch(e){}
-  const n=norm(key);
-  const poisonBases=new Set(['bulbasaur','ivysaur','venusaur','weedle','kakuna','beedrill','ekans','arbok','nidoranf','nidorina','nidoqueen','nidoranm','nidorino','nidoking','zubat','golbat','crobat','oddish','gloom','vileplume','tentacool','tentacruel','grimer','muk','koffing','weezing','gastly','haunter','gengar','spinarak','ariados','qwilfish','dustox','roselia','swalot','gulpin','seviper','stunky','skuntank','croagunk','toxicroak','skorupi','drapion','trubbish','garbodor','foongus','amoonguss','venipede','whirlipede','scolipede','skrelp','dragalge','mareanie','toxapex','salandit','salazzle','poipole','naganadel','stakataka','eternatus','gimmighoul','glimmet','glimmora','varoom','revavroom','clodsire','ironmoth','pecharunt']);
-  return poisonBases.has(n)?['Poison']:[];
-}
-function sanitizePrepItems(species, source){
-  const out={};
-  for(const [item,count] of Object.entries(source||{})){
-    const k=String(item||'').trim();
-    if(!k || Number(count||0)<=0) continue;
-    if(k.toLowerCase()==='black sludge' && !prepIsPoisonSpecies(species)) continue;
-    out[k]=1;
-  }
-  return out;
-}
 function teamKey(s){return norm(s).replace(/[^a-z0-9]/g,'')}
 function sameTeam(a,b){return teamKey(a)===teamKey(b)}
 function teamFor(u){const raw=String(u||'').trim();const k=raw.toLowerCase();return STATE.teamMap[k]||raw||'Unknown'}
@@ -971,9 +61,21 @@ function allRows(){return Object.values(STATE.replays)}
 // default-opponent logic and the standalone Damage Calculator, so the
 // calculator can default to "who am I actually playing next" too.
 function nextScheduledOpponent(team){
-  const rounds=Array.isArray(STATE.settings?.fixture?.rounds) ? STATE.settings.fixture.rounds : [];
   const key=v=>teamKey(v);
   const target=key(team);
+  // Finals Mode takes precedence once the regular season is over. The first
+  // unresolved finals match involving this team is its next opponent.
+  const finals=window.SBL?.finals?.resolveMatchups ? window.SBL.finals.resolveMatchups(STATE.settings?.finals||{}) : null;
+  if(finals && finals.status!=='inactive') {
+    for(const round of (finals.rounds||[])){
+      for(const match of (round.matches||[])){
+        if(match.winner || !match.teamA || !match.teamB) continue;
+        if(key(match.teamA)===target) return match.teamB;
+        if(key(match.teamB)===target) return match.teamA;
+      }
+    }
+  }
+  const rounds=Array.isArray(STATE.settings?.fixture?.rounds) ? STATE.settings.fixture.rounds : [];
   const played=(week,home,away)=>Object.values(STATE.replays||{}).some(r=>{
     if(!r || String(r.week||'Unassigned')!==String(week) || !r.players) return false;
     const a=key(teamFor(r.players.p1)), b=key(teamFor(r.players.p2));
@@ -1014,7 +116,7 @@ function monsForSide(r,side,preferredRoster=[]){
     if(String(m?.side||'').toLowerCase()!==side || !m.species)continue;
     const species=resolveReplaySpecies(m.species,resolutionRoster);
     const k=norm(species);
-    if(!out[k])out[k]={...m,species,_fromReplay:true,items:sanitizePrepItems(species,m.items),confirmedItems:sanitizePrepItems(species,m.confirmedItems),inferredItems:sanitizePrepItems(species,m.inferredItems)};
+    if(!out[k])out[k]={...m,species,_fromReplay:true};
     else{
       const x=out[k];
       x.appearances=(Number(x.appearances)||0)+(Number(m.appearances)||0);
@@ -1023,9 +125,8 @@ function monsForSide(r,side,preferredRoster=[]){
       x.damageDealt=(Number(x.damageDealt)||0)+(Number(m.damageDealt||0));
       x.damageTaken=(Number(x.damageTaken)||0)+(Number(m.damageTaken||0));
       x.moves={...(x.moves||{})}; for(const [mv,c] of Object.entries(m.moves||{})) x.moves[mv]=(x.moves[mv]||0)+Number(c||0);
-      x.items={...(x.items||{}), ...sanitizePrepItems(species, m.items)};
-      x.confirmedItems={...(x.confirmedItems||{}), ...sanitizePrepItems(species, m.confirmedItems)};
-      x.inferredItems={...(x.inferredItems||{}), ...sanitizePrepItems(species, m.inferredItems)};
+      x.items={...(x.items||{})}; for(const [it,c] of Object.entries(m.items||{})) x.items[it]=(x.items[it]||0)+Number(c||0);
+      x.confirmedItems={...(x.confirmedItems||{})}; for(const [it,c] of Object.entries(m.confirmedItems||{})) x.confirmedItems[it]=(x.confirmedItems[it]||0)+Number(c||0); x.inferredItems={...(x.inferredItems||{})}; for(const [it,c] of Object.entries(m.inferredItems||{})) x.inferredItems[it]=(x.inferredItems[it]||0)+Number(c||0);
       x.leads=(Number(x.leads)||0)+Number(m.leads||0); x.sentOut=(Number(x.sentOut)||0)+Number(m.sentOut||0);
     }
   }
@@ -1163,12 +264,12 @@ function aggregate(team){
       a.leads=(Number(a.leads)||0)+Number(m.leads||0);
       a.sentOut=(Number(a.sentOut)||0)+Number(m.sentOut||0);
       a.dealt+=Number(m.damageDealt||0);a.taken+=Number(m.damageTaken||0);a.replays.add(r.id);const replayWeek=String(r.week??r.round??r.roundNumber??'').trim();if(replayWeek && Number(m.appearances||0)>0)a.weeks.add(replayWeek);
-      for(const [item] of Object.entries(sanitizePrepItems(m.species,m.items))) a.items[item]=(a.items[item]||0)+1;
-      for(const [item] of Object.entries(sanitizePrepItems(m.species,m.confirmedItems))) a.confirmedItems[item]=(a.confirmedItems[item]||0)+1;
-      for(const [item] of Object.entries(sanitizePrepItems(m.species,m.inferredItems))) a.inferredItems[item]=(a.inferredItems[item]||0)+1;
+      for(const [item,count] of Object.entries(m.items||{})) a.items[item]=(a.items[item]||0)+Number(count||0);
+      for(const [item,count] of Object.entries(m.confirmedItems||{})) a.confirmedItems[item]=Math.max(Number(a.confirmedItems[item]||0),Number(count||0));
+      for(const [item,count] of Object.entries(m.inferredItems||{})) a.inferredItems[item]=Math.max(Number(a.inferredItems[item]||0),Number(count||0));
       for(const [item,evidence] of Object.entries(m.itemEvidence||{})){a.itemEvidence[item] ||= [];for(const ev of (evidence||[]))if(!a.itemEvidence[item].includes(ev))a.itemEvidence[item].push(ev);}
       const moves={...(m.moves||{})};
-      a.gameSets.push({replayId:String(r.id||''), week: replayWeek, moves, items:sanitizePrepItems(m.species,m.items), confirmedItems:sanitizePrepItems(m.species,m.confirmedItems), inferredItems:sanitizePrepItems(m.species,m.inferredItems), sentOut:Number(m.sentOut||0), led:Number(m.leads||0)>0 ? 1 : 0});
+      a.gameSets.push({week: replayWeek, moves, items:{...(m.items||{})}, confirmedItems:{...(m.confirmedItems||{})}, inferredItems:{...(m.inferredItems||{})}, sentOut:Number(m.sentOut||0), led:Number(m.leads||0)>0 ? 1 : 0});
       seen.push(k)
     }
     seen.sort();for(let i=0;i<seen.length;i++)for(let j=i+1;j<seen.length;j++){const key=seen[i]+'|'+seen[j];pairCounts[key]=(pairCounts[key]||0)+1}
@@ -1790,54 +891,6 @@ async function comparisonTypes(species){
 }
 
 
-function showdownProfileStorageKey(){ return `sbl_showdown_sets_${STATE.profileUserId||STATE.profileTeam||'profile'}`; }
-function loadShowdownProfileSets(){ try{ const raw=localStorage.getItem(showdownProfileStorageKey()); const x=raw?JSON.parse(raw):[]; return Array.isArray(x)?x:[]; }catch(e){ return []; } }
-function saveShowdownProfileSets(sets){ try{ localStorage.setItem(showdownProfileStorageKey(),JSON.stringify(sets)); }catch(e){} }
-function parseShowdownSetBlock(block){
-  const lines=String(block||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean); if(!lines.length) return null;
-  const first=lines[0]; const head=first.replace(/^\s+|\s+$/g,'');
-  let name=head,species=head,item='';
-  const at=head.indexOf(' @ '); if(at>=0){ item=head.slice(at+3).trim(); name=head.slice(0,at).trim(); }
-  const par=name.match(/^(.*)\s+\(([^)]+)\)$/); if(par && ['M','F'].includes(par[2])) name=par[1].trim();
-  const nick= name.match(/^(.*)\s+\(([^)]+)\)$/); if(nick && nick[2] && !['M','F'].includes(nick[2])){ name=nick[1].trim(); species=nick[2].trim(); } else species=name;
-  let ability='',nature='',level=100,gender='',shiny=false,teraType='',moves=[],evs={},ivs={};
-  const statMap={HP:'hp',Atk:'atk',Def:'def',SpA:'spa','Sp. Atk':'spa',SpD:'spd','Sp. Def':'spd',Spe:'spe'};
-  for(const line of lines.slice(1)){
-    let m=line.match(/^Ability:\s*(.+)$/i); if(m){ability=m[1].trim();continue;}
-    m=line.match(/^Level:\s*(\d+)$/i); if(m){level=Number(m[1]);continue;}
-    m=line.match(/^Shiny:\s*Yes$/i); if(m){shiny=true;continue;}
-    m=line.match(/^Tera Type:\s*(.+)$/i); if(m){teraType=m[1].trim();continue;}
-    m=line.match(/^EVs:\s*(.+)$/i); if(m){ for(const part of m[1].split('/')){const z=part.trim().match(/^(\d+)\s+(.+)$/); if(z && statMap[z[2]]) evs[statMap[z[2]]]=Number(z[1]);} continue; }
-    m=line.match(/^IVs:\s*(.+)$/i); if(m){ for(const part of m[1].split('/')){const z=part.trim().match(/^(\d+)\s+(.+)$/); if(z && statMap[z[2]]) ivs[statMap[z[2]]]=Number(z[1]);} continue; }
-    m=line.match(/^(.+?)\s+Nature$/i); if(m){nature=m[1].trim();continue;}
-    if(/^[-~]\s*/.test(line)) moves.push(line.replace(/^[-~]\s*/,'').trim());
-  }
-  return {name,species,item,ability,nature,level,gender,shiny,teraType,moves:moves.slice(0,4),evs,ivs,importedAt:new Date().toISOString()};
-}
-function parseShowdownSets(text){
-  return String(text||'').split(/\n\s*\n/).map(parseShowdownSetBlock).filter(Boolean);
-}
-function importedSetOptions(selected=''){ const sets=loadShowdownProfileSets(); return `<option value="">No imported set</option>`+sets.map((x,i)=>{const label=`${x.name&&x.name!==x.species?x.name+' — ':''}${x.species}${x.item?' @ '+x.item:''}`;return `<option value="${i}" ${String(i)===String(selected)?'selected':''}>${esc(label)}</option>`;}).join(''); }
-window.importedSetOptions=importedSetOptions;
-window.importedSetForIndex=importedSetForIndex;
-function importedSetForIndex(value){ const sets=loadShowdownProfileSets(); const i=Number(value); return Number.isInteger(i)&&i>=0&&i<sets.length?sets[i]:null; }
-function normaliseImportedStats(obj){ const out={hp:0,atk:0,def:0,spa:0,spd:0,spe:0}; for(const k of Object.keys(out)) if(obj&&obj[k]!=null) out[k]=Number(obj[k])||0; return out; }
-window.normaliseImportedStats=normaliseImportedStats;
-function openShowdownImportModal(){
-  const old=document.getElementById('showdownImportModal'); if(old)old.remove();
-  const sets=loadShowdownProfileSets();
-  const overlay=document.createElement('div'); overlay.id='showdownImportModal'; overlay.className='showdown-import-overlay';
-  overlay.innerHTML=`<div class="showdown-import-card" role="dialog" aria-modal="true" aria-label="Import Showdown Set"><div class="showdown-import-head"><h2>Import Showdown Set</h2><button type="button" class="showdown-import-close">×</button></div><div class="showdown-import-help">Paste a Pokémon Showdown export below. You can paste one set or multiple sets. Imported sets are saved to your player profile on this device for reuse.</div><textarea id="showdownImportText" class="showdown-import-text" placeholder="Gholdengo @ Choice Specs\nAbility: Good as Gold\nEVs: 4 Def / 252 SpA / 252 Spe\nTimid Nature\n- Make It Rain\n- Shadow Ball\n- Focus Blast\n- Trick"></textarea><div class="showdown-import-actions"><button type="button" class="showdown-import-close">Cancel</button><button type="button" id="showdownImportSave" class="damage-calc-primary">Import & Save</button></div><div class="showdown-saved-list"><strong style="font-size:11px">Saved sets</strong>${sets.length?sets.map((x,i)=>`<div class="showdown-saved-item"><div class="showdown-saved-meta"><strong>${esc(x.name||x.species)}</strong><span>${esc(x.item||'No item')} · ${esc(x.nature||'No nature')} · ${x.moves?.length||0} moves</span></div><div class="showdown-saved-actions"><button type="button" data-set-index="${i}" class="showdown-copy-set">Copy</button><button type="button" data-set-index="${i}" class="showdown-delete-set">Delete</button></div></div>`).join(''):'<span class="small">No saved sets yet.</span>'}</div></div>`;
-  document.body.appendChild(overlay);
-  requestAnimationFrame(()=>overlay.classList.add('open'));
-  const close=()=>{ if(overlay.dataset.closing==='1') return; overlay.dataset.closing='1'; overlay.classList.remove('open'); setTimeout(()=>overlay.remove(),240); }; overlay.querySelectorAll('.showdown-import-close').forEach(b=>b.addEventListener('click',close));
-  overlay.addEventListener('click',e=>{if(e.target===overlay)close();});
-  overlay.querySelector('#showdownImportSave').addEventListener('click',()=>{ const parsed=parseShowdownSets(overlay.querySelector('#showdownImportText').value); if(!parsed.length){alert('No valid Showdown sets were found.');return;} const merged=[...loadShowdownProfileSets(),...parsed]; saveShowdownProfileSets(merged); window.dispatchEvent(new Event('showdownSetsUpdated')); close(); openShowdownImportModal(); });
-  overlay.querySelectorAll('.showdown-delete-set').forEach(b=>b.addEventListener('click',()=>{const arr=loadShowdownProfileSets();arr.splice(Number(b.dataset.setIndex),1);saveShowdownProfileSets(arr); window.dispatchEvent(new Event('showdownSetsUpdated')); close(); openShowdownImportModal();}));
-  overlay.querySelectorAll('.showdown-copy-set').forEach(b=>b.addEventListener('click',()=>{const x=loadShowdownProfileSets()[Number(b.dataset.setIndex)]; if(x) navigator.clipboard?.writeText(exportShowdownSet(x));}));
-}
-window.openShowdownImportModal=openShowdownImportModal;
-function exportShowdownSet(x){ const out=[`${x.species||x.name}${x.item?` @ ${x.item}`:''}`,x.ability?`Ability: ${x.ability}`:'',x.level&&x.level!==100?`Level: ${x.level}`:'',x.shiny?'Shiny: Yes':'',x.teraType?`Tera Type: ${x.teraType}`:'',Object.keys(x.evs||{}).length?`EVs: ${[['hp','HP'],['atk','Atk'],['def','Def'],['spa','SpA'],['spd','SpD'],['spe','Spe']].filter(([k])=>x.evs[k]).map(([k,l])=>`${x.evs[k]} ${l}`).join(' / ')}`:'',x.nature?`${x.nature} Nature`:'',...(x.moves||[]).map(m=>`- ${m}`)].filter(Boolean); return out.join('\n'); }
 async function renderMatchPrep(yourTeam, selectedOpponent){
   const names=teamNames();
   const opponent=selectedOpponent && !sameTeam(selectedOpponent,yourTeam)
@@ -1912,46 +965,22 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
     const seasonMovesBrought={};
     const seasonItems={};
     const seasonItemEvidence={};
-    // Item usage is a per-replay fact. A single replay may contain many
-    // recovery/item events, but it can only contribute one occurrence of a
-    // held item. Conversely, the same Pokémon can bring Leftovers in many
-    // different replays, and each distinct replay must add another occurrence.
-    // Deduplicate by replay id so duplicate parser rows cannot inflate counts.
-    const uniqueGameSets=new Map();
     for(const set of (usage.gameSets||[])){
-      const rid=String(set.replayId||'').trim();
-      const key=rid || `week:${String(set.week??'').trim()}:idx:${uniqueGameSets.size}`;
-      if(!uniqueGameSets.has(key)) uniqueGameSets.set(key,set);
-      else {
-        const existing=uniqueGameSets.get(key);
-        existing.items={...(existing.items||{}),...(set.items||{})};
-        existing.confirmedItems={...(existing.confirmedItems||{}),...(set.confirmedItems||{})};
-        existing.inferredItems={...(existing.inferredItems||{}),...(set.inferredItems||{})};
-        existing.itemEvidence={...(existing.itemEvidence||{}),...(set.itemEvidence||{})};
-        existing.moves={...(existing.moves||{}),...(set.moves||{})};
-      }
-    }
-    for(const set of uniqueGameSets.values()){
       const seenMoves=new Set();
       for(const [move,count] of Object.entries(set.moves||{})){const k=String(move).trim();if(k){seasonMoves[k]=(seasonMoves[k]||0)+Number(count||0);seenMoves.add(k);}}
       // Replay logs do not expose the full four-move team sheet. A move is
       // therefore counted as "brought" when it is observed on that week's
-      // battle set; each replay contributes at most one bring for a move.
+      // battle set; each set contributes at most one bring for a move.
       for(const k of seenMoves) seasonMovesBrought[k]=(seasonMovesBrought[k]||0)+1;
-      const confirmed=new Set(Object.keys(set.confirmedItems||{}));
-      const inferred=new Set(Object.keys(set.inferredItems||{}));
-      const items=new Set([...Object.keys(set.items||{}),...confirmed,...inferred]);
-      for(const item of items){
-        const k=String(item).trim();
-        if(!k) continue;
-        seasonItems[k]=(seasonItems[k]||0)+1;
-        if(confirmed.has(item)) seasonItemEvidence[k]='confirmed';
-        else if(seasonItemEvidence[k] !== 'confirmed' && inferred.has(item)) seasonItemEvidence[k]='inferred';
-      }
+      for(const [item,count] of Object.entries(set.items||{})){const k=String(item).trim();if(k)seasonItems[k]=(seasonItems[k]||0)+Number(count||0);}
+      for(const [item,count] of Object.entries(set.confirmedItems||{})){const k=String(item).trim();if(k){seasonItems[k]=Math.max(Number(seasonItems[k]||0),Number(count||0));seasonItemEvidence[k]='confirmed';}}
+      for(const [item,count] of Object.entries(set.inferredItems||{})){const k=String(item).trim();if(k && seasonItemEvidence[k] !== 'confirmed'){seasonItems[k]=Math.max(Number(seasonItems[k]||0),Number(count||0));seasonItemEvidence[k]='inferred';}}
     }
-    // Do not merge the old top-level item counters here. They are legacy
-    // aggregate/event counts and can no longer represent the number of
-    // distinct replays. gameSets is the authoritative per-replay source.
+    // Some replay/parser versions expose item evidence on the aggregate Pokémon
+    // record as well as inside gameSets. Merge both shapes so inferred items are
+    // never silently omitted from Season Overview.
+    for(const [item,count] of Object.entries(usage.confirmedItems||{})){const k=String(item).trim();if(k){seasonItems[k]=Math.max(Number(seasonItems[k]||0),Number(count||0));seasonItemEvidence[k]='confirmed';}}
+    for(const [item,count] of Object.entries(usage.inferredItems||{})){const k=String(item).trim();if(k && seasonItemEvidence[k] !== 'confirmed'){seasonItems[k]=Math.max(Number(seasonItems[k]||0),Number(count||0));seasonItemEvidence[k]='inferred';}}
     for(const [move,count] of Object.entries(usage.moves||{})){const k=String(move).trim();if(k&&!seasonMoves[k])seasonMoves[k]=Number(count||0);}
     for(const [item,count] of Object.entries(usage.items||{})){const k=String(item).trim();if(k&&!seasonItems[k])seasonItems[k]=Number(count||0);}
     const sortedMoveBroughtEntries=Object.entries(seasonMovesBrought).sort((a,b)=>Number(b[1])-Number(a[1])||a[0].localeCompare(b[0]));
@@ -2034,38 +1063,16 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
     const seasonMovesBrought={};
     const seasonItems={};
     const seasonItemEvidence={};
-    // Every gameSet represents one replay. Item counts are therefore summed
-    // across distinct replays, not maxed against the first replay. A replay may
-    // contain many item-related events, but the parser normalizes each game's
-    // item maps to 0/1. If the same replay is present twice, count it only once.
-    const seenReplayIds = new Set();
     for(const set of (usage.gameSets||[])){
-      const replayId = String(set.replayId ?? '').trim();
-      if(replayId){
-        if(seenReplayIds.has(replayId)) continue;
-        seenReplayIds.add(replayId);
-      }
       const seenMoves=new Set();
       for(const [move,count] of Object.entries(set.moves||{})){const k=String(move).trim();if(k){seasonMoves[k]=(seasonMoves[k]||0)+Number(count||0);seenMoves.add(k);}}
       // Replay logs do not expose the full four-move team sheet. A move is
       // therefore counted as "brought" when it is observed on that week's
       // battle set; each set contributes at most one bring for a move.
       for(const k of seenMoves) seasonMovesBrought[k]=(seasonMovesBrought[k]||0)+1;
-
-      const addItemOnce=(item)=>{
-        const k=String(item||'').trim();
-        if(!k) return;
-        seasonItems[k]=(seasonItems[k]||0)+1;
-      };
-      for(const item of Object.keys(set.items||{})) addItemOnce(item);
-      for(const item of Object.keys(set.confirmedItems||{})){
-        addItemOnce(item);
-        seasonItemEvidence[item]='confirmed';
-      }
-      for(const item of Object.keys(set.inferredItems||{})){
-        addItemOnce(item);
-        if(seasonItemEvidence[item] !== 'confirmed') seasonItemEvidence[item]='inferred';
-      }
+      for(const [item,count] of Object.entries(set.items||{})){const k=String(item).trim();if(k)seasonItems[k]=(seasonItems[k]||0)+Number(count||0);}
+      for(const [item,count] of Object.entries(set.confirmedItems||{})){const k=String(item).trim();if(k){seasonItems[k]=Math.max(Number(seasonItems[k]||0),Number(count||0));seasonItemEvidence[k]='confirmed';}}
+      for(const [item,count] of Object.entries(set.inferredItems||{})){const k=String(item).trim();if(k && seasonItemEvidence[k] !== 'confirmed'){seasonItems[k]=Math.max(Number(seasonItems[k]||0),Number(count||0));seasonItemEvidence[k]='inferred';}}
     }
     for(const [move,count] of Object.entries(usage.moves||{})){const k=String(move).trim();if(k&&!seasonMoves[k])seasonMoves[k]=Number(count||0);}
     for(const [item,count] of Object.entries(usage.items||{})){const k=String(item).trim();if(k&&!seasonItems[k])seasonItems[k]=Number(count||0);}
@@ -2532,9 +1539,17 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
   const switchSection=`<section id="prepSwitchAnalyser" class="panel prep-selectable-section" data-prep-section="switch"><div class="switch-analyser-head"><div><h2>Switch-In Analyser</h2><p class="panel-desc">Choose the attacking side, damaging move, and switch-in defender.</p></div><button type="button" id="prepSwitchRoleToggle" class="switch-role-toggle" aria-pressed="false">↔ Swap attacker / defender</button></div><p class="panel-desc">Choose an attacking Pokémon and one of its damaging learnset moves. Set the attacker EVs and each switch-in Pokémon's defensive EVs individually. Weather and terrain only affect moves they actually influence.</p><div class="prep-switch-controls"><div><label>Attacker Pokémon <span class="switch-side-label">(${switchAttackerSide==='your'?'Your Team':'Opponent Team'})</span></label><select id="prepSwitchMon">${switchAttackerMons.map(m=>`<option value="${esc(m.species)}" ${m.species===switchMon?.species?'selected':''}>${esc(displaySpecies(m))}</option>`).join('')}</select></div><div><label>Damaging Move</label><select id="prepSwitchMove"><option value="">${observedMoveOptions.length?'Select a damaging move':'Loading moves…'}</option>${observedMoveOptions.map(m=>`<option value="${esc(m)}" ${norm(m)===norm(defaultMove)?'selected':''}>${esc(m)}</option>`).join('')}</select></div><div id="prepSwitchHitsField" style="display:none"><label>Number of Hits</label><select id="prepSwitchHits"><option value="">Auto</option></select></div></div><div class="prep-item-controls"><div><label>Attacker Item</label>${switchItemSelect('prepSwitchAtkItem',switchAtkItem,'offensive')}</div><div><label>Switch-In Item</label>${switchItemSelect('prepSwitchDefItem',switchDefItem,'defensive')}</div><div><label>Attacker EVs</label><button type="button" id="prepSwitchAtkEVs" class="damage-calc-primary">Set EVs</button></div><div><label>Defensive EVs</label><button type="button" id="prepSwitchAllDefEVs" class="prep-all-evs-btn">Set All EVs</button></div></div><div class="prep-item-controls"><div><label>Weather</label>${switchFieldSelect('prepSwitchWeather',switchWeather,switchWeatherOptions)}</div><div><label>Terrain</label>${switchFieldSelect('prepSwitchTerrain',switchTerrain,switchTerrainOptions)}</div></div>${switchRows}</section>`;
 
   const latestMatchesSection=matchHistoryForTeam(opponent,false).replace('<section class="panel">','<section id="prepLatestMatches" class="panel prep-selectable-section" data-prep-section="matches">');
-  return `<section class="panel"><div class="prep-hero"><div><h2>Match Prep</h2><p class="panel-desc" style="margin:0">Prepare <strong>${esc(yourTeam)}</strong> for a match against <strong>${esc(opponent)}</strong>. Match usage, scouting, recent replays and battle tools are combined here.</p></div><div class="prep-hero-controls"><div><label>Your Team</label><select id="prepYourTeam">${names.map(n=>`<option value="${esc(n)}" ${sameTeam(n,yourTeam)?'selected':''}>${esc(n)}</option>`).join('')}</select></div><div><label>Opponent</label><select id="prepOpponent">${names.filter(n=>!sameTeam(n,yourTeam)).map(n=>`<option value="${esc(n)}" ${sameTeam(n,opponent)?'selected':''}>${esc(n)}</option>`).join('')}</select></div></div><div class="prep-side-swap"><span class="prep-side-swap-label">Team sides</span><button type="button" id="prepSwapTeams" aria-label="Swap your team and opponent">↔ Swap Team</button></div></div></section>
-  <section class="panel prep-section-picker"><label for="prepSectionSelect">View Section</label><select id="prepSectionSelect"><option value="overview">Team Overview</option><option value="typechart">Type Chart</option><option value="coverage">Team Coverage</option><option value="switch">Switch-In Analyser</option><option value="speed">Speed Workbench</option><option value="matches">Replays</option></select></section>
-  <section class="panel prep-selectable-section" data-prep-section="damage"><div class="prep-calc-head"><div><h2>Damage Calculator</h2><p class="panel-desc" style="margin:0">Run a full calculation with your actual roster Pokémon, items, abilities, natures, EVs, status and weather.</p></div><div class="prep-calc-actions" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button type="button" id="prepImportShowdown" class="prep-import-set-btn">Import Showdown Set</button><button id="openDamageCalc" class="damage-calc-primary">Open Damage Calculator</button></div></div></section>
+  return `<section class="panel prep-hero-panel"><div class="prep-hero"><div><h2>Match Prep</h2><p class="panel-desc" style="margin:0">Prepare <strong>${esc(yourTeam)}</strong> for a match against <strong>${esc(opponent)}</strong>. Match usage, scouting, recent replays and battle tools are combined here.</p></div><div class="prep-hero-controls"><div><label>Your Team</label><select id="prepYourTeam">${names.map(n=>`<option value="${esc(n)}" ${sameTeam(n,yourTeam)?'selected':''}>${esc(n)}</option>`).join('')}</select></div><div><label>Opponent</label><select id="prepOpponent">${names.filter(n=>!sameTeam(n,yourTeam)).map(n=>`<option value="${esc(n)}" ${sameTeam(n,opponent)?'selected':''}>${esc(n)}</option>`).join('')}</select></div></div><div class="prep-side-swap"><span class="prep-side-swap-label">Team sides</span><button type="button" id="prepSwapTeams" aria-label="Swap your team and opponent">↔ Swap Team</button></div></div></section>
+  <section class="panel prep-section-picker">
+    <div class="prep-section-tabs" id="prepSectionTabs" role="tablist" aria-label="Match Prep sections">
+      <button type="button" class="prep-section-tab" data-section="overview" role="tab">Team Overview</button>
+      <button type="button" class="prep-section-tab" data-section="typechart" role="tab">Type Chart</button>
+      <button type="button" class="prep-section-tab" data-section="coverage" role="tab">Team Coverage</button>
+      <button type="button" class="prep-section-tab" data-section="switch" role="tab">Switch-In Analyser</button>
+      <button type="button" class="prep-section-tab" data-section="speed" role="tab">Speed Workbench</button>
+      <button type="button" class="prep-section-tab" data-section="matches" role="tab">Replays</button>
+    </div>
+  </section>
   <section id="prepTeamOverview" class="panel prep-selectable-section" data-prep-section="overview">
     <div class="team-overview-head">
       <div><h2 id="prepTeamOverviewTitle">Team Overview</h2><p class="panel-desc" style="margin:0">Your team and the opponent are shown together. Click any Pokémon to view Usage Stats and Scouting. Both sides expose the same matchup information.</p></div>
@@ -2587,20 +1602,21 @@ async function render(){
       return;
     }
 
-    // Section picker: Damage Calculator stays visible; the other sections are shown one at a time.
-    const prepSectionSelect=document.getElementById('prepSectionSelect');
-    const prepSelectableSections=Array.from(document.querySelectorAll('.prep-selectable-section[data-prep-section]')).filter(el=>el.dataset.prepSection!=='damage');
+    // Section picker: sections are shown one at a time.
+    const prepSectionTabs=Array.from(document.querySelectorAll('.prep-section-tab'));
+    const prepSelectableSections=Array.from(document.querySelectorAll('.prep-selectable-section[data-prep-section]'));
     const showPrepSection=(value)=>{
       const next=value||'overview';
       STATE.prepSection=next;
       prepSelectableSections.forEach(section=>{ section.hidden=section.dataset.prepSection!==next; });
+      prepSectionTabs.forEach(tab=>{
+        const active=tab.dataset.section===next;
+        tab.classList.toggle('active',active);
+        tab.setAttribute('aria-selected',active?'true':'false');
+      });
     };
-    if(prepSectionSelect){
-      prepSectionSelect.value=STATE.prepSection||'overview';
-      prepSectionSelect.addEventListener('change',()=>showPrepSection(prepSectionSelect.value));
-      showPrepSection(STATE.prepSection||prepSectionSelect.value||'overview');
-    }
-    document.getElementById('prepImportShowdown')?.addEventListener('click',()=>window.openShowdownImportModal());
+    prepSectionTabs.forEach(tab=>tab.addEventListener('click',()=>showPrepSection(tab.dataset.section)));
+    showPrepSection(STATE.prepSection||'overview');
 
     // Type Chart: toggle between Defensive and Offensive matrices.
     {
@@ -2626,12 +1642,6 @@ async function render(){
     }
 
     // Match Prep opponent cards open their detailed scouting information in a modal popout.
-    document.querySelectorAll('[data-prep-calc]').forEach(btn=>btn.addEventListener('click',e=>{
-      e.preventDefault(); e.stopPropagation();
-      const species=btn.getAttribute('data-prep-calc')||'';
-      try{ window.openDamageCalcModal({defenderTeam:STATE.prepOpponent,defender:species}); }
-      catch(err){ console.error('Could not open calculator for Pokémon:',err); alert('Could not open the Damage Calculator: '+(err?.message||err)); }
-    }));
     document.querySelectorAll('.prep-popout-trigger').forEach(btn=>btn.addEventListener('click',e=>{
       e.preventDefault(); e.stopPropagation();
       const card=btn.closest('.prep-opponent-popout');
@@ -2639,8 +1649,6 @@ async function render(){
       const existing=document.getElementById('prepOpponentDetailModal');
       if(existing)existing.remove();
       const species=card.dataset.prepPopout||'';
-      const cardSide=card.dataset.prepTeam==='your'?'your':'opponent';
-      const calcDefenderTeam=cardSide==='your'?STATE.prepYourTeam:STATE.prepOpponent;
       const title=displaySpecies({species})||card.querySelector('.prep-card-title strong')?.textContent||species||'Opponent Pokémon';
       const spriteHtml=card.querySelector('.prep-popout-trigger img')?.outerHTML||'';
       const cardTypes=card.querySelector('.prep-inline-types')?.innerHTML||'';
@@ -2679,10 +1687,9 @@ async function render(){
       const modal=document.createElement('div');
       modal.id='prepOpponentDetailModal';
       modal.className='prep-detail-modal';
-      modal.innerHTML=`<div class="prep-detail-backdrop"></div><div class="prep-detail-dialog" role="dialog" aria-modal="true" aria-label="${esc(title)}"><button type="button" class="prep-detail-close" aria-label="Close">×</button><div class="prep-detail-summary-row"><div class="prep-card-head"><div>${spriteHtml}</div><div class="prep-detail-title"><h2>${esc(title)}</h2><div class="prep-detail-types">${cardTypes||'<span class="small">Typing loading…</span>'}</div></div></div><div class="prep-popup-nav"><div class="prep-mode-tabs"><button type="button" class="prep-mode-tab active" data-mode="team">Pokémon Data</button><button type="button" class="prep-mode-tab" data-mode="opponent">Analysis</button></div><button type="button" class="damage-calc-primary prep-popup-calc" id="prepPopupCalc">Calc vs this Pokémon</button></div></div><div id="prepModeContent">${teamOverview}</div></div>`;
+      modal.innerHTML=`<div class="prep-detail-backdrop"></div><div class="prep-detail-dialog" role="dialog" aria-modal="true" aria-label="${esc(title)}"><button type="button" class="prep-detail-close" aria-label="Close">×</button><div class="prep-detail-summary-row"><div class="prep-card-head"><div>${spriteHtml}</div><div class="prep-detail-title"><h2>${esc(title)}</h2><div class="prep-detail-types">${cardTypes||'<span class="small">Typing loading…</span>'}</div></div></div><div class="prep-popup-nav"><div class="prep-mode-tabs"><button type="button" class="prep-mode-tab active" data-mode="team">Pokémon Data</button><button type="button" class="prep-mode-tab" data-mode="opponent">Analysis</button></div></div></div><div id="prepModeContent">${teamOverview}</div></div>`;
       document.body.appendChild(modal);
       requestAnimationFrame(()=>modal.classList.add('open'));
-      modal.querySelector('#prepPopupCalc')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();openDamageCalcModal({defenderTeam:calcDefenderTeam,defender:species});});
       const close=()=>{if(modal.dataset.closing==='1')return;modal.dataset.closing='1';modal.classList.remove('open');setTimeout(()=>modal.remove(),180);document.removeEventListener('keydown',onKey);};
       const onKey=e=>{if(e.key==='Escape')close();};
       modal.querySelector('.prep-detail-close').addEventListener('click',close);
@@ -2749,7 +1756,7 @@ async function render(){
     }));
 
 $('prepYourTeam')?.addEventListener('change',async e=>{
-      STATE.prepSection=$('prepSectionSelect')?.value||STATE.prepSection||'overview';
+      STATE.prepSection=STATE.prepSection||'overview';
       STATE.prepYourTeam=e.target.value;
       STATE.prepOpponent=nextScheduledOpponent(STATE.prepYourTeam)||teamNames().find(n=>!sameTeam(n,STATE.prepYourTeam))||'';
       STATE.prepSwitchMon='';STATE.prepSwitchMove='';STATE.prepSwitchHits='';STATE.prepSwitchAtkItem='';STATE.prepSwitchDefItem='';STATE.prepSwitchEVsByMon={};STATE.prepCoverageMon='';
@@ -2761,14 +1768,14 @@ $('prepYourTeam')?.addEventListener('change',async e=>{
       if(!previousYour || !previousOpponent || sameTeam(previousYour,previousOpponent)) return;
       STATE.prepYourTeam=previousOpponent;
       STATE.prepOpponent=previousYour;
-      STATE.prepSection=$('prepSectionSelect')?.value||STATE.prepSection||'overview';
+      STATE.prepSection=STATE.prepSection||'overview';
       STATE.prepSwitchMon='';STATE.prepSwitchMove='';STATE.prepSwitchHits='';STATE.prepSwitchAtkItem='';STATE.prepSwitchDefItem='';STATE.prepSwitchEVsByMon={};STATE.prepCoverageMon='';
       if($('teamSelect')) $('teamSelect').value=STATE.prepOpponent;
       const u=new URL(location.href);u.searchParams.set('team',STATE.prepOpponent);history.replaceState(null,'',u);
       await render();
     });
     $('prepOpponent')?.addEventListener('change',async e=>{
-      STATE.prepSection=$('prepSectionSelect')?.value||STATE.prepSection||'overview';
+      STATE.prepSection=STATE.prepSection||'overview';
       STATE.prepOpponent=e.target.value;STATE.prepSwitchMon='';STATE.prepSwitchMove='';STATE.prepSwitchHits='';STATE.prepSwitchAtkItem='';STATE.prepSwitchDefItem='';STATE.prepSwitchEVsByMon={};STATE.prepCoverageMon='';
       if($('teamSelect')) $('teamSelect').value=e.target.value;
       const u=new URL(location.href);u.searchParams.set('team',e.target.value);history.replaceState(null,'',u);
@@ -3316,7 +2323,6 @@ requestAnimationFrame(()=>host.classList.add('open'));
     // Build a local type map for switch-in cards and calculate once after render.
     const typeMapForSpecies={};
     for(const m of await franchiseMons(switchDefenderTeamName)){typeMapForSpecies[m.species]=await fetchTypes(m.species);}
-    $('openDamageCalc')?.addEventListener('click',e=>{e.preventDefault();openDamageCalcModal({attackerTeam:STATE.prepOpponent,defenderTeam:STATE.prepYourTeam});});
     await populateSwitchMoveSelect(STATE.prepSwitchMove||'');
     if($('prepSwitchMove')?.value) await renderSwitchResults();
     return;
@@ -3341,7 +2347,7 @@ async function openPokemonScoutPopup(team,key){
             <div class="muted">${m.replays.size} replays · ${m.appearances} appearances</div>
           </div>
         </div>
-        <div class="scout-popup-actions"><button class="damage-calc-primary scout-calc-button" id="scoutCalcOpen" type="button">Calc vs this Pokémon</button><button class="scout-popup-close" id="scoutPopupClose" type="button">Close ✕</button></div>
+        <div class="scout-popup-actions"><button class="scout-popup-close" id="scoutPopupClose" type="button">Close ✕</button></div>
       </div>
 
       <div class="scout-popup-section">
@@ -3384,13 +2390,6 @@ async function openPokemonScoutPopup(team,key){
     setTimeout(()=>host.remove(),160);
   };
   host.querySelector('#scoutPopupClose').addEventListener('click',close);
-  host.querySelector('#scoutCalcOpen')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();
-    // The calculator should replace the scout popup, not sit on top of it.
-    // Close/remove the popup first so closing the calculator returns to the
-    // underlying Team Overview page rather than reopening the scout card.
-    close();
-    requestAnimationFrame(()=>openDamageCalcModal({defenderTeam:team,defender:m.species}));
-  });
   host.querySelector('#scoutPopupOverlay').addEventListener('click',e=>{
     if(e.target.id==='scoutPopupOverlay')close();
   });
@@ -3518,9 +2517,19 @@ async function load(){
   // This is the default whenever Match Prep is opened without an explicit
   // ?team=... parameter, regardless of which page the user came from.
   function nextOpponentForTeam(team){
-    const rounds=Array.isArray(STATE.settings?.fixture?.rounds) ? STATE.settings.fixture.rounds : [];
     const key=v=>teamKey(v);
     const target=key(team);
+    const finals=window.SBL?.finals?.resolveMatchups ? window.SBL.finals.resolveMatchups(STATE.settings?.finals||{}) : null;
+    if(finals && finals.status!=='inactive') {
+      for(const round of (finals.rounds||[])){
+        for(const match of (round.matches||[])){
+          if(match.winner || !match.teamA || !match.teamB) continue;
+          if(key(match.teamA)===target) return match.teamB;
+          if(key(match.teamB)===target) return match.teamA;
+        }
+      }
+    }
+    const rounds=Array.isArray(STATE.settings?.fixture?.rounds) ? STATE.settings.fixture.rounds : [];
     const played=(week,home,away)=>Object.values(STATE.replays||{}).some(r=>{
       if(!r || String(r.week||'Unassigned')!==String(week) || !r.players) return false;
       const a=key(teamFor(r.players.p1)), b=key(teamFor(r.players.p2));
@@ -3553,7 +2562,7 @@ async function load(){
 
 
 $('teamSelect').addEventListener('change',async()=>{
-  STATE.prepSection=$('prepSectionSelect')?.value||STATE.prepSection||'overview';
+  STATE.prepSection=STATE.prepSection||'overview';
   const selected=$('teamSelect').value;
   if(selected){
     STATE.prepOpponent=selected;
@@ -3618,32 +2627,3 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 
 /* ===== End block 4 ===== */
-
-/* ===== Extracted inline Match Prep block 5 ===== */
-
-(function(){
-  const calculatorKeys = [
-    'sbl_damage_calculator_state_v1',
-    'sbl_damage_calculator_last_session_v1',
-    'damageCalcState',
-    'damageCalcImportedSet',
-    'damageCalcSession',
-    'damageCalcSavedState'
-  ];
-
-  function clearCalculatorBrowserState(){
-    calculatorKeys.forEach(function(key){
-      try{ localStorage.removeItem(key); }catch(e){}
-      try{ sessionStorage.removeItem(key); }catch(e){}
-    });
-  }
-
-  // Clear synchronously as soon as this script executes.
-  clearCalculatorBrowserState();
-
-  // Also clear on a real page reload/navigation so a previous calculator
-  // session can never become the default after refresh.
-  window.addEventListener('pageshow', clearCalculatorBrowserState);
-})();
-
-/* ===== End block 5 ===== */

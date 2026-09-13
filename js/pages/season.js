@@ -11,6 +11,7 @@
   const IS_ADMIN_PAGE = document.body.dataset.admin === 'true';
   const POLL_MS = 10000;
   let adminUser = null;
+  let adminIsCommissioner = false;
   let loadingFromRemote = false;
 
   function requireAdmin(){
@@ -24,10 +25,17 @@
       if(error) throw error;
       const { sharedState, replays, publishedRosters } = SBL.replays.partition(data);
       const snap=SBL.seasons.getSnapshot(sharedState || {});
-      const titleEl=document.getElementById('seasonTitle'); if(titleEl) titleEl.textContent=`SBL ${snap.name}: National Dex Draft`;
+      const titleEl=document.getElementById('seasonTitle');
+      const subTitleEl=document.querySelector('#app > header .sub');
+      const finalsPreview=SBL.finals.normalizeFinalsState(snap.settings?.finals);
+      const finalsReleased=finalsPreview.status !== 'inactive' && Array.isArray(finalsPreview.rounds) && finalsPreview.rounds.length > 0;
+      if(titleEl) titleEl.textContent=finalsReleased ? `SBL ${snap.name}: Finals` : `SBL ${snap.name}: National Dex Draft`;
+      if(subTitleEl) subTitleEl.textContent=finalsReleased ? 'Season Finals · single elimination.' : 'Weekly fixture and conference standings.';
+      try { localStorage.setItem('sbl_finals_nav_released', finalsReleased ? '1' : '0'); } catch (_) {}
       STATE.replays = snap.archived ? snap.replays : replays;
       STATE.teamMap = snap.teamMap || {};
       STATE.settings = Object.assign({caseInsensitiveNames:true, teamLogos:{}, bannerMode:'top', bannerTeam:'', rosters:{}}, snap.settings || {});
+      STATE.settings.finals = SBL.finals.normalizeFinalsState(STATE.settings.finals);
 
       // The Rosters page treats __dashboard_state__.settings.rosters as the
       // primary published roster, with __rosters__ as the compatibility fallback.
@@ -131,7 +139,7 @@
     const {data, error} = await supabase.auth.getSession();
     if(error){ showAdminLogin(); return false; }
     if(!data.session){ showAdminLogin(); return false; }
-    const profile = await SBL.profiles.get(data.session.user.id, 'team_name', supabase);
+    const profile = await SBL.profiles.get(data.session.user.id, 'team_name,is_commissioner', supabase);
      if(!profile?.team_name){
       // Logged in but hasn't claimed/been assigned a team yet — no access to
       // the rest of the site until that's done from the login page.
@@ -139,6 +147,7 @@
       return false;
     }
     adminUser = data.session.user;
+    adminIsCommissioner = !!profile?.is_commissioner;
     document.getElementById('app').style.display = '';
     return true;
   }
@@ -1988,8 +1997,88 @@
     </div>`;
   }
 
+  function renderFinalsPanel(){
+    const finals=SBL.finals.resolveMatchups(STATE.settings.finals||SBL.finals.defaultFinalsState());
+    if(finals.status==='inactive' || !finals.rounds.length) return `<div class="panel finals-panel"><div class="finals-kicker">FINALS MODE</div><h2>Finals</h2><div class="note">The regular season is still active. Finals will appear here once the commissioner generates the playoff bracket.</div></div>`;
+    const statusLabel=finals.champion?'CHAMPION':finals.status==='complete'?'COMPLETE':finals.status==='live'?'LIVE':'SCHEDULED';
+    const seedByTeam=new Map((finals.seeds||[]).map(s=>[s.team,s.seed]));
+    const playin=finals.rounds.find(r=>r.key==='playin');
+    const playinsComplete=!!playin && playin.matches.every(m=>m.winner);
+    const playinWinners=playin?.matches.filter(m=>m.winner).map(m=>({team:m.winner,seed:seedByTeam.get(m.winner)||null}))||[];
+    const winnerOrder=playinWinners.slice().sort((a,b)=>b.seed-a.seed);
+    const roundHtml=finals.rounds.map((r,ri)=>{
+      const isPlayin=r.key==='playin';
+      const matches=r.matches;
+      const matchHtml=matches.map((m,mi)=>{
+        const a=m.teamA||'TBD', b=m.teamB||'TBD', winner=m.winner;
+        const seedA=seedByTeam.get(a)||m.seedA, seedB=seedByTeam.get(b)||m.seedB;
+        const ready=a!=='TBD'&&b!=='TBD';
+        const roundLabel=isPlayin?`PI ${mi+1}`:r.key==='quarterfinals'?`QF ${mi+1}`:r.key==='semifinals'?`SF ${mi+1}`:'FINAL';
+        return `<article class="finals-bracket-match ${winner?'is-complete':''} ${ready?'is-ready':'is-tbd'}" data-finals-match="${SBL.pokemon.escapeHtml(m.id)}" data-finals-round="${SBL.pokemon.escapeHtml(r.key)}" tabindex="0" role="button" title="Click to view matchup${adminIsCommissioner?' and enter score':''}">
+          <div class="finals-match-top"><span class="finals-match-number">${roundLabel}</span><span class="finals-bracket-match-status">${winner?'FINAL':ready?'READY':'TBD'}</span></div>
+          <div class="finals-bracket-team ${winner===a?'is-winner':''}"><span class="finals-bracket-seed">${seedA?`#${seedA}`:'—'}</span><span class="finals-bracket-name ${a==='TBD'?'tbd':''}">${SBL.pokemon.escapeHtml(a)}</span><span class="finals-team-score">${m.scoreA!=null?m.scoreA:''}</span></div>
+          <div class="finals-bracket-team ${winner===b?'is-winner':''}"><span class="finals-bracket-seed">${seedB?`#${seedB}`:'—'}</span><span class="finals-bracket-name ${b==='TBD'?'tbd':''}">${SBL.pokemon.escapeHtml(b)}</span><span class="finals-team-score">${m.scoreB!=null?m.scoreB:''}</span></div>
+          ${adminIsCommissioner && ready ? `<div class="finals-admin-inline" data-finals-inline-editor>
+            <label>Winner</label>
+            <select class="finals-winner-select" data-finals-winner aria-label="Winner for ${SBL.pokemon.escapeHtml(a)} vs ${SBL.pokemon.escapeHtml(b)}">
+              <option value="">Select winner</option>
+              <option value="${SBL.pokemon.escapeHtml(a)}" ${winner===a?'selected':''}>${SBL.pokemon.escapeHtml(a)}</option>
+              <option value="${SBL.pokemon.escapeHtml(b)}" ${winner===b?'selected':''}>${SBL.pokemon.escapeHtml(b)}</option>
+            </select>
+            <button type="button" class="ghost small" data-finals-save-winner>Save</button>
+          </div>` : ''}
+        </article>`;
+      }).join('');
+      return `<section class="finals-bracket-column finals-round-${ri+1}" data-round="${r.key}"><div class="finals-bracket-column-head"><div><div class="finals-bracket-column-title">${SBL.pokemon.escapeHtml(r.name)}</div><div class="finals-bracket-column-date">${SBL.pokemon.escapeHtml(r.label)}</div></div><span class="finals-round-count">${matches.length} ${matches.length===1?'match':'matches'}</span></div><div class="finals-bracket-matches">${matchHtml}</div></section>`;
+    }).join('');
+    const playinNote=playinsComplete?`Play-in winners are ordered from lowest seed to highest seed: #${winnerOrder.map(x=>x.seed).join(' → #')}. They then face #1, #2, #3 and #4 respectively.`:`${4-playinWinners.length} play-ins remaining. Once all four are complete, winners are reordered by seed and paired against #1–#4.`;
+    return `<div class="panel finals-panel"><div class="finals-hero"><div><div class="finals-kicker">FINALS MODE</div><h2>Season Finals</h2><div class="note">12 teams · single elimination · click a matchup for score and details${adminIsCommissioner?' · commissioner score entry enabled':''}</div></div><span class="finals-mode-badge ${finals.champion?'champion':finals.status}">${statusLabel}</span></div><div class="finals-format-strip"><div><strong>Play-In</strong><span>Seeds 5–12 · 4 matches</span></div><div><strong>Quarterfinals</strong><span>Seeds 1–4 enter here</span></div><div><strong>Semifinals</strong><span>2 matches</span></div><div><strong>Grand Final</strong><span>1 match</span></div></div><div class="finals-bracket-note"><strong>Play-in progression</strong><span>${SBL.pokemon.escapeHtml(playinNote)}</span></div><div class="finals-bracket-shell"><div class="finals-bracket-grid">${roundHtml}</div></div>${finals.champion?`<div class="finals-bracket-champion"><div class="finals-bracket-champion-label">SBL CHAMPION</div><span class="finals-bracket-champion-name">${SBL.pokemon.escapeHtml(finals.champion)}</span></div>`:''}<div class="note finals-click-hint">Click any matchup to open its score card.</div></div>`;
+  }
+
+  function openFinalsMatch(roundKey, matchId){
+    const finals=SBL.finals.resolveMatchups(STATE.settings.finals||SBL.finals.defaultFinalsState());
+    const round=finals.rounds.find(r=>r.key===roundKey), match=round?.matches.find(m=>m.id===matchId); if(!match)return;
+    const a=match.teamA||'TBD', b=match.teamB||'TBD', editable=adminIsCommissioner&&a!=='TBD'&&b!=='TBD';
+    const modal=document.getElementById('auditModal'); if(!modal)return;
+    const scoreEditor=editable ? `<div class="finals-modal-score-grid"><div class="finals-score-team"><label class="finals-score-team-name" for="finalsModalScoreA">${SBL.pokemon.escapeHtml(a)}</label><input class="score-number" type="number" min="0" step="1" inputmode="numeric" id="finalsModalScoreA" value="${match.scoreA??''}" aria-label="${SBL.pokemon.escapeHtml(a)} score"></div><div class="finals-score-team"><label class="finals-score-team-name" for="finalsModalScoreB">${SBL.pokemon.escapeHtml(b)}</label><input class="score-number" type="number" min="0" step="1" inputmode="numeric" id="finalsModalScoreB" value="${match.scoreB??''}" aria-label="${SBL.pokemon.escapeHtml(b)} score"></div></div>` : `<div class="finals-modal-score-readonly"><div><span>${SBL.pokemon.escapeHtml(a)}</span><strong>${match.scoreA??'—'}</strong></div><div><span>${SBL.pokemon.escapeHtml(b)}</span><strong>${match.scoreB??'—'}</strong></div></div>`;
+    modal.innerHTML=`<div class="audit-overlay" id="finalsScoreOverlay"><div class="audit-box finals-score-modal"><button class="modal-close" id="finalsScoreClose" aria-label="Close">×</button><div class="finals-kicker">${SBL.pokemon.escapeHtml(round.name)}</div><h3>${SBL.pokemon.escapeHtml(a)} <span class="finals-modal-vs">vs</span> ${SBL.pokemon.escapeHtml(b)}</h3>${scoreEditor}${match.winner?`<div class="finals-modal-winner">Winner: <strong>${SBL.pokemon.escapeHtml(match.winner)}</strong></div>`:''}${editable?'<div class="note">Commissioner score entry only. The higher score becomes the winner automatically.</div>':'<div class="note">Scores are read-only. Only authorised commissioners can enter or change Finals scores.</div>'}${editable?'<div class="foot-actions"><button class="primary" id="saveFinalsModalScore">Save score</button></div>':''}</div></div>`;
+    updateModalPageLock();
+    document.getElementById('finalsScoreClose')?.addEventListener('click',closeAudit); document.getElementById('finalsScoreOverlay')?.addEventListener('click',e=>{if(e.target.id==='finalsScoreOverlay')closeAudit();});
+    document.getElementById('saveFinalsModalScore')?.addEventListener('click',async()=>{if(!adminIsCommissioner)return;const btn=document.getElementById('saveFinalsModalScore'), scoreA=document.getElementById('finalsModalScoreA')?.value, scoreB=document.getElementById('finalsModalScoreB')?.value;if(scoreA===''||scoreB===''){alert('Enter both scores.');return;}btn.disabled=true;try{STATE.settings.finals=SBL.finals.setResult(STATE.settings.finals,roundKey,matchId,{scoreA,scoreB});await SBL.replays.saveSharedState({teamMap:STATE.teamMap,settings:STATE.settings},supabase);closeAudit();renderSeason();}catch(err){alert('Could not save score: '+err.message);btn.disabled=false;}});
+  }
+
   function renderSeason(){
-    contentEl.innerHTML = renderFixturePanel() + standingsPanelHtml();
+    const finalsState = SBL.finals.normalizeFinalsState(STATE.settings?.finals || SBL.finals.defaultFinalsState());
+    const finalsReleased = finalsState.status !== 'inactive' && Array.isArray(finalsState.rounds) && finalsState.rounds.length > 0;
+    // Once Finals are released, the public Season page becomes the Finals page:
+    // regular-season ladder and fixture are intentionally hidden so there is one
+    // clear source of truth for the current competition.
+    contentEl.innerHTML = finalsReleased
+      ? renderFinalsPanel()
+      : renderFixturePanel() + standingsPanelHtml();
+
+    if(finalsReleased){
+      contentEl.querySelectorAll('.finals-bracket-match').forEach(match=>{
+        const open=()=>openFinalsMatch(match.dataset.finalsRound,match.dataset.finalsMatch);
+        match.addEventListener('click',e=>{if(e.target.closest('[data-finals-inline-editor]'))return;open();});
+        match.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){if(e.target.closest('[data-finals-inline-editor]'))return;e.preventDefault();open();}});
+      });
+      if(adminIsCommissioner){
+        contentEl.querySelectorAll('[data-finals-save-winner]').forEach(btn=>btn.addEventListener('click',async e=>{
+          e.stopPropagation();
+          const editor=btn.closest('[data-finals-inline-editor]');
+          const matchEl=btn.closest('[data-finals-bracket-match]');
+          const winner=editor?.querySelector('[data-finals-winner]')?.value;
+          if(!winner){alert('Select a winner.');return;}
+          btn.disabled=true;
+          try{
+            STATE.settings.finals=SBL.finals.setResult(STATE.settings.finals,matchEl.dataset.finalsRound,matchEl.dataset.finalsMatch,{winner});
+            await SBL.replays.saveSharedState({teamMap:STATE.teamMap,settings:STATE.settings},supabase);
+            renderSeason();
+          }catch(err){alert('Could not save winner: '+err.message);btn.disabled=false;}
+        }));
+      }
+    }
 
     const weekSelect = document.getElementById('fixtureWeekSelect');
     if(weekSelect){
@@ -2423,6 +2512,7 @@
       console.warn('Could not load Pokémon typing data; cached data will be used.',e);
     }
   }
+
 
   // ---------- init ----------
   document.addEventListener('keydown', (e)=>{

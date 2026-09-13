@@ -30,6 +30,7 @@
   let tradeLimits = [];
   let activeTradeSeason = new Date().getFullYear();
   let activeTab = 'myteam';
+  let themePickerState = { group:'All' };
   let draft = { target:'', offered:new Set(), requested:new Set(), faQuery:'' };
   let statusMsg = '';
     // Shared trade status helper. The trade composer is rendered dynamically,
@@ -1278,52 +1279,45 @@
     const status = String(profile?.status || 'unknown').toLowerCase();
     const statusLabel = status === 'approved' ? 'Approved' : status === 'pending' ? 'Pending approval' : status === 'rejected' ? 'Rejected' : status;
     const savedTheme = window.SBLTheme?.getSavedId?.() || document.documentElement.dataset.sblTheme || 'amber';
-    const themes = Array.isArray(window.SBL_THEMES) ? window.SBL_THEMES.slice() : [];
+    const themes = Array.isArray(window.SBLTheme?.list?.()) ? window.SBLTheme.list() : (window.SBL_THEMES || []).slice();
     if(savedTheme==='custom'){ const c=window.SBLTheme?.resolve?.('custom'); if(c) themes.push(c); }
-    const currentTheme = themes.find(t => t.id === savedTheme) || themes[0];
-    const themeTone = theme => {
-      const hex=String(theme?.bg||'').replace('#','');
-      if(hex.length!==6) return 'Balanced';
-      const rgb=[0,2,4].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4));
-      const lum=.2126*rgb[0]+.7152*rgb[1]+.0722*rgb[2];
-      return lum>.55?'Light':lum<.16?'Dark':'Balanced';
-    };
+    const currentTheme = themes.find(t => t.id === savedTheme) || window.SBLTheme?.resolve?.(savedTheme) || themes[0];
+    let pickerThemeId = currentTheme?.id || savedTheme;
     const themeGroup = theme => {
-      if(String(theme?.group || '').toLowerCase() === 'pokemon') return 'Pokemon';
-      if(theme?.group) return theme.group;
-      const hex = String(theme?.accent || '').replace('#','');
-      if(hex.length !== 6) return 'Other';
-      const r=parseInt(hex.slice(0,2),16)/255, g=parseInt(hex.slice(2,4),16)/255, b=parseInt(hex.slice(4,6),16)/255;
-      const max=Math.max(r,g,b), min=Math.min(r,g,b), d=max-min;
-      if(d < 0.08) return 'Neutral';
-      let h=0;
-      if(max===r) h=((g-b)/d)%6; else if(max===g) h=(b-r)/d+2; else h=(r-g)/d+4;
-      h=(h*60+360)%360;
-      if(h < 15 || h >= 345) return 'Red';
-      if(h < 45) return 'Orange';
-      if(h < 70) return 'Yellow';
-      if(h < 165) return 'Green';
-      if(h < 195) return 'Cyan';
-      if(h < 255) return 'Blue';
-      if(h < 290) return 'Purple';
-      if(h < 345) return 'Pink';
-      return 'Other';
+      const id=String(theme?.id||'').toLowerCase();
+      const declared=String(theme?.group||'').toLowerCase();
+      if(['pikachu','charizard','blastoise','venusaur','gengar','umbreon','lucario'].includes(id) || declared==='pokemon') return 'Pokémon';
+      if(['cyberpunk-neon','synthwave','vaporwave','glitch','crt'].includes(id) || ['cyber','crazy'].includes(declared)) return 'Experimental';
+      if(['galaxy','nebula'].includes(id) || declared==='cosmic') return 'Cosmic';
+      if(['sakura','rose','rosepaper','rose-light','fuchsia','lavender','lavender-light','violet','dusk','indigo','matcha'].includes(id) || declared==='pretty') return 'Expressive';
+      if(['paper','ivory','porcelain','snowfall','cloud','linen','sage-light','mint-light','sky-light','lavender-light','rose-light'].includes(id) || declared==='light' || declared==='premium') return 'Light';
+      if(['amber','ember','orange','gold','crimson','rose'].includes(id)) return 'Warm';
+      if(['emerald','forest','jade','mint','teal','aqua','matcha'].includes(id)) return 'Nature';
+      if(['cyan','arctic','deepsea','sky','azure','cobalt','navy','ocean','sapphire','steelblue'].includes(id)) return 'Cool';
+      if(['slate','onyx','graphite','monochrome','midnight'].includes(id)) return 'Neutral';
+      if(['red','orange','yellow'].includes(declared)) return 'Warm';
+      if(['green'].includes(declared)) return 'Nature';
+      if(['cyan','blue'].includes(declared)) return 'Cool';
+      if(['purple','pink'].includes(declared)) return 'Expressive';
+      return 'Neutral';
     };
     const themeGroups = themes.reduce((groups,t)=>{ const g=themeGroup(t); (groups[g] ||= []).push(t); return groups; }, {});
-    const themeGroupOrder=['Light','Premium','Cyber','Crazy','Red','Orange','Yellow','Green','Cyan','Blue','Purple','Pink','Neutral','Pokemon','Unhinged','Elemental','Other'];
-    const savedThemeGroup = savedTheme==='custom' ? 'Other' : themeGroup(currentTheme);
-    const initialTone = savedTheme==='custom' ? themeTone(currentTheme) : themeTone(currentTheme);
-    const initialThemeGroup = savedTheme==='custom' ? 'Other' : (themeGroups[savedThemeGroup]?.length ? savedThemeGroup : themeGroupOrder.find(g=>themeGroups[g]?.length) || 'Light');
+    const preferredGroupOrder=['Essentials','Neutral','Warm','Nature','Cool','Expressive','Light','Cosmic','Pokémon','Experimental'];
+    // Essentials is a curated, broad starting point rather than another colour family.
+    themeGroups.Essentials = themes.filter(t=>['amber','slate','ivory','emerald','cobalt','violet','paper','snowfall'].includes(t.id));
+    const themeGroupOrder=[...preferredGroupOrder.filter(group=>themeGroups[group]?.length),...Object.keys(themeGroups).filter(group=>!preferredGroupOrder.includes(group)).sort()];
+    const availableGroups = new Set(['All','Recent','Favorites',...themeGroupOrder]);
+    if(!availableGroups.has(themePickerState.group)) themePickerState.group='All';
+    const initialThemeGroup = themePickerState.group;
     const spriteStyle = window.SBL?.pokemon?.getSpriteStyle?.() || document.documentElement.dataset.sblSpriteStyle || '3d';
     const favoriteSet = new Set(themeFavorites());
     const recentSet = new Set(themeRecent());
-    const renderThemeSwatches = (group, query='', tone='All') => {
+    const renderThemeSwatches = group => {
       let list = group==='Favorites' ? themes.filter(t=>favoriteSet.has(t.id)) : group==='Recent' ? themes.filter(t=>recentSet.has(t.id)) : (themeGroups[group] || themes);
-      if(tone && tone!=='All') list=list.filter(t=>themeTone(t)===tone);
-      const q=String(query||'').trim().toLowerCase();
-      if(q) list=list.filter(t=>`${t.name} ${t.id} ${t.group||''}`.toLowerCase().includes(q));
-      if(!list.length) return '<div class="empty-state">No themes match those filters.</div>';
-      return `<div class="account-theme-group"><div class="account-theme-group-label">${themeEscape(group==='All'?'Theme library':group)} · ${list.length}</div><div class="account-theme-swatch-grid">${list.map(t => `<button type="button" class="theme-swatch${t.id===savedTheme?' active':''}" data-theme-id="${themeEscape(t.id)}" aria-label="Use ${themeEscape(t.name)} theme"><span class="preview" style="background:${themeEscape(t.bg)};border-color:${themeEscape(t.border)}"><span class="preview-nav" style="background:${themeEscape(t.accent)}"></span><span style="background:${themeEscape(t.panel)}"></span><span style="background:${themeEscape(t.panelAlt)}"></span><i style="background:${themeEscape(t.accent2||t.accent)}"></i></span><span class="label-row"><span>${themeEscape(t.name)}<small>${themeTone(t)}${t.group?' · '+themeEscape(t.group):''}</small></span><span class="theme-card-actions"><span class="favorite-dot${favoriteSet.has(t.id)?' on':''}" data-favorite-id="${themeEscape(t.id)}" title="Favorite">★</span><span class="check">✓</span></span></span></button>`).join('')}</div></div>`;
+      if(group==='All') list=themes;
+      if(group==='Essentials') list=themeGroups.Essentials || [];
+      if(!list.length) return '<div class="empty-state">No themes here yet. Favorite a few themes and they will appear here.</div>';
+      return `<div class="account-theme-group"><div class="account-theme-group-label">${themeEscape(group==='All'?'Theme library':group)} · ${list.length}</div><div class="account-theme-swatch-grid">${list.map(t => `<button type="button" class="theme-swatch${t.id===pickerThemeId?' active':''}" data-theme-id="${themeEscape(t.id)}" aria-label="Use ${themeEscape(t.name)} theme"><span class="preview" style="background:${themeEscape(t.bg)};border-color:${themeEscape(t.border)}"><span class="preview-nav" style="background:${themeEscape(t.accent)}"></span><span style="background:${themeEscape(t.panel)}"></span><span style="background:${themeEscape(t.panelAlt)}"></span><i style="background:${themeEscape(t.accent2||t.accent)}"></i></span><span class="label-row"><span>${themeEscape(t.name)}</span><span class="theme-card-actions"><span class="favorite-dot${favoriteSet.has(t.id)?' on':''}" data-favorite-id="${themeEscape(t.id)}" title="Favorite">★</span><span class="check">✓</span></span></span></button>`).join('')}</div></div>`;
     };
     contentEl.innerHTML = `<div class="account-page">
       <div class="account-hero panel">
@@ -1364,13 +1358,10 @@
         <div class="account-card-head"><div><div class="account-card-kicker">Appearance</div><h3>Theme Studio</h3><div class="note">Browse the full theme library, favorite the good ones, randomize, or build your own.</div></div><button type="button" class="ghost theme-random-btn" id="accountRandomTheme">🎲 Random</button></div>
         <div class="account-theme-picker">
           <div class="account-theme-tools">
-            <input id="accountThemeSearch" type="search" placeholder="Search the theme library…" autocomplete="off" aria-label="Search themes">
-            <select id="accountThemeToneSelect" aria-label="Theme brightness">
-              <option value="All" ${initialTone==='Balanced'?'selected':''}>All brightness</option><option value="Light" ${initialTone==='Light'?'selected':''}>☀ Light</option><option value="Balanced" ${initialTone==='Balanced'?'selected':''}>◐ Balanced</option><option value="Dark" ${initialTone==='Dark'?'selected':''}>● Dark</option>
-            </select>
-            <select id="accountThemeGroupSelect" aria-label="Theme family">
-              <option value="All">All themes</option><option value="Recent">Recently used</option><option value="Favorites">Favorites</option>
-              ${themeGroupOrder.filter(group => themeGroups[group]?.length).map(group => `<option value="${SBL.pokemon.escapeHtml(group)}" ${group===initialThemeGroup?'selected':''}>${SBL.pokemon.escapeHtml(group)}</option>`).join('')}
+            <label class="account-theme-category-label" for="accountThemeGroupSelect">Browse by style</label>
+            <select id="accountThemeGroupSelect" aria-label="Theme category">
+              <option value="All">All themes</option><option value="Essentials">Essentials</option><option value="Recent">Recently used</option><option value="Favorites">Favorites</option>
+              ${themeGroupOrder.filter(group=>group!=='Essentials' && themeGroups[group]?.length).map(group => `<option value="${SBL.pokemon.escapeHtml(group)}" ${group===initialThemeGroup?'selected':''}>${SBL.pokemon.escapeHtml(group)}</option>`).join('')}
             </select>
           </div>
           <div class="account-theme-quick-actions"><button type="button" class="ghost" id="accountSurpriseTheme">✨ Surprise me</button><button type="button" class="ghost" id="accountCreateTheme">🎨 Create theme</button><button type="button" class="ghost" id="accountExportTheme">↗ Export</button><button type="button" class="ghost" id="accountImportTheme">↙ Import</button><input id="accountImportThemeFile" type="file" accept="application/json,.json" hidden></div>
@@ -1378,8 +1369,8 @@
             <span class="theme-swatch-preview" style="background:${SBL.pokemon.escapeHtml(currentTheme?.bg||'transparent')};border-color:${SBL.pokemon.escapeHtml(currentTheme?.border||'var(--border)')}"><i style="background:${SBL.pokemon.escapeHtml(currentTheme?.accent||'var(--amber)')}"></i><b style="background:${SBL.pokemon.escapeHtml(currentTheme?.panel||'var(--panel)')}"></b></span>
             <span id="accountThemeName">${SBL.pokemon.escapeHtml(currentTheme?.name || 'Theme')}</span>
           </div>
-          <div class="account-theme-swatches" id="accountThemeSwatches">${renderThemeSwatches(initialThemeGroup,'',initialTone)}</div>
-          <div class="note" id="accountThemeHelp">Choose a category or search the library. Your selected theme, favorites, and recent themes are remembered on this browser.</div>
+          <div class="account-theme-swatches" id="accountThemeSwatches">${renderThemeSwatches(initialThemeGroup)}</div>
+          <div class="note" id="accountThemeHelp">Choose a style category to browse. Your selected theme, favorites, and recent themes are remembered on this browser.</div>
           <div class="custom-theme-panel" id="customThemePanel" hidden>
             <div class="custom-theme-title">Custom theme creator</div><div class="custom-theme-help">Start from a theme, then tune the core palette. Your custom theme stays local to this browser.</div>
             <div class="custom-theme-grid">
@@ -1401,27 +1392,52 @@
       });
       renderAccount();
     });
-    const rerenderThemeLibrary = (group=document.getElementById('accountThemeGroupSelect')?.value || initialThemeGroup, query=document.getElementById('accountThemeSearch')?.value || '', tone=document.getElementById('accountThemeToneSelect')?.value || initialTone) => {
-      const swatches=document.getElementById('accountThemeSwatches'); if(swatches) swatches.innerHTML=renderThemeSwatches(group,query,tone);
+    const rerenderThemeLibrary = () => {
+      const swatches=document.getElementById('accountThemeSwatches');
+      if(swatches) swatches.innerHTML=renderThemeSwatches(themePickerState.group);
+    };
+    const updateCurrentTheme = theme => {
+      const current=document.getElementById('accountThemeCurrent');
+      const name=document.getElementById('accountThemeName');
+      if(current){
+        const preview=current.querySelector('.theme-swatch-preview');
+        if(preview){
+          preview.style.background=theme?.bg||'transparent';
+          preview.style.borderColor=theme?.border||'var(--border)';
+          const dot=preview.querySelector('i'); if(dot) dot.style.background=theme?.accent||'var(--amber)';
+          const surface=preview.querySelector('b'); if(surface) surface.style.background=theme?.panel||'var(--panel)';
+        }
+      }
+      if(name) name.textContent=theme?.name||'Theme';
     };
     document.getElementById('accountThemeSwatches')?.addEventListener('click', e=>{
       const fav=e.target.closest('[data-favorite-id]');
-      if(fav){ e.preventDefault(); e.stopPropagation(); window.SBLTheme?.toggleFavorite?.(fav.dataset.favoriteId); favoriteSet.clear(); themeFavorites().forEach(x=>favoriteSet.add(x)); rerenderThemeLibrary(); return; }
+      if(fav){
+        e.preventDefault(); e.stopPropagation();
+        window.SBLTheme?.toggleFavorite?.(fav.dataset.favoriteId);
+        favoriteSet.clear(); themeFavorites().forEach(x=>favoriteSet.add(x));
+        rerenderThemeLibrary();
+        return;
+      }
       const btn=e.target.closest('[data-theme-id]'); if(!btn) return;
       const theme=themes.find(t=>t.id===btn.dataset.themeId); if(!theme) return;
-      // Always rebuild the Account/Theme Studio after a theme change. The old
-      // implementation kept a closed-over savedTheme value, which could leave
-      // the picker visually one selection behind and make the previous theme
-      // appear unresponsive until a third theme was selected.
-      window.SBLTheme?.apply?.(theme.id,true);
-      renderAccount();
+      const applied=window.SBLTheme?.apply?.(theme.id,true) || theme;
+      pickerThemeId=theme.id;
+      updateCurrentTheme(applied);
+      rerenderThemeLibrary();
     });
-    document.getElementById('accountThemeGroupSelect')?.addEventListener('change', ()=>rerenderThemeLibrary());
-    document.getElementById('accountThemeToneSelect')?.addEventListener('change', ()=>rerenderThemeLibrary());
-    document.getElementById('accountThemeSearch')?.addEventListener('input', ()=>rerenderThemeLibrary());
-    const randomTheme=()=>{const pool=themes.filter(t=>t.id!==savedTheme); const t=pool[Math.floor(Math.random()*pool.length)]; if(t){window.SBLTheme?.apply?.(t.id,true); renderAccount();}};
+    document.getElementById('accountThemeGroupSelect')?.addEventListener('change', e=>{ themePickerState.group=e.target.value||'All'; rerenderThemeLibrary(); });
+    const randomTheme=()=>{
+      const pool=themes.filter(t=>t.id!==pickerThemeId);
+      const t=pool[Math.floor(Math.random()*pool.length)];
+      if(!t) return;
+      const applied=window.SBLTheme?.apply?.(t.id,true) || t;
+      pickerThemeId=t.id;
+      updateCurrentTheme(applied);
+      rerenderThemeLibrary();
+    };
     document.getElementById('accountRandomTheme')?.addEventListener('click',randomTheme);
-    document.getElementById('accountSurpriseTheme')?.addEventListener('click',()=>{randomTheme();});
+    document.getElementById('accountSurpriseTheme')?.addEventListener('click',randomTheme);
     document.getElementById('accountExportTheme')?.addEventListener('click',()=>{const blob=new Blob([window.SBLTheme.exportTheme()],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`sbl-theme-${getSavedThemeId()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500);});
     document.getElementById('accountImportTheme')?.addEventListener('click',()=>document.getElementById('accountImportThemeFile')?.click());
     document.getElementById('accountImportThemeFile')?.addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;try{const text=await f.text();window.SBLTheme.importTheme(text);renderAccount();}catch(err){alert('Could not import that theme: '+err.message);}});
