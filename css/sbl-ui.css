@@ -1,0 +1,641 @@
+/* Shared UI — shared responsive/UI polish.  Behavior-neutral by design. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+img, svg, canvas, video { max-width: 100%; }
+
+button, input, select, textarea { max-width: 100%; }
+
+button,
+.btn,
+.button,
+.btn-primary,
+.btn-secondary,
+.btn-danger,
+.btn-ghost,
+[role="button"] {
+  min-height: 36px;
+}
+
+
+/* Keep dense data views usable without forcing the whole page wider. */
+.table-wrap,
+.table-container,
+.data-table-wrap,
+.matrix-wrap,
+.matrix-container,
+.roster-table-wrap,
+.stats-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+table { max-width: 100%; }
+
+/* Nested popup stacking: a Pokémon profile opened from a league/summary modal
+   must render above its parent overlay rather than disappearing behind it. */
+.pokemon-overlay { z-index: 12000 ; }
+.audit-overlay { z-index: 11000 ; }
+
+/* Shared modal guardrails. Page-specific modal dimensions still win. */
+.modal,
+.modal-overlay,
+.dialog-overlay,
+.popup-overlay,
+.overlay {
+  overscroll-behavior: contain;
+}
+
+.modal-card,
+.profile-modal,
+.summary-modal,
+.overview-modal,
+.scout-popup-card,
+.prep-detail-dialog,
+.damage-calc-card {
+  max-width: min(96vw, 1100px);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Better tap targets while preserving the site's compact desktop density. */
+@media (max-width: 700px) {
+  .page-nav { scrollbar-width: none; }
+  .page-nav::-webkit-scrollbar { display: none; }
+
+  .page-nav a,
+  button,
+  .btn,
+  .button,
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger,
+  .btn-ghost,
+  select {
+    min-height: 40px;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  .modal-card,
+  .profile-modal,
+  .summary-modal,
+  .overview-modal,
+  .scout-popup-card,
+  .prep-detail-dialog,
+  .damage-calc-card {
+    max-width: calc(100vw - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+
+  .account-panel { width: 100%; }
+
+  .account-preferences-head,
+  .toolbar,
+  .controls-row,
+  .filter-row,
+  .search-row {
+    gap: 8px;
+  }
+
+  .toolbar,
+  .controls-row,
+  .filter-row,
+  .search-row {
+    flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto ;
+    animation-duration: .001ms ;
+    animation-iteration-count: 1 ;
+    transition-duration: .001ms ;
+  }
+}
+
+/* Shared UI Foundation — shared visual hierarchy. Kept theme-neutral and token-driven. */
+
+body > header,
+#app > header,
+main > header,
+body > main > header {
+  position: relative;
+}
+
+h1, h2, h3 {
+  text-wrap: balance;
+}
+
+h1 {
+  letter-spacing: -0.025em;
+}
+
+.sub {
+  color: var(--text-dim, rgba(255,255,255,.62));
+  line-height: 1.5;
+}
+
+.panel {
+  border: 1px solid var(--border, rgba(255,255,255,.12));
+  border-radius: 12px;
+  background: var(--panel, rgba(255,255,255,.035));
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.tabs > button,
+.tabs > a,
+.tab,
+.admin-nav-item,
+.admin-nav-group-toggle {
+  border-radius: 7px;
+  transition: background .14s ease, color .14s ease, border-color .14s ease, transform .14s ease;
+}
+
+.tabs > button:hover,
+.tabs > a:hover,
+.tab:hover,
+.admin-nav-item:hover,
+.admin-nav-group-toggle:hover {
+  transform: translateY(-1px);
+}
+
+.toolbar,
+.roster-toolbar,
+.controls-row,
+.filter-row,
+.search-row {
+  align-items: center;
+}
+
+button,
+.btn,
+.button,
+select {
+  border-radius: 7px;
+}
+
+input,
+select,
+textarea {
+  border-color: var(--border, rgba(255,255,255,.14));
+  transition: border-color .14s ease, box-shadow .14s ease, background .14s ease;
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--text-dim, rgba(255,255,255,.30));
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent, #7c8cff);
+}
+
+table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+tbody tr {
+  transition: background .12s ease;
+}
+
+.empty,
+.empty-state,
+.loading,
+.loading-state,
+.error-state {
+  min-height: 120px;
+  padding: 24px;
+  border-radius: 10px;
+  color: var(--text-dim, rgba(255,255,255,.62));
+  text-align: center;
+}
+
+.badge {
+  vertical-align: middle;
+}
+
+.admin-nav {
+  gap: 6px;
+}
+
+.admin-nav-group {
+  border-radius: 9px;
+}
+
+.admin-nav-submenu {
+  border-radius: 8px;
+}
+
+@media (max-width: 700px) {
+  .page-nav {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar { display: none; }
+
+  .tabs > button,
+  .tabs > a,
+  .tab,
+  .admin-nav-item,
+  .admin-nav-group-toggle {
+    flex: 0 0 auto;
+  }
+}
+
+/* Shared UI UI Accessibility: accessibility + interaction hardening */
+button:disabled,
+.btn:disabled,
+.button:disabled,
+select:disabled,
+input:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: .58;
+}
+
+button,
+a,
+select,
+input[type="checkbox"],
+input[type="radio"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:active:not(:disabled),
+.btn:active:not(:disabled),
+.button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.table-wrap,
+.table-container,
+.data-table-wrap,
+.matrix-wrap,
+.matrix-container {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.table-wrap table,
+.table-container table,
+.data-table-wrap table {
+  min-width: max-content;
+}
+
+img {
+  max-width: 100%;
+}
+
+[hidden] {
+  display: none ;
+}
+
+@media (max-width: 700px) {
+  .toolbar,
+  .roster-toolbar,
+  .controls-row,
+  .filter-row,
+  .search-row {
+    flex-wrap: wrap;
+  }
+
+  .toolbar > input,
+  .toolbar > select,
+  .controls-row > input,
+  .controls-row > select,
+  .filter-row > input,
+  .filter-row > select,
+  .search-row > input,
+  .search-row > select {
+    min-width: min(100%, 220px);
+  }
+
+  .modal,
+  .modal-content,
+  .dialog,
+  .dialog-content {
+    max-width: calc(100vw - 24px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto ;
+    transition-duration: .001ms ;
+    animation-duration: .001ms ;
+    animation-iteration-count: 1 ;
+  }
+}
+
+/* Theme-safe headings: never force headings to white on light palettes. */
+:where(h1,h2,h3,h4,h5,h6,
+  .section-title,.page-title,.card-title,.panel-title,.modal-title,
+  .section-heading,.page-heading,.card-heading,.account-card-head h3,
+  .myteam-section-head h2,.myteam-section-head h3) {
+  color: var(--text, #111827) ;
+}
+
+/* Match Prep analysis: always-visible usage breakdown */
+.prep-analysis-summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:10px}
+.prep-analysis-summary-grid .prep-card-section{display:flex;flex-direction:column;gap:5px}
+.prep-analysis-summary-grid strong{font-size:20px;line-height:1}
+.prep-analysis-list{display:grid;gap:6px;margin-top:8px}
+.prep-analysis-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2)}
+.prep-analysis-row strong{font-variant-numeric:tabular-nums}
+.prep-analysis-weeks{display:grid;gap:10px;margin-top:8px}
+.prep-analysis-week{padding:10px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2)}
+.prep-analysis-week-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+.prep-analysis-week-head span{font-size:11px;color:var(--text-dim)}
+.prep-analysis-columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.prep-analysis-columns>div{min-width:0}
+@media(max-width:700px){.prep-analysis-summary-grid,.prep-analysis-columns{grid-template-columns:1fr}}
+
+/* Match Prep Analysis — season-first overview */
+.prep-detail-dialog .matchprep-analysis-overview{display:flex;flex-direction:column;gap:14px;width:100%;min-width:0}
+.prep-detail-dialog .prep-analysis-season,.prep-detail-dialog .prep-analysis-weeks-section{padding:16px;border:1px solid var(--border);border-radius:16px;background:linear-gradient(145deg,var(--panel-alt),var(--panel));box-shadow:0 8px 24px rgba(0,0,0,.10)}
+.prep-detail-dialog .prep-analysis-section-head{display:flex;justify-content:space-between;gap:16px;margin-bottom:14px}
+.prep-detail-dialog .prep-analysis-section-head h3{margin:3px 0 4px;color:var(--text);font-size:18px;line-height:1.2}
+.prep-detail-dialog .prep-analysis-section-head p{margin:0;color:var(--text-dim);font-size:11px;line-height:1.5;max-width:760px}
+.prep-detail-dialog .prep-analysis-eyebrow{display:block;color:var(--accent,#8b5cf6);font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.12em}
+.prep-detail-dialog .prep-analysis-summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.prep-detail-dialog .prep-analysis-stat{min-width:0;padding:14px 15px;border:1px solid var(--border);border-radius:12px;background:var(--panel);display:flex;flex-direction:column;gap:3px}
+.prep-detail-dialog .prep-analysis-stat span{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.07em;color:var(--text-dim)}
+.prep-detail-dialog .prep-analysis-stat strong{font-size:27px;line-height:1;color:var(--text)}
+.prep-detail-dialog .prep-analysis-stat small{font-size:9px;color:var(--text-dim)}
+.prep-detail-dialog .prep-analysis-overview-grid{display:grid;grid-template-columns:1fr;gap:12px}
+.prep-detail-dialog .prep-analysis-table-card{min-width:0;border:1px solid var(--border);border-radius:12px;background:var(--panel);overflow:hidden}
+.prep-detail-dialog .prep-analysis-card-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:13px 14px;border-bottom:1px solid var(--border)}
+.prep-detail-dialog .prep-analysis-card-head h4{margin:0;color:var(--text);font-size:13px}
+.prep-detail-dialog .prep-analysis-card-head small{display:block;margin-top:2px;color:var(--text-dim);font-size:9px}
+.prep-detail-dialog .prep-analysis-card-head>strong{font-size:18px;color:var(--text)}
+.prep-detail-dialog .prep-analysis-list{padding:4px 12px 10px;max-height:240px;overflow:auto}
+.prep-detail-dialog .prep-analysis-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 2px;border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);font-size:11px}
+.prep-detail-dialog .prep-analysis-row:last-child{border-bottom:0}
+.prep-detail-dialog .prep-analysis-row>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.prep-detail-dialog .prep-analysis-row-value{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.prep-detail-dialog .prep-analysis-row-value strong{min-width:24px;text-align:right;color:var(--text)}
+.prep-detail-dialog .prep-analysis-row-value small{width:34px;text-align:right;color:var(--text-dim);font-variant-numeric:tabular-nums}
+.prep-detail-dialog .prep-analysis-extra-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.prep-detail-dialog .prep-analysis-mini-card{min-width:0;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--panel)}
+.prep-detail-dialog .prep-analysis-mini-card>span{display:block;margin-bottom:8px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)}
+.prep-detail-dialog .prep-analysis-weeks-section .prep-analysis-section-head{margin-bottom:10px}
+.prep-detail-dialog .prep-analysis-weeks{display:flex;flex-direction:column;gap:9px}
+/* Match Prep weekly selector: compact, wrapping week buttons; never require horizontal scrolling. */
+.prep-detail-dialog .prep-analysis-week-buttons{display:flex;flex-wrap:wrap;align-items:center;gap:6px;width:100%;margin-top:8px}
+.prep-detail-dialog .prep-analysis-week-btn{flex:1 1 clamp(52px, calc((100% - 42px) / 8), 110px);min-width:52px;max-width:110px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text-dim);font:inherit;font-size:11px;font-weight:800;line-height:1.1;white-space:nowrap;cursor:pointer;transition:background .15s ease,color .15s ease,border-color .15s ease,transform .15s ease}
+.prep-detail-dialog .prep-analysis-week-btn:hover{color:var(--text);border-color:color-mix(in srgb,var(--accent,#8b5cf6) 55%,var(--border));transform:translateY(-1px)}
+.prep-detail-dialog .prep-analysis-week-btn.active{background:color-mix(in srgb,var(--accent,#8b5cf6) 18%,var(--panel));color:var(--text);border-color:var(--accent,#8b5cf6);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent,#8b5cf6) 25%,transparent)}
+@media(max-width:700px){.prep-detail-dialog .prep-analysis-week-btn{flex-basis:calc((100% - 18px) / 4);max-width:none;padding:6px 7px;font-size:10px}}
+
+.prep-detail-dialog .prep-analysis-week{border:1px solid var(--border);border-radius:12px;background:var(--panel);overflow:hidden}
+.prep-detail-dialog .prep-analysis-week-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 13px;border-bottom:1px solid var(--border)}
+.prep-detail-dialog .prep-analysis-week-head>div{display:flex;align-items:center;gap:9px;min-width:0}
+.prep-detail-dialog .prep-analysis-week-head strong{font-size:12px;color:var(--text)}
+.prep-detail-dialog .prep-analysis-week-head small{font-size:9px;color:var(--text-dim);padding:3px 7px;border:1px solid var(--border);border-radius:999px}
+.prep-detail-dialog .prep-week-status-dot{width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0}
+.prep-detail-dialog .prep-week-status-dot.is-led{background:var(--accent,#8b5cf6)}
+.prep-detail-dialog .prep-week-status-dot.is-sent{background:var(--teal,#2dd4bf)}
+.prep-detail-dialog .prep-week-status-dot.is-brought{background:var(--text-dim)}
+.prep-detail-dialog .prep-analysis-week-stats{display:flex;gap:14px;padding:8px 13px;color:var(--text-dim);font-size:9px;border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent)}
+.prep-detail-dialog .prep-analysis-week-stats b{color:var(--text);font-size:10px}
+.prep-detail-dialog .prep-analysis-week .prep-analysis-columns{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:10px 13px 12px}
+.prep-detail-dialog .prep-analysis-subhead{margin-bottom:4px;color:var(--text-dim);font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.06em}
+.prep-detail-dialog .prep-analysis-week .prep-analysis-list{padding:0;max-height:180px}
+@media(max-width:760px){.prep-detail-dialog .prep-analysis-summary-grid,.prep-detail-dialog .prep-analysis-overview-grid,.prep-detail-dialog .prep-analysis-extra-grid,.prep-detail-dialog .prep-analysis-week .prep-analysis-columns{grid-template-columns:1fr}.prep-detail-dialog .prep-analysis-list{max-height:200px}}
+
+/* Match Prep analysis layout */
+.prep-detail-dialog .prep-analysis-overview-grid,
+.prep-detail-dialog .prep-analysis-extra-grid,
+.prep-detail-dialog .prep-analysis-week .prep-analysis-columns {
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  width:100%;
+  gap:12px;
+}
+.prep-detail-dialog .prep-analysis-overview-grid > *,
+.prep-detail-dialog .prep-analysis-extra-grid > *,
+.prep-detail-dialog .prep-analysis-week .prep-analysis-columns > * {
+  display:block;
+  width:100%;
+  max-width:none;
+  min-width:0;
+}
+.prep-detail-dialog .prep-analysis-table-card,
+.prep-detail-dialog .prep-analysis-mini-card,
+.prep-detail-dialog .prep-analysis-week .prep-analysis-columns > div {
+  width:100%;
+  min-width:0;
+}
+
+/* Hide scrollbars sitewide while preserving scrolling. */
+html,
+body,
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.prep-analysis-week-select {display:flex;align-items:center;gap:8px;margin-top:8px;min-width:180px;}
+.prep-analysis-week-select span {font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:var(--text-dim);}
+.prep-analysis-week-select select {min-width:150px;padding:8px 30px 8px 10px;border:1px solid var(--border);border-radius:9px;background:var(--panel-alt);color:var(--text);font-weight:750;}
+.prep-analysis-week[hidden] {display:none ;}
+
+/* Match Prep item evidence */
+.prep-analysis-inferred{display:inline-block;margin-left:.45rem;font-size:.68rem;line-height:1;padding:.18rem .38rem;border-radius:999px;opacity:.72;text-transform:uppercase;letter-spacing:.04em;vertical-align:middle}
+
+/* Finals bracket — clean four-stage tournament display */
+.finals-panel{overflow:visible;padding:24px;}
+.finals-hero{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding-bottom:18px;border-bottom:1px solid var(--border);}
+.finals-kicker{font-size:10px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:var(--accent,var(--amber));margin-bottom:5px;}
+.finals-mode-badge{display:inline-flex;align-items:center;justify-content:center;padding:6px 10px;border:1px solid var(--border);border-radius:999px;font-size:10px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;}
+.finals-mode-badge.live{border-color:var(--accent);color:var(--accent);}
+.finals-mode-badge.champion,.finals-mode-badge.complete{border-color:var(--amber);color:var(--amber);}
+.finals-format-strip{display:grid;grid-template-columns:repeat(4,1fr);margin:18px 0 12px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--panel-alt);}
+.finals-format-strip>div{padding:12px 14px;border-right:1px solid var(--border);min-width:0;}
+.finals-format-strip>div:last-child{border-right:0;}
+.finals-format-strip strong{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.07em;}
+.finals-format-strip span{display:block;margin-top:3px;color:var(--text-dim);font-size:11px;line-height:1.35;}
+.finals-bracket-note{display:flex;gap:10px;align-items:flex-start;margin:14px 0 4px;padding:11px 13px;border:1px solid var(--border);border-radius:10px;background:var(--panel-alt);font-size:11px;line-height:1.45;}
+.finals-bracket-note strong{white-space:nowrap;}
+.finals-bracket-shell{overflow-x:auto;overflow-y:hidden;padding:22px 8px 28px;}
+.finals-bracket{overflow:visible;padding:0;}
+.finals-bracket-grid{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1fr) minmax(220px,1fr) minmax(220px,1fr);gap:42px;min-width:1040px;align-items:start;}
+.finals-bracket-column{position:relative;min-width:0;}
+.finals-bracket-column-head{height:38px;display:flex;align-items:flex-end;justify-content:space-between;gap:8px;margin-bottom:14px;padding:0 3px;}
+.finals-bracket-column-title{font-weight:900;font-size:12px;letter-spacing:.09em;text-transform:uppercase;}
+.finals-bracket-column-date{font-size:10px;color:var(--text-dim);margin-top:3px;}
+.finals-round-count{font-size:9px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;}
+.finals-bracket-matches{height:560px;display:grid;grid-template-rows:repeat(8,1fr);position:relative;}
+.finals-bracket-match{position:relative;align-self:center;min-height:82px;border:1px solid var(--border);background:var(--panel);border-radius:11px;box-shadow:0 5px 18px rgba(0,0,0,.08);overflow:visible;z-index:2;cursor:pointer;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease;}
+.finals-bracket-column[data-round="playin"] .finals-bracket-match:nth-child(1),.finals-bracket-column[data-round="quarterfinals"] .finals-bracket-match:nth-child(1){grid-row:1 / span 2;}
+.finals-bracket-column[data-round="playin"] .finals-bracket-match:nth-child(2),.finals-bracket-column[data-round="quarterfinals"] .finals-bracket-match:nth-child(2){grid-row:3 / span 2;}
+.finals-bracket-column[data-round="playin"] .finals-bracket-match:nth-child(3),.finals-bracket-column[data-round="quarterfinals"] .finals-bracket-match:nth-child(3){grid-row:5 / span 2;}
+.finals-bracket-column[data-round="playin"] .finals-bracket-match:nth-child(4),.finals-bracket-column[data-round="quarterfinals"] .finals-bracket-match:nth-child(4){grid-row:7 / span 2;}
+.finals-bracket-column[data-round="semifinals"] .finals-bracket-match:nth-child(1){grid-row:1 / span 4;}
+.finals-bracket-column[data-round="semifinals"] .finals-bracket-match:nth-child(2){grid-row:5 / span 4;}
+.finals-bracket-column[data-round="grandfinal"] .finals-bracket-match:nth-child(1){grid-row:1 / span 8;}
+.finals-bracket-team{display:grid;grid-template-columns:34px minmax(0,1fr);align-items:center;min-height:39px;padding:0 11px;border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);}
+.finals-bracket-team:last-of-type{border-bottom:0;}
+.finals-bracket-team.is-winner{font-weight:850;background:color-mix(in srgb,var(--accent,var(--amber)) 9%,var(--panel));}
+.finals-bracket-seed{font-family:var(--mono);font-size:10px;color:var(--text-dim);}
+.finals-bracket-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;}
+.finals-bracket-name.tbd{color:var(--text-dim);font-style:italic;}
+.finals-match-top{height:24px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;border-bottom:1px solid color-mix(in srgb,var(--border) 60%,transparent);}
+.finals-match-number{font-size:9px;font-family:var(--mono);color:var(--text-dim);font-weight:800;}
+.finals-bracket-match-status{font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:.07em;color:var(--text-dim);}
+.finals-bracket-match.is-complete .finals-bracket-match-status{color:var(--accent,var(--amber));}
+.finals-bracket-vs{display:none;}
+.finals-bracket-source{font-size:9px;color:var(--text-dim);padding:5px 10px;border-top:1px solid color-mix(in srgb,var(--border) 55%,transparent);}
+.finals-bracket-champion{margin:10px auto 4px;max-width:430px;text-align:center;padding:17px 20px;border:1px solid color-mix(in srgb,var(--amber) 55%,var(--border));border-radius:13px;background:color-mix(in srgb,var(--amber) 8%,var(--panel));}
+.finals-bracket-champion-label{font-size:9px;text-transform:uppercase;letter-spacing:.13em;color:var(--text-dim);font-weight:900;}
+.finals-bracket-champion-name{display:block;margin-top:4px;font-size:21px;font-weight:900;}
+.finals-admin-results-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:22px 0 10px;padding:14px 15px;border:1px solid var(--border);border-radius:11px;background:var(--panel-alt);}
+.finals-admin-results-head .note{margin:0;}
+#finalsResultsStatus{min-height:16px;}
+@media(max-width:900px){.finals-format-strip{grid-template-columns:1fr 1fr}.finals-format-strip>div:nth-child(2){border-right:0}.finals-format-strip>div:nth-child(-n+2){border-bottom:1px solid var(--border)}.finals-hero{flex-direction:column}.finals-bracket-grid{gap:28px}.finals-admin-results-head{align-items:flex-start;flex-direction:column;}}
+
+/* Finals bracket: intentionally no connector lines. */
+
+
+.finals-bracket-match:hover,.finals-bracket-match:focus-visible{transform:translateY(-2px);border-color:color-mix(in srgb,var(--accent,var(--amber)) 55%,var(--border));box-shadow:0 8px 24px rgba(0,0,0,.13);outline:none;}
+.finals-bracket-match.is-tbd{cursor:default;}
+.finals-team-score{margin-left:auto;min-width:18px;text-align:right;font:800 12px var(--mono);}
+.finals-bracket-match.is-complete .finals-team-score{color:var(--accent,var(--amber));}
+.finals-click-hint{text-align:center;margin-top:4px;}
+.finals-score-modal{position:relative;width:calc(100% - 32px);max-width:440px;padding:26px;border-radius:18px;}
+.finals-score-modal h3{margin:6px 0 18px;font-size:18px;}
+.finals-modal-vs{font:700 10px var(--mono);color:var(--text-dim);margin:0 7px;}
+.finals-modal-score-grid,.admin-score-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0 20px;}
+.finals-modal-score-grid label,.admin-score-grid label{display:grid;gap:6px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);}
+.admin-score-overlay{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:20px;background:rgba(0,0,0,.42);backdrop-filter:blur(4px);}
+.admin-score-modal{position:relative;width:min(440px,100%);padding:26px;border:1px solid var(--border);border-radius:18px;background:var(--panel);box-shadow:0 24px 70px rgba(0,0,0,.28);}
+.admin-score-modal h2{margin:7px 0 18px;font-size:20px;}
+.admin-score-modal h2 span{font:700 10px var(--mono);color:var(--text-dim);margin:0 8px;}
+.admin-score-modal .modal-close{position:absolute;right:12px;top:10px;}
+.finals-admin-match-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:stretch;padding:8px 0;border-bottom:1px solid var(--border);}
+.finals-admin-match-main{min-width:0;display:grid;grid-template-columns:54px minmax(0,1fr) 72px minmax(110px,auto);gap:12px;align-items:center;text-align:left;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--panel-alt);color:inherit;cursor:pointer;}
+.finals-admin-match-main:hover{border-color:color-mix(in srgb,var(--accent,var(--amber)) 50%,var(--border));}
+.finals-admin-match-label{font:800 9px var(--mono);color:var(--text-dim);}
+.finals-admin-teams{display:flex;gap:7px;align-items:center;min-width:0;}.finals-admin-teams strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.finals-admin-teams span{font:700 9px var(--mono);color:var(--text-dim);}
+.finals-admin-score{font:800 13px var(--mono);text-align:center;}
+.finals-admin-match-main>.note{margin:0;text-align:right;white-space:nowrap;}
+.finals-admin-match-row>.finals-winner-select{align-self:center;min-width:150px;}
+@media(max-width:800px){.finals-admin-match-main{grid-template-columns:45px minmax(0,1fr) 58px;}.finals-admin-match-main>.note{grid-column:2/-1;text-align:left;}.finals-admin-match-row{grid-template-columns:1fr;}.finals-admin-match-row>.finals-winner-select{width:100%;}.finals-modal-score-grid,.admin-score-grid{grid-template-columns:1fr;}}
+
+/* Season Management 2.0 — persistent section rail instead of stacked/collapsible cards. */
+body[data-admin="true"] #content .season-admin-rail{position:sticky;top:18px;display:flex;flex-direction:column;gap:3px;padding:6px;border:1px solid var(--border);border-radius:14px;background:var(--panel);}
+body[data-admin="true"] #content .season-admin-rail-label{padding:8px 10px 6px;font-size:9px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim);}
+body[data-admin="true"] #content .season-admin-nav{display:flex;flex-direction:column;gap:2px;}
+body[data-admin="true"] #content .season-admin-nav button{appearance:none;border:0;background:transparent;color:var(--text-dim);border-radius:9px;padding:10px 11px;text-align:left;font:700 12px var(--sans);cursor:pointer;}
+body[data-admin="true"] #content .season-admin-nav button:hover{background:var(--panel-alt);color:var(--text);}
+body[data-admin="true"] #content .season-admin-nav button.active{background:color-mix(in srgb,var(--accent,var(--amber)) 11%,var(--panel-alt));color:var(--text);box-shadow:inset 2px 0 0 var(--accent,var(--amber));}
+body[data-admin="true"] #content .season-admin-nav button span{display:block;margin-top:2px;font:500 10px var(--sans);color:var(--text-dim);}
+body[data-admin="true"] #content .season-admin-content{min-width:0;}
+@media(max-width:760px){body[data-admin="true"] #content .season-admin-workspace{grid-template-columns:1fr;gap:12px;}body[data-admin="true"] #content .season-admin-rail{position:static;}body[data-admin="true"] #content .season-admin-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}body[data-admin="true"] #content .season-admin-nav button{min-height:52px;}}
+
+/* Finals administration */
+.finals-admin-round-panel{margin-top:10px;}
+.finals-admin-round-head{margin:0 0 8px;}
+.finals-admin-results-note{margin-top:4px;}
+.finals-admin-champion{margin-top:12px;border-color:var(--amber);}
+.finals-admin-start-row{align-items:end;margin-top:14px;}
+
+/* Finals score entry */
+.finals-score-team{min-width:0;padding:14px 10px 12px;border:1px solid var(--border);border-radius:14px;background:var(--panel2);text-align:center;}
+.finals-score-team-name{display:block;font-size:11px;font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);margin-bottom:11px;}
+.finals-modal-score-grid input,.admin-score-grid input{width:100%;font:800 22px var(--mono);text-align:center;}
+.finals-modal-winner{padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--panel-alt);margin-bottom:10px;font-size:11px;}
+.finals-score-modal .finals-modal-winner{margin:0 0 12px;text-align:center;font-size:12px;}
+.finals-score-modal .note,.admin-score-modal .note{text-align:center;}
+.finals-score-modal .foot-actions,.admin-score-modal .foot-actions{justify-content:center;margin-top:18px;}
+@media(max-width:800px){.finals-modal-score-grid,.admin-score-grid{grid-template-columns:1fr 1fr;}.finals-score-team{padding:12px 8px;}}
+@media(max-width:430px){.finals-modal-score-grid,.admin-score-grid{grid-template-columns:1fr;}}
+
+/* Season Management 3.0 — focused local navigation. One major tool is
+   visible at a time; Competition gets one additional, compact sub-navigation. */
+body[data-admin="true"] #content .season-admin-workspace{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:14px;
+}
+body[data-admin="true"] #content .season-admin-workspace-head{
+  display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
+  padding:2px 2px 0;
+}
+body[data-admin="true"] #content .season-admin-eyebrow{
+  font:800 9px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);
+}
+body[data-admin="true"] #content .season-admin-workspace-head h2{margin:3px 0 0;font-size:20px;letter-spacing:-.01em;}
+body[data-admin="true"] #content .season-admin-head-meta{font:600 11px var(--mono);color:var(--text-dim);padding-bottom:2px;}
+body[data-admin="true"] #content .season-admin-local-nav{
+  display:flex;gap:5px;overflow-x:auto;padding:4px;border:1px solid var(--border);border-radius:13px;background:var(--panel);
+  scrollbar-width:none;
+}
+body[data-admin="true"] #content .season-admin-local-nav::-webkit-scrollbar{display:none;}
+body[data-admin="true"] #content .season-admin-local-tab{
+  appearance:none;border:0;background:transparent;color:var(--text-dim);border-radius:9px;padding:10px 13px;
+  text-align:left;cursor:pointer;min-width:120px;font-family:var(--sans);flex:1;
+}
+body[data-admin="true"] #content .season-admin-local-tab strong{display:block;font-size:12px;line-height:1.2;}
+body[data-admin="true"] #content .season-admin-local-tab span{display:block;margin-top:3px;font-size:10px;line-height:1.25;color:var(--text-dim);}
+body[data-admin="true"] #content .season-admin-local-tab:hover{background:var(--panel-alt);color:var(--text);}
+body[data-admin="true"] #content .season-admin-local-tab.active{background:color-mix(in srgb,var(--accent,var(--amber)) 10%,var(--panel-alt));color:var(--text);box-shadow:inset 0 -2px 0 var(--accent,var(--amber));}
+body[data-admin="true"] #content .season-admin-pane{display:none;min-width:0;}
+body[data-admin="true"] #content .season-admin-pane.active{display:block;}
+body[data-admin="true"] #content .season-admin-pane > .panel{margin-top:0;}
+body[data-admin="true"] #content .season-admin-pane > .panel + .panel{margin-top:12px;}
+body[data-admin="true"] #content .season-admin-subnav{
+  display:flex;gap:3px;margin:0 0 10px;padding:3px;border-bottom:1px solid var(--border);
+}
+body[data-admin="true"] #content .season-admin-subtab{
+  appearance:none;border:0;background:transparent;color:var(--text-dim);padding:8px 11px;border-radius:7px 7px 0 0;
+  cursor:pointer;font:700 11px var(--sans);
+}
+body[data-admin="true"] #content .season-admin-subtab:hover{color:var(--text);background:var(--panel-alt);}
+body[data-admin="true"] #content .season-admin-subtab.active{color:var(--text);background:var(--panel-alt);box-shadow:inset 0 -2px 0 var(--accent,var(--amber));}
+body[data-admin="true"] #content .season-admin-subpane{display:none;}
+body[data-admin="true"] #content .season-admin-subpane.active{display:block;}
+@media(max-width:760px){
+  body[data-admin="true"] #content .season-admin-workspace-head{align-items:flex-start;}
+  body[data-admin="true"] #content .season-admin-local-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible;}
+  body[data-admin="true"] #content .season-admin-local-tab{min-width:0;}
+}
+@media(max-width:480px){body[data-admin="true"] #content .season-admin-local-nav{grid-template-columns:1fr;}}

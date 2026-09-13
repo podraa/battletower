@@ -12,8 +12,8 @@
 }
 
 .sbl-remote-sprite{
-  object-fit:contain !important;
-  object-position:center !important;
+  object-fit:contain;
+  object-position:center;
   max-width:none;
   max-height:none;
   flex:0 0 auto;
@@ -29,8 +29,8 @@
 .pick-card .sbl-remote-sprite,
 .free-agency-card .sbl-remote-sprite,
 .draft-card .sbl-remote-sprite{
-  width:var(--sbl-sprite-lg) !important;
-  height:var(--sbl-sprite-lg) !important;
+  width:var(--sbl-sprite-lg);
+  height:var(--sbl-sprite-lg);
 }
 
 .mon-card,
@@ -60,20 +60,20 @@
 .mon-head .sbl-remote-sprite,
 .prep-card-head .sbl-remote-sprite,
 .profile-card-head .sbl-remote-sprite{
-  width:var(--sbl-sprite-lg) !important;
-  height:var(--sbl-sprite-lg) !important;
-  max-width:var(--sbl-sprite-lg) !important;
-  max-height:var(--sbl-sprite-lg) !important;
+  width:var(--sbl-sprite-lg);
+  height:var(--sbl-sprite-lg);
+  max-width:var(--sbl-sprite-lg);
+  max-height:var(--sbl-sprite-lg);
 }
 
 /* Larger hero/team sprites get a little more breathing room. */
 .team-card-top .sbl-remote-sprite,
 .team-card .team-card-top-sprite.sbl-remote-sprite,
 .league-card-sprite .sbl-remote-sprite{
-  width:var(--sbl-sprite-xl) !important;
-  height:var(--sbl-sprite-xl) !important;
-  max-width:var(--sbl-sprite-xl) !important;
-  max-height:var(--sbl-sprite-xl) !important;
+  width:var(--sbl-sprite-xl);
+  height:var(--sbl-sprite-xl);
+  max-width:var(--sbl-sprite-xl);
+  max-height:var(--sbl-sprite-xl);
 }
 
 .team-card-top,
@@ -104,10 +104,10 @@
 .switch-card-top .sbl-remote-sprite,
 .opponent-card .sbl-remote-sprite,
 .speed-matrix-sprite.sbl-remote-sprite{
-  width:var(--sbl-sprite-md) !important;
-  height:var(--sbl-sprite-md) !important;
-  max-width:var(--sbl-sprite-md) !important;
-  max-height:var(--sbl-sprite-md) !important;
+  width:var(--sbl-sprite-md);
+  height:var(--sbl-sprite-md);
+  max-width:var(--sbl-sprite-md);
+  max-height:var(--sbl-sprite-md);
 }
 
 /* Speed/type matrices and dense tables intentionally stay compact. */
@@ -116,10 +116,10 @@
 .tc2-opp-sprite.sbl-remote-sprite,
 .death-cause-sprite.sbl-remote-sprite,
 .league-card-sprite .league-rank + .sbl-remote-sprite{
-  width:var(--sbl-sprite-sm) !important;
-  height:var(--sbl-sprite-sm) !important;
-  max-width:var(--sbl-sprite-sm) !important;
-  max-height:var(--sbl-sprite-sm) !important;
+  width:var(--sbl-sprite-sm);
+  height:var(--sbl-sprite-sm);
+  max-width:var(--sbl-sprite-sm);
+  max-height:var(--sbl-sprite-sm);
 }
 
 .tc-row-mon,
@@ -143,10 +143,10 @@
 .selected-chip .sbl-remote-sprite,
 .mon-pill .sbl-remote-sprite,
 .random-trade-mon .sbl-remote-sprite{
-  width:var(--sbl-sprite-sm) !important;
-  height:var(--sbl-sprite-sm) !important;
-  max-width:var(--sbl-sprite-sm) !important;
-  max-height:var(--sbl-sprite-sm) !important;
+  width:var(--sbl-sprite-sm);
+  height:var(--sbl-sprite-sm);
+  max-width:var(--sbl-sprite-sm);
+  max-height:var(--sbl-sprite-sm);
 }
 
 /* Small inline Pokémon references should never inherit a large card size. */
@@ -154,10 +154,10 @@
 .type-pill .sbl-remote-sprite,
 .pokemon-inline .sbl-remote-sprite,
 .chip .sbl-remote-sprite{
-  width:var(--sbl-sprite-xs) !important;
-  height:var(--sbl-sprite-xs) !important;
-  max-width:var(--sbl-sprite-xs) !important;
-  max-height:var(--sbl-sprite-xs) !important;
+  width:var(--sbl-sprite-xs);
+  height:var(--sbl-sprite-xs);
+  max-width:var(--sbl-sprite-xs);
+  max-height:var(--sbl-sprite-xs);
 }
 
 /* Popup/modal cards need a fixed sprite area so different forms cannot change
