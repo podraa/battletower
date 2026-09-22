@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
-<title>Admin Dashboard</title>
+<title>League Admin</title>
 
 
 
@@ -28,14 +28,15 @@
 <body data-admin="true">
 <div id="app" style="display:none">
 <header>
-<h1> Admin Dashboard <span class="badge" id="seasonBadge" style="vertical-align:middle;"></span></h1>
+<h1> League Admin <span class="badge" id="seasonBadge" style="vertical-align:middle;"></span></h1>
 </header>
 <nav class="tabs admin-nav" id="tabs" aria-label="Admin navigation">
   <button type="button" class="admin-sidebar-toggle" id="adminSidebarToggle" aria-label="Collapse sidebar" title="Collapse sidebar"><span class="admin-sidebar-toggle-icon">‹</span><span class="admin-sidebar-toggle-label">Collapse</span></button>
   <div class="admin-nav-group" data-nav-group="home">
     <div class="admin-nav-group-title">Home</div>
     <div class="admin-nav-submenu">
-      <button class="admin-nav-item active" data-tab="overview">Dashboard</button>
+      <button class="admin-nav-item active" data-tab="overview">League Dashboard</button>
+      <button class="admin-nav-item" data-tab="league">League Manager</button>
     </div>
   </div>
   <div class="admin-nav-group" data-nav-group="season">
@@ -53,6 +54,7 @@
     <div class="admin-nav-submenu">
       <button class="admin-nav-item" data-tab="settings">Franchises &amp; Users</button>
       <button class="admin-nav-item" data-tab="commissioner">User Control</button>
+      <button class="admin-nav-item" data-tab="franchise-requests">Franchise Requests</button>
     </div>
   </div>
   <div class="admin-nav-group" data-nav-group="replays">
@@ -81,6 +83,8 @@
 <script src="js/services/pokemon.js" defer></script>
 <script src="js/services/replays.js" defer></script>
 <script src="js/sbl-supabase.js" defer></script>
+<script src="js/services/league-db.js" defer></script>
+<script src="js/services/franchise-ownership.js" defer></script>
 <script src="js/services/admin.js" defer></script>
 <script src="js/services/draft.js" defer></script>
 <script src="js/auth.js" defer></script>

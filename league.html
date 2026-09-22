@@ -1,56 +1,39 @@
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1" name="viewport"/>
-<title>Your Leagues — Battle Tower</title>
-
-
-
-
-
-
-
-
-
-
-
-
-
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>League Workspace — Battle Tower</title>
+<script>
+  // Keep the existing shared league-context bridge synchronized before the
+  // shared site shell evaluates its permission state. The URL remains the
+  // authoritative context for this page.
+  (function(){
+    try {
+      const id = new URLSearchParams(location.search).get('league') || '';
+      if(id) localStorage.setItem('sbl_selected_league_id', id);
+    } catch(_) {}
+  })();
+</script>
 <script id="sbl-global-theme-loader" src="js/sbl-themes.js?v=20260912-theme-quality1"></script>
-
-
-
-
-
-
-
-
-
-
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
-<link href="css/sbl-site.css" rel="stylesheet"/>
-<link href="css/sbl-components.css" rel="stylesheet"/>
-<link href="css/sbl-sprites-layout.css" rel="stylesheet"/>
-<link href="css/sbl-ui.css" rel="stylesheet"/>
-<link href="css/pages/index.css" rel="stylesheet"/>
-
-
-
-
+<link href="css/sbl-site.css" rel="stylesheet">
+<link href="css/sbl-components.css" rel="stylesheet">
+<link href="css/sbl-sprites-layout.css" rel="stylesheet">
+<link href="css/sbl-ui.css" rel="stylesheet">
+<link href="css/pages/index.css" rel="stylesheet">
 </head>
 <body>
 <nav aria-label="Site navigation" class="page-nav" id="pageNav"></nav>
 <div id="app">
 <header>
-<h1>Your Leagues</h1>
-<div class="sub">Choose a league to open its workspace.</div>
+<h1>My Team</h1>
+<div class="sub">Your league workspace.</div>
 </header>
 <div id="content"><div class="empty-state">Loading…</div></div>
 </div>
-<script defer="" src="js/sbl-site.js"></script>
+<script defer src="js/sbl-site.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
 <script src="js/sbl-supabase.js" defer></script>
 <script src="js/services/league-db.js" defer></script>
@@ -63,8 +46,8 @@
 <script src="js/services/league.js" defer></script>
 <script src="js/services/replays.js" defer></script>
 <script src="js/services/trades.js" defer></script>
-
 <script src="js/services/data.js" defer></script>
-<script src="js/pages/index.js" defer></script><script src="js/app.js" defer></script>
+<script src="js/pages/league.js" defer></script>
+<script src="js/app.js" defer></script>
 </body>
 </html>

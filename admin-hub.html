@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Battle Tower Admin Hub</title>
+<script id="sbl-global-theme-loader" src="js/sbl-themes.js?v=20260913-admin-hub"></script>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="css/sbl-site.css" rel="stylesheet">
+<link href="css/sbl-components.css" rel="stylesheet">
+<link href="css/sbl-sprites-layout.css" rel="stylesheet">
+<link href="css/sbl-ui.css" rel="stylesheet">
+<link href="css/pages/admin-hub.css" rel="stylesheet">
+</head>
+<body data-site-admin="true">
+<nav aria-label="Site navigation" class="page-nav" id="pageNav"></nav>
+<div id="app" class="site-admin-app" style="display:none">
+  <header class="site-admin-header">
+    <div>
+      <div class="site-admin-kicker">Platform administration</div>
+      <h1>Admin Hub</h1>
+      <p class="site-admin-sub">Site-wide control, health and access. This area is separate from league administration.</p>
+    </div>
+    <div class="site-admin-header-actions">
+      <span class="site-admin-pill" id="adminIdentity">Checking access…</span>
+      <button class="site-admin-button" id="refreshHealth" type="button">Refresh</button>
+    </div>
+  </header>
+
+  <div id="adminHubError" class="site-admin-error" hidden></div>
+
+  <main id="adminHubContent" aria-live="polite">
+    <section class="site-admin-section">
+      <div class="site-admin-section-heading">
+        <div><div class="site-admin-eyebrow">Overview</div><h2>Site health</h2></div>
+        <span id="healthTimestamp" class="site-admin-muted">Waiting for check</span>
+      </div>
+      <div id="healthGrid" class="health-grid"></div>
+    </section>
+
+    <section class="site-admin-section">
+      <div class="site-admin-section-heading">
+        <div><div class="site-admin-eyebrow">Platform</div><h2>Leagues</h2></div>
+        <span class="site-admin-muted">All leagues, not just the selected workspace</span>
+      </div>
+      <div id="leagueTable" class="site-admin-table-wrap"></div>
+    </section>
+
+    <section class="site-admin-section">
+      <div class="site-admin-section-heading">
+        <div><div class="site-admin-eyebrow">Access</div><h2>Site administrators</h2></div>
+        <span class="site-admin-muted">Only site admins can manage this list</span>
+      </div>
+      <div id="adminTable" class="site-admin-table-wrap"></div>
+    </section>
+
+    <section class="site-admin-section" id="changeLogSection" hidden>
+      <div class="site-admin-section-heading">
+        <div><div class="site-admin-eyebrow">History</div><h2>Change log</h2></div>
+        <span class="site-admin-muted">Super-admin record of deployed changes and fixes</span>
+      </div>
+      <div class="change-log-entry-form">
+        <div><label for="changeVersion">Build / version</label><input id="changeVersion" type="text" placeholder="e.g. Match Prep Notes UI"></div>
+        <div><label for="changeType">Type</label><select id="changeType"><option value="fix">Fix</option><option value="feature">Feature</option><option value="improvement">Improvement</option><option value="migration">Migration</option><option value="security">Security</option><option value="maintenance">Maintenance</option></select></div>
+        <div><label for="changeTitle">Change</label><input id="changeTitle" type="text" placeholder="Short change title"></div>
+        <div class="change-log-form-wide"><label for="changeSummary">Summary</label><input id="changeSummary" type="text" placeholder="What changed and why?"></div>
+        <div class="change-log-form-wide"><label for="changeDetails">Details <span>(optional)</span></label><textarea id="changeDetails" rows="2" placeholder="Technical details, affected areas, migration notes…"></textarea></div>
+        <div><label>&nbsp;</label><button class="site-admin-button primary" id="addChangeLog" type="button">Record change</button></div>
+      </div>
+      <div id="changeLogTable" class="change-log-list"></div>
+    </section>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+<script src="js/sbl-supabase.js" defer></script>
+<script src="js/services/league-db.js" defer></script>
+<script src="js/services/franchise-ownership.js" defer></script>
+<script src="js/auth.js" defer></script>
+<script src="js/services/site-admin.js" defer></script>
+<script src="js/sbl-site.js" defer></script>
+<script src="js/pages/admin-hub.js" defer></script>
+</body>
+</html>
