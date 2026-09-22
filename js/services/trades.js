@@ -13,8 +13,10 @@
   window.SBL = window.SBL || {};
   const SBL = window.SBL;
   let tradeCache = null;
+  let tradeCacheKey = '';
   let tradePromise = null;
-  function invalidateTradeCache(){ tradeCache = null; tradePromise = null; }
+  let tradePromiseKey = '';
+  function invalidateTradeCache(){ tradeCache = null; tradeCacheKey=''; tradePromise = null; tradePromiseKey=''; }
 
   function acceptedAt(trade) {
     const raw = trade?.responded_at || trade?.accepted_at || trade?.updated_at || trade?.created_at;
@@ -167,13 +169,21 @@
 
   async function load(client, options = {}) {
     const db = client || SBL.getSupabase();
+    const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    const seasonId = SBL.leagueDb?.selectedSeasonId?.() || '';
     if (options?.force) invalidateTradeCache();
-    if (tradeCache) return { data: tradeCache, error: null };
-    if (tradePromise) return { data: await tradePromise, error: null };
+    const cacheKey=`${leagueId||'legacy'}|${seasonId||''}`;
+    if (tradeCache && tradeCacheKey===cacheKey) return { data: tradeCache, error: null };
+    if (tradePromise && tradePromiseKey===cacheKey) return { data: await tradePromise, error: null };
+    tradePromiseKey=cacheKey;
     tradePromise = (async () => {
-      const { data, error } = await db.from('trade_requests').select('*').order('created_at', { ascending: false });
+      let query = db.from('trade_requests').select('*').order('created_at', { ascending: false });
+      if (leagueId) query = query.eq('league_id', leagueId);
+      if (seasonId) query = query.or(`season_id.is.null,season_id.eq.${seasonId}`);
+      const { data, error } = await query;
       if (error) throw error;
       tradeCache = data || [];
+      tradeCacheKey=cacheKey;
       return tradeCache;
     })();
     try { return { data: await tradePromise, error: null }; } finally { tradePromise = null; }
@@ -181,7 +191,12 @@
 
   async function create(payload, client) {
     const db = client || SBL.getSupabase();
-    const { data, error } = await db.from('trade_requests').insert(payload).select('*').maybeSingle();
+    const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    const seasonId = SBL.leagueDb?.selectedSeasonId?.() || null;
+    const row = Object.assign({}, payload || {});
+    if (leagueId) row.league_id = leagueId;
+    if (seasonId) row.season_id = seasonId;
+    const { data, error } = await db.from('trade_requests').insert(row).select('*').maybeSingle();
     if (error) throw error;
     invalidateTradeCache();
     return data || null;
@@ -189,15 +204,14 @@
 
   async function respond(id, status, userId, client) {
     const db = client || SBL.getSupabase();
-    const { data, error } = await db.from('trade_requests')
-      .update({
-        status,
-        responded_at: new Date().toISOString(),
-        responded_by: userId || null
-      })
-      .eq('id', id)
-      .select('*')
-      .maybeSingle();
+    const leagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
+    let query=db.from('trade_requests').update({
+      status,
+      responded_at: new Date().toISOString(),
+      responded_by: userId || null
+    }).eq('id',id);
+    if(leagueId) query=query.eq('league_id',leagueId);
+    const { data, error } = await query.select('*').maybeSingle();
     if (error) throw error;
     invalidateTradeCache();
     return data || null;
@@ -229,6 +243,18 @@
 
   async function setLimits(teamName, teamLimit, freeAgencyLimit, client) {
     const db = client || SBL.getSupabase();
+    const leagueId=SBL.leagueDb?.selectedLeagueId?.();
+    if(leagueId){
+      const seasonId=SBL.leagueDb?.selectedSeasonId?.()||null;
+      const season=new Date().getFullYear();
+      const values={league_id:leagueId,season_id:seasonId,season,team_name:String(teamName||'').trim(),team_trade_limit:Number(teamLimit)||0,free_agency_trade_limit:Number(freeAgencyLimit)||0};
+      let result=await db.from('franchise_trade_limits').update(values).eq('league_id',leagueId).eq('season',season).eq('team_name',values.team_name).select('*').maybeSingle();
+      if(result.error) throw result.error;
+      if(!result.data) result=await db.from('franchise_trade_limits').insert(values).select('*').maybeSingle();
+      if(result.error) throw result.error;
+      invalidateTradeCache();
+      return result.data;
+    }
     const { data, error } = await db.rpc('commissioner_set_trade_limits', {
       p_team_name: teamName,
       p_team_trade_limit: teamLimit,

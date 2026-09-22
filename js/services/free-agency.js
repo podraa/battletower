@@ -66,39 +66,37 @@
   }
 
   async function load(client, requestedSeason) {
-    if (!SBL.league?.loadRows) throw new Error('League service is not available.');
-
-    const { data: rows } = await SBL.league.loadRows(client);
+    const db = client || SBL.getSupabase();
+    const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    let snapshot = null;
     let dashboard = {};
-    let publishedRosters = {};
-
-    for (const row of rows || []) {
-      if (row.replay_id === '__dashboard_state__') dashboard = row.replay_data || {};
-      if (row.replay_id === '__rosters__') publishedRosters = row.replay_data?.rosters || {};
+    if (leagueId && SBL.seasons?.loadSnapshot) {
+      snapshot = await SBL.seasons.loadSnapshot({ leagueId, season: requestedSeason || undefined });
+      dashboard = { teamMap: snapshot?.teamMap || {}, settings: snapshot?.settings || {} };
+    } else if (SBL.league?.loadRows) {
+      const { data: rows } = await SBL.league.loadRows(db);
+      dashboard = (rows || []).find(r => r.replay_id === '__dashboard_state__')?.replay_data || {};
     }
 
-    const snapshot = selectedSnapshot(dashboard, requestedSeason);
-    const settings = snapshot.settings || {};
+    const state = snapshot ? dashboard : dashboard;
+    const selected = snapshot || selectedSnapshot(state, requestedSeason);
+    const settings = selected?.settings || {};
     let rosters = normalizeRosters(settings.rosters || {});
-    if (!snapshot.archived && !Object.keys(rosters).length) {
-      rosters = normalizeRosters(publishedRosters);
+
+    if (!Object.keys(rosters).length && leagueId) {
+      const { data: row } = await db.from('league_replays').select('replay_id,replay_data').eq('league_id',leagueId).eq('replay_id','__rosters__').maybeSingle();
+      rosters = normalizeRosters(row?.replay_data?.rosters || {});
     }
 
     let pool = normalizePool(settings.freeAgency?.mons);
-    if (!snapshot.archived && SBL.trades?.load) {
-      const {data: tradeRows} = await SBL.trades.load(client);
+    if (!selected?.archived && SBL.trades?.load) {
+      const {data: tradeRows} = await SBL.trades.load(db);
       const rawRosters = rosters;
       rosters = SBL.trades.getEffectiveRosters(rawRosters, tradeRows || []);
       pool = SBL.trades.restoreFutureFreeAgencyPool(pool, rawRosters, tradeRows || []);
     }
 
-    return {
-      state: dashboard,
-      snapshot,
-      settings,
-      pool,
-      rosters
-    };
+    return { state: dashboard, snapshot: selected, settings, pool, rosters };
   }
 
   function getPool(settingsOrState) {

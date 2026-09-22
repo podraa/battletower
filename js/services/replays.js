@@ -23,11 +23,60 @@
   const ROSTERS_ID = '__rosters__';
   const FREE_AGENCY_ID = '__free_agency__';
   let loadCache = null;
+  let loadCacheKey = '';
   let loadPromise = null;
+  let loadPromiseKey = '';
+
+  async function loadNormalized(db) {
+    let id = SBL.leagueDb?.selectedLeagueId?.() || '';
+    if (!SBL.leagueDb?.isAvailable || !(await SBL.leagueDb.isAvailable(db))) return null;
+    // Do not guess a league when no valid selection exists. The league
+    // landing page is intentionally neutral, and a stale browser selection
+    // must never expose data from another league.
+    if (!id) {
+      return [{ replay_id: STATE_ID, replay_data: { teamMap:{}, settings:{}, replays:{} } }];
+    }
+    const snapshot = await SBL.leagueDb.getSnapshot(id, db);
+    if (!snapshot) {
+      return [{ replay_id: STATE_ID, replay_data: { teamMap:{}, settings:{}, replays:{} } }];
+    }
+    let scopedState = snapshot.state || {};
+    // Season-scoped state is authoritative once league_seasons has been
+    // materialized. Resolve it through the shared context helper so stale
+    // season selections from another league can never select that league's row.
+    let sr;
+    try {
+      sr=await SBL.leagueDb.getSeasonContext(id,db);
+    } catch (seasonError) {
+      throw new Error('Could not load the selected season: ' + (seasonError?.message || seasonError));
+    }
+    if (!sr || !sr.data || typeof sr.data!=='object') {
+      throw new Error('Could not load the selected season for this league.');
+    }
+    const seasonData=sr.data||{};
+    scopedState={teamMap:seasonData.teamMap||{},settings:seasonData.settings||{}};
+    scopedState.settings.activeSeason=sr.name || scopedState.settings.activeSeason;
+    SBL.leagueDb.setSelectedSeasonId?.(sr.id);
+    SBL.leagueDb.setSelectedSeasonKey?.(sr.season_key);
+    snapshot.state=scopedState;
+    const leagues = await SBL.leagueDb.listAll(db);
+    const registry = {};
+    for (const league of leagues) {
+      const full = await SBL.leagueDb.getLeague(league.id, db);
+      if (full) registry[full.id] = full;
+    }
+    snapshot.state.settings = snapshot.state.settings || {};
+    snapshot.state.settings.leagues = registry;
+    snapshot.state.settings.activeLeagueId = id;
+    const replayRows = await SBL.leagueDb.loadReplays(id, db, {seasonId:SBL.leagueDb.selectedSeasonId?.()});
+    return [{ replay_id: STATE_ID, replay_data: snapshot.state }, ...replayRows.map(r => ({ replay_id:r.replay_id, replay_data:r.replay_data, updated_at:r.updated_at }))];
+  }
 
   function invalidateLoadCache() {
     loadCache = null;
+    loadCacheKey = '';
     loadPromise = null;
+    loadPromiseKey = '';
   }
 
   // Backward-compatible global hook for older admin/page code.
@@ -38,17 +87,23 @@
     const db = client || (SBL.getSupabase ? SBL.getSupabase() : null);
     if (!db) throw new Error('Supabase client is not available.');
     if (options?.force) invalidateLoadCache();
-    if (loadCache) return { data: loadCache, error: null };
-    if (loadPromise) {
+    const requestKey=`${SBL.leagueDb?.selectedLeagueId?.()||'legacy'}|${SBL.leagueDb?.selectedSeasonId?.()||''}|${SBL.leagueDb?.selectedSeasonKey?.()||''}`;
+    if (loadCache && loadCacheKey===requestKey) return { data: loadCache, error: null };
+    if (loadPromise && loadPromiseKey===requestKey) {
       const data = await loadPromise;
       return { data, error: null };
     }
+    loadPromiseKey=requestKey;
     loadPromise = (async () => {
-      const { data, error } = await db
-        .from('replays')
-        .select('replay_id,replay_data');
+      const normalized = await loadNormalized(db);
+      if (normalized) { loadCache = normalized; loadCacheKey=`${SBL.leagueDb?.selectedLeagueId?.()||'legacy'}|${SBL.leagueDb?.selectedSeasonId?.()||''}|${SBL.leagueDb?.selectedSeasonKey?.()||''}`; return loadCache; }
+      let query = db.from('replays').select('replay_id,replay_data');
+      const legacyLeagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+      if (legacyLeagueId) query = query.eq('league_id',legacyLeagueId);
+      const { data, error } = await query;
       if (error) throw error;
       loadCache = data || [];
+      loadCacheKey=requestKey;
       return loadCache;
     })();
     try {
@@ -56,6 +111,7 @@
       return { data, error: null };
     } finally {
       loadPromise = null;
+      loadPromiseKey='';
     }
   }
 
@@ -86,17 +142,6 @@
 
       if (!SPECIAL_IDS.has(row.replay_id)) {
         replays[row.replay_id] = row.replay_data || {};
-      }
-    }
-
-    // Older dashboard snapshots could contain replay rows inside the shared
-    // state blob. Preserve that compatibility behavior here rather than on
-    // every page.
-    if (sharedState?.replays && typeof sharedState.replays === 'object') {
-      for (const [id, replay] of Object.entries(sharedState.replays)) {
-        if (id && replay && typeof replay === 'object') {
-          replays[id] = replay;
-        }
       }
     }
 
@@ -1887,8 +1932,18 @@
     const db = client || SBL.getSupabase();
     const payload = Array.isArray(rows) ? rows : [];
     if(!payload.length) return { data: [], error: null };
+    const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    if(leagueId && SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db)){
+      const data = await SBL.leagueDb.upsertReplays(leagueId,payload,db);
+      invalidateLoadCache();
+      await SBL.performance?.invalidate?.('replays:all');
+      return { data, error:null };
+    }
+    const legacyLeagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    const legacySeasonId = SBL.leagueDb?.selectedSeasonId?.() || null;
+    const legacyPayload = payload.map(row => Object.assign({},row,legacyLeagueId?{league_id:legacyLeagueId}: {},legacySeasonId?{season_id:legacySeasonId}: {}));
     const { data, error } = await db.from('replays')
-      .upsert(payload, { onConflict:'replay_id' })
+      .upsert(legacyPayload, { onConflict:'replay_id' })
       .select('replay_id,replay_data');
     if(error) throw error;
     invalidateLoadCache();
@@ -1900,8 +1955,17 @@
     const db = client || SBL.getSupabase();
     const values = (Array.isArray(ids) ? ids : []).filter(Boolean);
     if(!values.length) return { data: [], error: null };
-    const { data, error } = await db.from('replays')
-      .delete().in('replay_id', values).select('replay_id');
+    const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    if(leagueId && SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db)){
+      const data=await SBL.leagueDb.deleteReplays(leagueId,values,db);
+      invalidateLoadCache();
+      await SBL.performance?.invalidate?.('replays:all');
+      return {data,error:null};
+    }
+    let query = db.from('replays').delete().in('replay_id', values);
+    const legacyLeagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    if (legacyLeagueId) query = query.eq('league_id',legacyLeagueId);
+    const { data, error } = await query.select('replay_id');
     if(error) throw error;
     await SBL.performance?.invalidate?.('replays:all');
     return { data: data || [], error: null };
@@ -1909,7 +1973,14 @@
 
   async function listIds(client){
     const db = client || SBL.getSupabase();
-    const { data, error } = await db.from('replays').select('replay_id');
+    const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    if(leagueId && SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db)){
+      return (await SBL.leagueDb.loadReplays(leagueId,db)).map(r=>({replay_id:r.replay_id}));
+    }
+    let query = db.from('replays').select('replay_id');
+    const legacyLeagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    if (legacyLeagueId) query = query.eq('league_id',legacyLeagueId);
+    const { data, error } = await query;
     if(error) throw error;
     return data || [];
   }
@@ -1924,23 +1995,64 @@
 
   async function saveSharedState(state, client){
     const db = client || SBL.getSupabase();
-    return upsertRows([{
-      replay_id: '__dashboard_state__',
-      replay_data: {
-        teamMap: state?.teamMap || {},
-        settings: state?.settings || {}
-      },
-      updated_at: new Date().toISOString()
-    }], db);
+    const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    const seasonId = SBL.leagueDb?.selectedSeasonId?.() || '';
+    if(!leagueId) throw new Error('Cannot save shared state without a selected league.');
+    if(!seasonId) throw new Error('Cannot save shared state without a selected season.');
+    if(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db)){
+      const settings=state?.settings||{};
+      const registry=settings.leagues && typeof settings.leagues==='object' ? settings.leagues : {};
+      const hasRegistry=Object.keys(registry).length>0;
+      const entry=registry[leagueId]||null;
+      if(hasRegistry && !entry){
+        await SBL.leagueDb.deleteLeague(leagueId,db);
+        invalidateLoadCache();
+        return {data:[],error:null};
+      }
+      await SBL.leagueDb.saveState(leagueId,{teamMap:state?.teamMap||{},settings},db);
+
+      const franchises=Object.entries(settings.franchiseDefinitions||settings.franchises||{}).map(([name,v])=>({name,conference:v?.conference||v?.division||''}));
+      if(franchises.length) await SBL.leagueDb.upsertFranchises(leagueId,franchises,db);
+
+      // CP2.1: authoritative league membership must never be synchronised from
+      // legacy shared-state members. This save path persists season/shared state
+      // only. Membership lifecycle is owned by the normalized membership and
+      // franchise services/RPCs.
+      if(entry.name || entry.description || entry.joinCode || entry.status){
+        await SBL.leagueDb.updateLeague(leagueId,{name:entry.name,description:entry.description||'',join_code:entry.joinCode||null,status:entry.status||'active'},db);
+      }
+      invalidateLoadCache();
+      await SBL.performance?.invalidate?.('replays:all');
+      return {data:[],error:null};
+    }
+    throw new Error('Normalized league storage is unavailable; shared state was not saved.');
   }
 
   async function savePublishedRosters(rosters, client){
     const db = client || SBL.getSupabase();
+    const leagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
+    if(leagueId && SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db)){
+      const league=await SBL.leagueDb.getLeague(leagueId,db);
+      const targetName=league?.state?.settings?.activeSeason || '';
+      const season=await SBL.leagueDb.getSeasonContext(leagueId,db,{seasonKey:targetName||''});
+      if(season){
+        const payload=JSON.parse(JSON.stringify(season.data||{}));
+        payload.settings=payload.settings||{};
+        payload.settings.rosters=rosters||{};
+        await SBL.leagueDb.saveSeasonState(leagueId,season.id,payload,db);
+      }
+      // Keep the normalized special row as a compatibility/readback artifact.
+      const rows=await SBL.leagueDb.upsertReplays(leagueId,[{replay_id:'__rosters__',replay_data:{rosters:rosters||{}},season_id:season?.id||null,updated_at:new Date().toISOString()}],db);
+      invalidateLoadCache();
+      return {data:rows,error:null};
+    }
     return upsertRows([{
-      replay_id: '__rosters__',
-      replay_data: { rosters: rosters || {} },
-      updated_at: new Date().toISOString()
-    }], db);
+      replay_id:'__rosters__',
+      league_id:leagueId||null,
+      season_id:SBL.leagueDb?.selectedSeasonId?.()||null,
+      replay_data:{rosters:rosters||{}},
+      updated_at:new Date().toISOString()
+    }],db);
   }
 
   SBL.replays.parseLog=parseLog;

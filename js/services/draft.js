@@ -24,16 +24,36 @@
   }
 
   function subscribe(callback, channelName='sbl-draft-live'){
-    const channel=db().channel(channelName)
-      .on('postgres_changes',{event:'UPDATE',schema:'public',table:'replays',filter:'replay_id=eq.__dashboard_state__'},()=>{ try{ callback?.(); }catch(e){ console.warn('Draft subscription callback failed:',e); } });
+    const channel=db().channel(channelName);
+    if(SBL.leagueDb?.selectedLeagueId?.()){
+      channel.on('postgres_changes',{event:'UPDATE',schema:'public',table:'league_seasons'},()=>{ try{ callback?.(); }catch(e){ console.warn('Draft subscription callback failed:',e); } });
+    } else {
+      channel.on('postgres_changes',{event:'UPDATE',schema:'public',table:'replays'},()=>{ try{ callback?.(); }catch(e){ console.warn('Draft subscription callback failed:',e); } });
+    }
     channel.subscribe((status)=>{ if(status==='CHANNEL_ERROR') console.warn('Draft realtime subscription unavailable.'); });
     return ()=>{ try{ db().removeChannel(channel); }catch(_){ } };
   }
 
   async function read(){
-    const {data,error}=await db().from('replays')
-      .select('replay_id,replay_data,updated_at')
-      .eq('replay_id',STATE_ID).maybeSingle();
+    let data=null,error=null;
+    if(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db())){
+      const id=SBL.leagueDb.selectedLeagueId();
+      const season=await SBL.leagueDb.getSeasonContext(id,db());
+      if(season?.data){
+        const scoped=season.data||{};
+        data={replay_id:STATE_ID,replay_data:{teamMap:scoped.teamMap||{},settings:scoped.settings||{}},updated_at:season.updated_at||null};
+      } else {
+        const snapshot=await SBL.leagueDb.getSnapshot(id,db());
+        if(!snapshot) throw new Error('The selected league could not be found.');
+        data={replay_id:STATE_ID,replay_data:snapshot.state,updated_at:snapshot.league?.updatedAt||snapshot.league?.updated_at||null};
+      }
+    }else{
+      let q=db().from('replays').select('replay_id,replay_data,updated_at').eq('replay_id',STATE_ID);
+      const legacyLeagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
+      if(legacyLeagueId) q=q.eq('league_id',legacyLeagueId);
+      const result=await q.maybeSingle();
+      data=result.data; error=result.error;
+    }
     if(error) throw error;
     if(!data) throw new Error('The shared draft state could not be found.');
     const shared=data.replay_data||{};
@@ -46,13 +66,18 @@
   }
 
   async function write(snapshot){
-    const payload={
-      replay_data:{teamMap:snapshot.teamMap||{},settings:snapshot.settings||{}},
-      updated_at:new Date().toISOString()
-    };
-    const {error}=await db().from('replays')
-      .update(payload)
-      .eq('replay_id',STATE_ID);
+    const payload={league_id:SBL.leagueDb?.selectedLeagueId?.()||null,season_id:SBL.leagueDb?.selectedSeasonId?.()||null,replay_data:{teamMap:snapshot.teamMap||{},settings:snapshot.settings||{}},updated_at:new Date().toISOString()};
+    if(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db())){
+      const leagueId=SBL.leagueDb.selectedLeagueId();
+      const season=await SBL.leagueDb.getSeasonContext(leagueId,db());
+      if(season) await SBL.leagueDb.saveSeasonState(leagueId,season.id,{teamMap:snapshot.teamMap||{},settings:snapshot.settings||{}},db());
+      else await SBL.leagueDb.saveState(leagueId,{teamMap:snapshot.teamMap||{},settings:snapshot.settings||{}},db());
+      return payload;
+    }
+    let q=db().from('replays').update(payload).eq('replay_id',STATE_ID);
+    const legacyLeagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
+    if(legacyLeagueId) q=q.eq('league_id',legacyLeagueId);
+    const {error}=await q;
     if(error) throw error;
     return payload;
   }

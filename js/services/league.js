@@ -15,9 +15,13 @@
   const STATE_ID = '__dashboard_state__';
 
   async function loadRows(client) {
+    if (SBL.replays?.load) return SBL.replays.load(client);
     const db = client || (SBL.getSupabase ? SBL.getSupabase() : null);
     if (!db) throw new Error('Supabase client is not available.');
-    const { data, error } = await db.from('replays').select('replay_id,replay_data');
+    let query = db.from('replays').select('replay_id,replay_data');
+    const leagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
+    if(leagueId) query=query.eq('league_id',leagueId);
+    const { data, error } = await query;
     if (error) throw error;
     return { data: data || [], error: null };
   }
@@ -26,11 +30,10 @@
     const db = client || (SBL.getSupabase ? SBL.getSupabase() : null);
     if (!db) throw new Error('Supabase client is not available.');
 
-    const { data, error } = await db
-      .from('replays')
-      .select('replay_id,replay_data')
-      .eq('replay_id', STATE_ID)
-      .maybeSingle();
+    let query = db.from('replays').select('replay_id,replay_data').eq('replay_id', STATE_ID);
+    const leagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
+    if(leagueId) query=query.eq('league_id',leagueId);
+    const { data, error } = await query.maybeSingle();
 
     if (error) throw error;
     return data?.replay_data || {};
