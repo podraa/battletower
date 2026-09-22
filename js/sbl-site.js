@@ -17,20 +17,25 @@
   // The shared site shell loads before page-specific controllers, so it must
   // establish the global namespace itself rather than relying on app.js.
   window.SBL = window.SBL || {};
+  // Platform branding. League names remain data-driven and are not changed by this value.
+  window.SBL_CONFIG = window.SBL_CONFIG || {};
+  window.SBL_CONFIG.softwareName = window.SBL_CONFIG.softwareName || 'Battle Tower';
 
   /*
    * This is the only place navigation labels/order should be edited.
    * `file` is the real HTML filename.
    */
   const NAV_ITEMS = [
-    { file: 'index.html',         label: 'My Team' },
-    { file: 'stats.html',         label: 'Stats' },
-    { file: 'season.html',        label: 'Season' },
-    { file: 'rosters.html',       label: 'Rosters' },
-    { file: 'match-prep.html', label: 'Match Prep' },
-    { file: 'free-agency.html',   label: 'Free Agency' },
-    { file: 'draft.html',         label: 'Draft Room', draftLiveOnly: true },
-    { file: 'admin.html',         label: 'Admin Dashboard', adminOnly: true }
+    { file: 'index.html',         label: 'Leagues', selectorOnly: true },
+    { file: 'league.html',        label: 'My Team', leagueScoped: true },
+    { file: 'stats.html',         label: 'Stats', leagueScoped: true },
+    { file: 'season.html',        label: 'Season', leagueScoped: true },
+    { file: 'rosters.html',       label: 'Rosters', leagueScoped: true },
+    { file: 'match-prep.html',    label: 'Match Prep', leagueScoped: true },
+    { file: 'free-agency.html',   label: 'Free Agency', leagueScoped: true },
+    { file: 'draft.html',         label: 'Draft Room', leagueScoped: true, draftLiveOnly: true },
+    { file: 'admin.html',         label: 'League Admin', leagueScoped: true, adminOnly: true },
+    { file: 'admin-hub.html',     label: 'Admin Hub', siteAdminOnly: true }
   ];
 
   const currentFile =
@@ -40,6 +45,97 @@
   const NAV_LAST_UID_KEY = 'navLastUid';
   const FINALS_NAV_CACHE_KEY = 'sbl_finals_nav_released';
 
+  const isSelectorPage = currentFile === 'index.html';
+  const isGlobalAdminPage = currentFile === 'admin-hub.html';
+  const isLeagueContextPage = !isSelectorPage && !isGlobalAdminPage;
+  const routeLeagueId = currentFile === 'league.html'
+    ? String(new URLSearchParams(location.search).get('league') || '').trim()
+    : '';
+
+  function activeNavigationLeagueId() {
+    // Navigation must not depend on the deferred league-db service having
+    // published its API yet. The selected league is persisted in the same
+    // localStorage key used by league-db, so the shared shell can resolve the
+    // context deterministically during its first render as well.
+    if (routeLeagueId) return routeLeagueId;
+
+    const fromDb = SBL.leagueDb?.selectedLeagueId?.();
+    if (fromDb) return fromDb;
+
+    try {
+      const stored = localStorage.getItem('sbl_selected_league_id') || '';
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(stored.trim())
+        ? stored.trim()
+        : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function refreshLeagueScopedNavigation() {
+    // Rebuild the shared nav after deferred services have had a chance to
+    // publish the selected-league API. This is intentionally a full render:
+    // every league-scoped href is derived from the same active league source.
+    if (typeof renderNav === 'function') renderNav();
+  }
+
+  async function enforceSiteAdminAccess() {
+    if (currentFile !== 'admin-hub.html') return true;
+    const db = getClient();
+    if (!db) return false;
+    try {
+      const { data: { session } } = await db.auth.getSession();
+      if (!session?.user || !SBL.siteAdmin?.isSiteAdmin) {
+        location.replace('index.html');
+        return false;
+      }
+      const allowed = await SBL.siteAdmin.isSiteAdmin(session.user.id);
+      if (!allowed) location.replace('index.html');
+      return allowed;
+    } catch (e) {
+      console.warn('SBL site-admin access check failed.', e);
+      location.replace('index.html');
+      return false;
+    }
+  }
+
+  async function enforceLeagueMembership() {
+    if (isSelectorPage || isGlobalAdminPage) return;
+    const db = getClient();
+    if (!db) return;
+    try {
+      const { data: { session } } = await db.auth.getSession();
+      if (!session?.user) return;
+      if(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db)){
+        const selectedId=activeNavigationLeagueId();
+        const league=selectedId ? await SBL.leagueDb.getLeague(selectedId,db) : null;
+        if(!league){ location.replace('index.html'); return; }
+        const profileResult=await db.from('profiles').select('id,is_commissioner').eq('id',session.user.id).maybeSingle();
+        const platformCommissioner=!!profileResult?.data?.is_commissioner;
+        const member=await SBL.leagueDb.getMembership(selectedId,session.user.id,db);
+        const active=String(member?.status||'').toLowerCase()==='active';
+        const leagueAdmin=['commissioner','manager'].includes(String(member?.role||'').toLowerCase()) && active;
+        // League Admin is a privileged page: an active player is allowed into
+        // the normal league workspace, but only a league manager/commissioner
+        // (or platform commissioner) may enter admin.html.
+        const allowed=currentFile==='admin.html'
+          ? (platformCommissioner || leagueAdmin)
+          : (active || platformCommissioner);
+        if(!allowed) location.replace('index.html');
+        return;
+      }
+      // Normalized league membership is authoritative. Do not fall back to the
+      // legacy __dashboard_state__ record: failure to resolve normalized state
+      // must not silently authorize from potentially stale/wrong-scope data.
+      location.replace('index.html');
+      return;
+    } catch (e) {
+      console.warn('SBL league membership check failed.', e);
+      location.replace('index.html');
+      return false;
+    }
+  }
+
   function getClient() {
     try {
       return window.SBL?.getSupabase?.() || null;
@@ -47,6 +143,24 @@
       console.warn('SBL navigation: Supabase client unavailable.', e);
       return null;
     }
+  }
+
+  /*
+   * Site-admin visibility belongs to the shared shell, not to a particular
+   * page. Some pages intentionally do not load the Admin Hub controller, so
+   * the shell keeps a small authorization fallback here. The dedicated
+   * site-admin service, when loaded, provides the same RPC-backed check.
+   */
+  function ensureSiteAdminService() {
+    SBL.siteAdmin = SBL.siteAdmin || {};
+    if (typeof SBL.siteAdmin.isSiteAdmin === 'function') return;
+    SBL.siteAdmin.isSiteAdmin = async function (userId) {
+      const db = getClient();
+      if (!db || !userId) return false;
+      const { data, error } = await db.rpc('sbl_is_site_admin', { target_user: userId });
+      if (error) throw error;
+      return data === true;
+    };
   }
 
   function getNav() {
@@ -71,7 +185,12 @@
 
     NAV_ITEMS.forEach(item => {
       const link = document.createElement('a');
-      link.href = item.file;
+      let href = item.file;
+      if (item.file === 'league.html' && item.leagueScoped) {
+        const leagueId = activeNavigationLeagueId();
+        if (leagueId) href = `league.html?league=${encodeURIComponent(leagueId)}`;
+      }
+      link.href = href;
       link.dataset.page = item.file;
       link.textContent = item.label;
 
@@ -80,8 +199,24 @@
         link.hidden = true;
       }
 
+      if (item.siteAdminOnly) {
+        link.dataset.siteAdminOnly = 'true';
+        link.hidden = true;
+      }
+
       if (item.draftLiveOnly) {
         link.dataset.draftLiveOnly = 'true';
+        link.hidden = true;
+      }
+
+      if (item.leagueScoped) {
+        link.dataset.leagueScoped = 'true';
+        if (!isLeagueContextPage) {
+          link.hidden = true;
+        }
+      }
+
+      if (item.selectorOnly && !isSelectorPage) {
         link.hidden = true;
       }
 
@@ -218,8 +353,26 @@
   }
 
   function hidePrivilegedLinks() {
+    hideLeagueScopedLinks();
     hideAdminLink();
+    hideSiteAdminLink();
     hideDraftLink();
+  }
+
+  function hideLeagueScopedLinks() {
+    const nav = getNav();
+    if (!nav) return;
+    nav.querySelectorAll('[data-league-scoped]').forEach(link => {
+      link.hidden = true;
+    });
+  }
+
+  function showLeagueScopedLinks() {
+    const nav = getNav();
+    if (!nav) return;
+    nav.querySelectorAll('[data-league-scoped]:not([data-draft-live-only]):not([data-admin-only]):not([data-site-admin-only])').forEach(link => {
+      link.hidden = false;
+    });
   }
 
   function hideAdminLink() {
@@ -227,6 +380,22 @@
     if (!nav) return;
     nav.querySelectorAll('[data-admin-only]').forEach(link => {
       link.hidden = true;
+    });
+  }
+
+  function hideSiteAdminLink() {
+    const nav = getNav();
+    if (!nav) return;
+    nav.querySelectorAll('[data-site-admin-only]').forEach(link => {
+      link.hidden = true;
+    });
+  }
+
+  function showSiteAdminLink() {
+    const nav = getNav();
+    if (!nav) return;
+    nav.querySelectorAll('[data-site-admin-only]').forEach(link => {
+      link.hidden = false;
     });
   }
 
@@ -298,6 +467,13 @@
   }
 
   async function setupPermissions(client) {
+    // League-specific navigation permissions do not apply on the league
+    // selector or global Admin Hub. A previously selected league in
+    // localStorage must never make its privileged links appear here.
+    if (isSelectorPage || isGlobalAdminPage) {
+      hidePrivilegedLinks();
+      return;
+    }
     if (!client) {
       hidePrivilegedLinks();
       return;
@@ -317,6 +493,22 @@
       lockNav(false);
       writeLastUid(session.user.id);
 
+      // League-specific navigation is available only when the current page
+      // has a real, resolved league context. The global selector/Admin Hub
+      // were handled above and never reach this branch.
+      let hasLeagueContext = false;
+      try {
+        if (SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(client)) {
+          const selectedId = activeNavigationLeagueId();
+          const league = selectedId ? await SBL.leagueDb.getLeague(selectedId, client) : null;
+          hasLeagueContext = !!league && isLeagueContextPage;
+        }
+      } catch (leagueContextError) {
+        console.warn('SBL navigation: league context check failed.', leagueContextError);
+      }
+      if (hasLeagueContext) showLeagueScopedLinks();
+      else hideLeagueScopedLinks();
+
       let permissions = readNavCache(session.user.id);
 
       if (!permissions) {
@@ -330,24 +522,52 @@
 
         permissions = {
           isCommissioner: !!profile?.is_commissioner,
+          isSiteAdmin: false,
           draftLive: false
         };
       }
 
-      if (permissions.isCommissioner) showAdminLink();
+      let leagueAdmin = false;
+      let leagueAdminLeagueId = '';
+      let leagueAdminMember = null;
+      try {
+        if(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(client)){
+          const id=activeNavigationLeagueId();
+          leagueAdminLeagueId = id || '';
+          leagueAdminMember = id ? await SBL.leagueDb.getMembership(id,session.user.id,client) : null;
+          leagueAdmin=['commissioner','manager'].includes(String(leagueAdminMember?.role||'').toLowerCase()) && String(leagueAdminMember?.status||'').toLowerCase()==='active';
+        }
+      } catch (leagueAdminError) {
+        console.warn('SBL navigation: league-admin permission check failed.', leagueAdminError);
+      }
+      console.debug('SBL navigation permission context:', {
+        currentFile,
+        selectedLeagueId: leagueAdminLeagueId,
+        isCommissioner: !!permissions.isCommissioner,
+        leagueAdmin,
+        memberRole: leagueAdminMember?.role ?? null,
+        memberStatus: leagueAdminMember?.status ?? null
+      });
+      let siteAdmin = !!permissions.isSiteAdmin;
+      try {
+        if (SBL.siteAdmin?.isSiteAdmin) siteAdmin = await SBL.siteAdmin.isSiteAdmin(session.user.id);
+      } catch (siteAdminError) {
+        console.warn('SBL navigation: site-admin permission check failed.', siteAdminError);
+      }
+      permissions.isSiteAdmin = siteAdmin;
+      if (permissions.isCommissioner || leagueAdmin) showAdminLink();
+      if (permissions.isSiteAdmin) showSiteAdminLink();
 
       /*
        * Draft Room is intentionally independent of commissioner status:
        * any logged-in team owner sees it while the Draft Room lobby is open or the draft is live.
        */
       try {
-        const { data: stateRow } = await client
-          .from('replays')
-          .select('replay_data')
-          .eq('replay_id', '__dashboard_state__')
-          .maybeSingle();
-
-        const draftStatus = stateRow?.replay_data?.settings?.draft?.status;
+        let draftStatus='';
+        if(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(client)){
+          const snap=await SBL.leagueDb.getSnapshot(activeNavigationLeagueId(),client);
+          draftStatus=snap?.state?.settings?.draft?.status||'';
+        }
         // The Draft Room must become visible as soon as the commissioner
         // opens the lobby, not only after the first pick/start action.
         permissions.draftLive = draftStatus === 'lobby' || draftStatus === 'live';
@@ -367,6 +587,14 @@
   async function refreshSeasonNavLabel() {
     const nav = getNav();
     if (!nav) return;
+    if (isSelectorPage || isGlobalAdminPage) {
+      const seasonLink = nav.querySelector('a[data-page="season.html"]');
+      if (seasonLink) {
+        seasonLink.textContent = 'Season';
+        seasonLink.dataset.sblFinalsReleased = 'false';
+      }
+      return;
+    }
     const seasonLink = nav.querySelector('a[data-page="season.html"]');
     if (!seasonLink) return;
 
@@ -386,13 +614,12 @@
     try {
       const client = getClient();
       if (client) {
-        const { data, error } = await client
-          .from('replays')
-          .select('replay_data')
-          .eq('replay_id', '__dashboard_state__')
-          .maybeSingle();
+        let finals=null, error=null;
+        if(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(client)){
+          const snap=await SBL.leagueDb.getSnapshot(activeNavigationLeagueId(),client);
+          finals=snap?.state?.settings?.finals||null;
+        }
         if (!error) {
-          const finals = data?.replay_data?.settings?.finals;
           finalsReleased = !!(finals && finals.status !== 'inactive' && Array.isArray(finals.rounds) && finals.rounds.length);
           localStorage.setItem(FINALS_NAV_CACHE_KEY, finalsReleased ? '1' : '0');
         }
@@ -442,8 +669,13 @@
   SBL.ui.refreshSeasonNavLabel = refreshSeasonNavLabel;
 
   function boot() {
+    ensureSiteAdminService();
     const nav = renderNav();
     refreshSeasonNavLabel();
+
+    // Page boundaries now define navigation context explicitly: index.html is the
+    // league selector, league.html and the other workspace pages are league-scoped,
+    // and admin-hub.html is global. No context MutationObserver is required.
 
     /*
      * Restore the last-known permission state immediately. This prevents the
@@ -451,12 +683,16 @@
      */
     const lastUid = readLastUid();
 
+    const leagueContextPage = isLeagueContextPage;
     if (lastUid) {
       const cached = readNavCache(lastUid);
       if (cached) {
         lockNav(false);
-        if (cached.isCommissioner) showAdminLink();
-        if (cached.draftLive) showDraftLink();
+        // Cached league permissions are never restored on the league selector
+        // or global Admin Hub. Those pages have no active league context.
+        if (leagueContextPage && cached.isCommissioner) showAdminLink();
+        if (cached.isSiteAdmin) showSiteAdminLink();
+        if (leagueContextPage && cached.draftLive) showDraftLink();
       } else {
         hidePrivilegedLinks();
       }
@@ -465,6 +701,10 @@
     }
 
     const client = getClient();
+
+    document.addEventListener('sbl:league-selection-changed', () => {
+      refreshLeagueScopedNavigation();
+    });
 
     // The shared shell can execute before the deferred Supabase/auth scripts on
     // some pages. In that case the old implementation permanently hid the
@@ -483,6 +723,8 @@
 
     if (client) {
       setupPermissions(client);
+      enforceSiteAdminAccess();
+      enforceLeagueMembership();
 
       client.auth.onAuthStateChange((event, session) => {
         if (session?.user) lockNav(false);
@@ -508,6 +750,10 @@
         if (visible) showAdminLink();
         else hideAdminLink();
       },
+      setSiteAdminVisible: visible => {
+        if (visible) showSiteAdminLink();
+        else hideSiteAdminLink();
+      },
       setDraftVisible: visible => {
         if (visible) showDraftLink();
         else hideDraftLink();
@@ -519,10 +765,6 @@
     document.dispatchEvent(new CustomEvent('sbl:site-ready'));
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot, { once: true });
-  } else {
-    boot();
-  }
+  document.addEventListener('DOMContentLoaded', boot, { once: true });
 
 })();
