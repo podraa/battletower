@@ -31,8 +31,10 @@
   let pendingFranchiseRequest = null;
   const SOFTWARE_NAME = window.SBL_CONFIG?.softwareName || 'Battle Tower';
   let DASH = { teamMap:{}, settings:{ rosters:{}, freeAgency:{ mons:[] }, feedback:[] }, replays:{}, leagues:{}, leagueId:'', leagueName:'SBL' };
-  let leagueLanding = true;
-  document.body.classList.add('league-selection-mode');
+  // Standalone league workspace: the URL is the active league context.
+  let leagueLanding = false;
+  const ROUTE_LEAGUE_ID = new URLSearchParams(location.search).get('league') || '';
+  function routeLeagueId(){ return String(ROUTE_LEAGUE_ID || '').trim(); }
   let trades = [];
   let tradeLimits = [];
   let activeTradeSeason = new Date().getFullYear();
@@ -160,34 +162,47 @@
 
   // ---------- data loading ----------
   async function loadDashboardState(){
-    // The league-selection page is intentionally league-neutral. It must not
-    // load whichever league happened to be selected on the previous visit.
-    // In normalized mode, fetch the user's visible leagues directly and keep
-    // the dashboard state blank until the user explicitly opens one.
-    if(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(supabase)){
-      const uid=String(session?.user?.id||'');
-      const visible=uid ? await SBL.leagueDb.listForUser(uid,supabase) : [];
-      DASH.leagues={};
-      visible.forEach(l=>{ DASH.leagues[l.id]=l; });
-      DASH.leagueId='';
-      DASH.leagueName='';
-      DASH.teamMap={};
-      DASH.settings={rosters:{},freeAgency:{mons:[]},leagues:{},activeLeagueId:'',seasonArchives:{},leagueUpdates:[]};
-      DASH.replays={};
-      return;
+    const leagueId = routeLeagueId();
+    if(!leagueId) throw new Error('No league was specified. Return to the league selector and choose a league.');
+    if(!(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(supabase))){
+      throw new Error('This workspace requires the normalized league database.');
     }
-    const { data, error } = await SBL.replays.load(supabase);
-    if(error) throw error;
-    const { sharedState, replays } = SBL.replays.partition(data);
-    const shared = sharedState || {};
-    const snap = SBL.seasons.getSnapshot(shared);
-    DASH.leagues = snap.leagues || {};
-    DASH.leagueId = snap.leagueId || '';
-    DASH.leagueName = snap.leagueName || 'SBL';
-    DASH.teamMap = snap.teamMap;
-    DASH.settings = Object.assign({ rosters:{}, freeAgency:{mons:[]} }, snap.settings || {});
-    DASH.settings.rosters = normalizeStoredRosters(DASH.settings.rosters||{});
-    DASH.replays = snap.archived ? snap.replays : replays;
+
+    const snap = await SBL.leagueDb.getSnapshot(leagueId, supabase);
+    if(!snap) throw new Error('That league could not be loaded.');
+
+    // Keep the existing shared context API synchronized for services that still
+    // read the selected league from storage during this checkpoint. The URL is
+    // authoritative for this page; localStorage is only the compatibility bridge.
+    try{ localStorage.setItem('sbl_selected_league_id', leagueId); }catch(_){ }
+
+    // Keep the league-level snapshot: getSnapshot() -> getLeague() loads
+    // league_members + franchises and populates DASH.leagues, which is the
+    // membership source used by myLeagueMembership()/myLeagueTeam().
+    DASH.leagues = { [leagueId]: snap.league };
+    DASH.leagueId = leagueId;
+    DASH.leagueName = snap.league.name || leagueId;
+
+    // Load teamMap/settings from the season-scoped snapshot, matching the
+    // canonical Rosters service. If season_id is absent, loadSnapshot()
+    // resolves the league's active season (or its oldest season fallback) and
+    // writes the resolved season id/key back through the shared selectors.
+    const seasonSnap = await SBL.seasons.loadSnapshot({
+      leagueId,
+      seasonId: SBL.leagueDb.selectedSeasonId?.()
+    });
+    if(!seasonSnap) throw new Error('The selected season could not be loaded.');
+
+    DASH.teamMap = seasonSnap.teamMap || {};
+    DASH.settings = Object.assign(
+      {rosters:{},freeAgency:{mons:[]}},
+      seasonSnap.settings || {}
+    );
+    DASH.settings.rosters = normalizeStoredRosters(DASH.settings.rosters || {});
+
+    const rows = await SBL.leagueDb.loadReplays(leagueId, supabase);
+    DASH.replays = {};
+    rows.forEach(r => { DASH.replays[r.replay_id] = r.replay_data; });
   }
 
   async function loadProfile(){
@@ -263,7 +278,7 @@
     // normalized mode there is no league_id until the user explicitly opens a
     // league, so do not send an empty string to UUID-typed Supabase columns.
     const normalized = SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(supabase);
-    const selectedLeagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    const selectedLeagueId = routeLeagueId();
     if(normalized && !selectedLeagueId){
       activeTradeSeason = new Date().getFullYear();
       trades = [];
@@ -385,6 +400,22 @@
     const current = myLeagueTeam();
     const claimStatus = authoritativeClaimStatus();
     const requestedName = requestedFranchiseName();
+
+    // A pending franchise request is immutable from the user's side. The
+    // commissioner must resolve it before the user can choose another
+    // franchise. Keep this guard here as well as in the status screen so the
+    // selector cannot be reopened through another client-side path.
+    if(claimStatus === 'pending' && pendingFranchiseRequest?.franchise_id){
+      const name = pendingFranchiseRequest.franchise?.name || requestedName || myLeagueTeam() || 'your selected franchise';
+      contentEl.innerHTML = `
+        <div class="gate">
+          <div class="panel">
+            <h2>Waiting for approval</h2>
+            <div class="note">Your request for <strong>${SBL.pokemon.escapeHtml(name)}</strong> is <span class="status-pill pending">pending</span>. A commissioner needs to approve or reject it before you can choose another franchise.</div>
+          </div>
+        </div>`;
+      return;
+    }
     const currentUsername = profile.username || '';
     const needsUsername = !currentUsername;
     const title = needsUsername ? 'Choose your username' : (claimStatus === 'pending' ? 'Waiting for approval' : 'Choose your franchise');
@@ -505,12 +536,15 @@
               ? `Your claim for <strong>${SBL.pokemon.escapeHtml(myLeagueTeam())}</strong> was rejected. Pick a different team below, or reach out to your commissioner if you think this is a mistake.`
               : `Your claim for <strong>${SBL.pokemon.escapeHtml(pendingFranchiseRequest?.franchise?.name || requestedFranchiseName() || myLeagueTeam())}</strong> is <span class="status-pill pending">pending</span>. A commissioner needs to approve it before you can manage your roster or propose trades. You can still browse Free Agency below.`}
           </div>
-          <div class="foot-actions">
-            <button class="ghost" id="changeTeamBtn">${rejected ? 'Pick a different team' : 'Change team pick'}</button>
-          </div>
+          ${rejected ? `
+            <div class="foot-actions">
+              <button class="ghost" id="changeTeamBtn">Pick a different team</button>
+            </div>
+          ` : ''}
         </div>
       </div>`;
-    document.getElementById('changeTeamBtn').onclick = ()=>{ renderTeamClaim(); };
+    const changeTeamBtn = document.getElementById('changeTeamBtn');
+    if(changeTeamBtn) changeTeamBtn.onclick = ()=>{ renderTeamClaim(); };
   }
 
   function recordAdjustKey(){ return `sbl_record_adjust_${session?.user?.id||'anonymous'}_${profile?.team_name||'team'}`; }
@@ -743,9 +777,7 @@
     const entries = Object.values(registry);
     const userId = String(session?.user?.id || '').toLowerCase();
     const email = String(session?.user?.email || '').trim().toLowerCase();
-    const commissioner = !!profile?.is_commissioner;
     return entries.filter(league=>{
-      if(commissioner) return true;
       const members = Array.isArray(league?.members) ? league.members : null;
       if(!members) return false;
       return members.some(m=>{
@@ -768,7 +800,7 @@
 
   function isLeagueAdmin(league){
     const role = leagueRoleFor(league);
-    return !!profile?.is_commissioner || role === 'commissioner' || role === 'manager';
+    return role === 'commissioner' || role === 'manager';
   }
 
   function makeLeagueCode(){
@@ -868,7 +900,7 @@
             const created=await SBL.leagueDb.createLeague({name,description,joinCode,createdBy:String(session.user.id),state},supabase);
             DASH.leagueId=created.id; DASH.leagueName=created.name; saveSelectedLeague(created.id);
             msg.className='note ok'; msg.textContent=`League created. Invite code: ${created.joinCode}`;
-            setTimeout(()=>{location.href=`league.html?league=${encodeURIComponent(created.id)}`;},700);
+            setTimeout(()=>{close();leagueLanding=false;document.body.classList.remove('league-selection-mode');render();},700);
             return;
           }
           const league={id,name,description,createdAt:new Date().toISOString(),joinCode,members:[{userId:String(session.user.id),email:session.user.email||'',username:profile?.username||'',franchise:'',team:'',role:'commissioner',status:'active',addedAt:new Date().toISOString()}],state};
@@ -877,7 +909,7 @@
           const settings=JSON.parse(JSON.stringify(DASH.settings||{})); settings.leagues=registry; settings.activeLeagueId=id;
           await SBL.replays.saveSharedState({teamMap:{},settings},supabase);
           msg.className='note ok'; msg.textContent=`League created. Invite code: ${joinCode}`;
-          setTimeout(()=>{location.href=`league.html?league=${encodeURIComponent(id)}`;},900);
+          setTimeout(()=>{close();leagueLanding=false;document.body.classList.remove('league-selection-mode');activeTab='myteam';renderTabs();render();},900);
         }
       }catch(e){msg.className='note danger';msg.textContent=e.message||String(e);btn.disabled=false;}
     };
@@ -974,7 +1006,11 @@
           DASH.settings.rosters=normalizeStoredRosters(DASH.settings.rosters||{});
           DASH.replays=replays;
         }
-        location.href=`league.html?league=${encodeURIComponent(id)}`;
+        leagueLanding=false;
+        document.body.classList.remove('league-selection-mode');
+        activeTab='myteam';
+        renderTabs();
+        render();
       }catch(e){
         console.error('League open failed:',e);
         btn.disabled=false;
@@ -1764,7 +1800,7 @@
       <div class="account-actions"><button type="button" class="ghost" id="accountLogoutBtn">Log out</button></div>
     </div>`;
 
-    document.getElementById('accountBackToLeagues')?.addEventListener('click',()=>{activeTab='myteam';leagueLanding=true;document.body.classList.add('league-selection-mode');render();});
+    document.getElementById('accountBackToLeagues')?.addEventListener('click',()=>{location.href='index.html';});
     document.getElementById('accountSpriteStyle')?.addEventListener('click', e=>{
       const btn=e.target.closest('[data-sprite-style]'); if(!btn) return;
       const style=window.SBL?.pokemon?.setSpriteStyle?.(btn.dataset.spriteStyle,true) || btn.dataset.spriteStyle;
@@ -1833,7 +1869,7 @@
     });
     document.querySelectorAll('#customThemePanel input[type=color]').forEach(inp=>inp.addEventListener('input',()=>{const hex=document.getElementById(inp.id+'_hex');if(hex)hex.textContent=inp.value;}));
     document.getElementById('customThemeSave')?.addEventListener('click',()=>{const get=id=>document.getElementById('custom_'+id)?.value; const t={id:'custom',name:get('name')||'My Theme',base:getSavedThemeId(),bg:get('bg'),panel:get('panel'),panelAlt:get('panelAlt'),border:get('border'),text:get('text'),textDim:get('textDim'),accent:get('accent'),accentText:get('accentText')}; window.SBLTheme.saveCustom(t); renderAccount();});
-    document.getElementById('accountLogoutBtn')?.addEventListener('click', async ()=>{try{await SBL.auth.signOut();}catch(e){console.error('Logout failed:',e);}session=null;profile=null;activeTab='myteam';leagueLanding=true;render();});
+    document.getElementById('accountLogoutBtn')?.addEventListener('click', async ()=>{try{await SBL.auth.signOut();}catch(e){console.error('Logout failed:',e);}location.href='index.html';});
   }
 
   function renderMatches(){
@@ -1843,24 +1879,14 @@
   }
 
   function render(){
-    if(!session){ document.getElementById('tabs')?.remove(); document.body.classList.add('league-selection-mode'); renderAuthGate(); return; }
-    if(!profile){ document.getElementById('tabs')?.remove(); document.body.classList.add('league-selection-mode'); contentEl.innerHTML = '<div class="empty-state">Loading…</div>'; return; }
-    if(leagueLanding){
+    if(!session){
       document.getElementById('tabs')?.remove();
-      document.body.classList.add('league-selection-mode');
-      if(activeTab === 'account'){
-        const pageTitle=document.querySelector('#app > header h1');
-        const pageSub=document.querySelector('#app > header .sub');
-        if(pageTitle) pageTitle.textContent='Account';
-        if(pageSub) pageSub.textContent='Your account and appearance preferences.';
-        renderAccount();
-        return;
-      }
-      const pageTitle=document.querySelector('#app > header h1');
-      const pageSub=document.querySelector('#app > header .sub');
-      if(pageTitle) pageTitle.textContent='Your Leagues';
-      if(pageSub) pageSub.textContent='Choose a league to open its workspace.';
-      renderLeagueDashboard();
+      renderAuthGate();
+      return;
+    }
+    if(!profile){
+      document.getElementById('tabs')?.remove();
+      contentEl.innerHTML = '<div class="empty-state">Loading…</div>';
       return;
     }
 
@@ -1898,7 +1924,6 @@
     // Case 3: non-active membership states use the claim/status UI.
     else if(['pending','rejected','cancelled'].includes(authoritativeStatus) && !hasAuthoritativeFranchise){
       document.getElementById('tabs')?.remove();
-      if(authoritativeStatus === 'pending' || authoritativeStatus === 'rejected') return renderTeamClaim();
       return renderTeamClaim();
     }
     else {
@@ -1907,7 +1932,7 @@
       return;
     }
 
-    if(authoritativeStatus === 'pending' || authoritativeStatus === 'rejected'){
+    if(authoritativeClaimStatus() === 'pending' || authoritativeClaimStatus() === 'rejected'){
       renderTabs();
       if(activeTab === 'account') return renderAccount();
       return renderPendingOrRejected();

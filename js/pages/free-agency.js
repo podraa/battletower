@@ -9,6 +9,8 @@ async function enforceAccessGate(){
   if(!session){ location.replace('index.html'); return false; }
   const {data:profile, error} = await db.from('profiles').select('team_name').eq('id', session.user.id).maybeSingle();
   if(error || !profile?.team_name){ location.replace('index.html'); return false; }
+  const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+  if(!leagueId){ location.replace('index.html'); return false; }
   document.getElementById('app').style.display = '';
   return true;
 }

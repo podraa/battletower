@@ -22,7 +22,7 @@
   let draftSyncBusy = false;
 
   function requireAdmin(){
-    if(!adminUser || !adminIsCommissioner) throw new Error('Commissioner access required.');
+    if(!adminUser || !adminIsCommissioner) throw new Error('League admin access required.');
   }
 
   // ---------- Draft ----------
@@ -78,24 +78,31 @@
        STATE.replays = replays || {};
        STATE.teamMap = sharedState?.teamMap || {};
        STATE.settings = Object.assign(
-         {caseInsensitiveNames:true, rosters:{}, franchises:{}, conferenceNames:{a:'Conference A',b:'Conference B'}},
+         {caseInsensitiveNames:true, rosters:{}, franchises:{}, franchiseDefinitions:{}, conferenceNames:{a:'Conference A',b:'Conference B'}, leagues:{}, activeLeagueId:''},
          sharedState?.settings || {}
        );
        STATE.settings.rosters=STATE.settings.rosters||{};
        STATE.settings.franchises=STATE.settings.franchises||{};
+       STATE.settings.franchiseDefinitions=(STATE.settings.franchiseDefinitions && typeof STATE.settings.franchiseDefinitions==='object') ? STATE.settings.franchiseDefinitions : {};
+       STATE.settings.leagues=(STATE.settings.leagues && typeof STATE.settings.leagues==='object') ? STATE.settings.leagues : {};
+       STATE.settings.activeLeagueId=STATE.settings.activeLeagueId || 'main';
+       Object.values(STATE.settings.leagues).forEach(l=>{ if(!Array.isArray(l.members)) l.members = null; });
        STATE.settings.conferenceNames=STATE.settings.conferenceNames||{a:'Conference A',b:'Conference B'};
        STATE.settings.draft = normalizeDraftState(STATE.settings.draft);
        STATE.settings.activeSeason = STATE.settings.activeSeason || DEFAULT_SEASON;
        STATE.settings.seasonArchives = (STATE.settings.seasonArchives && typeof STATE.settings.seasonArchives === 'object') ? STATE.settings.seasonArchives : {};
        STATE.settings.leagueUpdates = Array.isArray(STATE.settings.leagueUpdates) ? STATE.settings.leagueUpdates : [];
        STATE.settings.finals = SBL.finals.normalizeFinalsState(STATE.settings.finals);
+       // The shared replay boundary now resolves the selected league + season.
+       // Do not restore the top-level league.state here: that would overwrite the
+       // season-scoped snapshot returned by SBL.replays.load().
        loaded = true;
      }catch(e){
        console.error('Supabase load failed:', e);
        STATE.replays = {};
        STATE.teamMap = {};
-       STATE.settings = {caseInsensitiveNames:true, rosters:{}, franchises:{}, conferenceNames:{a:'Conference A',b:'Conference B'}, draft:defaultDraftState(), activeSeason:DEFAULT_SEASON, seasonArchives:{}, leagueUpdates:[], finals:SBL.finals.defaultFinalsState()};
-       loaded = true;
+       STATE.settings = {caseInsensitiveNames:true, rosters:{}, franchises:{}, franchiseDefinitions:{}, conferenceNames:{a:'Conference A',b:'Conference B'}, leagues:{}, activeLeagueId:'', draft:defaultDraftState(), activeSeason:'', seasonArchives:{}, leagueUpdates:[], finals:SBL.finals.defaultFinalsState()};
+       loaded = false;
        throw e;
      }finally{
        loadingFromRemote = false;
@@ -120,7 +127,12 @@
 
   async function saveSharedState(){
      requireAdmin();
-     await SBL.replays.saveSharedState({teamMap:STATE.teamMap, settings:STATE.settings}, supabase);
+     try{
+       await SBL.replays.saveSharedState({teamMap:STATE.teamMap, settings:STATE.settings}, supabase);
+     }catch(err){
+       showAdminError('Could not save changes: ' + (err?.message || err));
+       throw err;
+     }
    }
   // Public rosters are kept in their own row because rosters.html reads
   // __rosters__ directly. Keeping this separate from dashboard state means
@@ -192,7 +204,7 @@
   // archive entry needs. Excludes seasonArchives/activeSeason themselves so
   // archives never nest inside archives.
   function snapshotCurrentSeason(){
-    const { seasonArchives, activeSeason, ...seasonSettings } = STATE.settings;
+    const { seasonArchives, activeSeason, leagues, activeLeagueId, ...seasonSettings } = STATE.settings;
     return {
       name: STATE.settings.activeSeason || DEFAULT_SEASON,
       archivedAt: new Date().toISOString(),
@@ -236,18 +248,21 @@
     STATE.settings = {
       caseInsensitiveNames: STATE.settings.caseInsensitiveNames,
       conferenceNames: STATE.settings.conferenceNames || {a:'Conference A',b:'Conference B'},
-      franchises: {},
+      franchiseDefinitions: JSON.parse(JSON.stringify(STATE.settings.franchiseDefinitions || {})),
+      franchises: JSON.parse(JSON.stringify(STATE.settings.franchises || {})),
       rosters: {},
       draft: defaultDraftState(),
       freeAgency: {mons:[]},
       tradeCredits: {},
       activeSeason: newName,
-      seasonArchives: archives
+      seasonArchives: archives,
+      leagues: STATE.settings.leagues || {},
+      activeLeagueId: STATE.settings.activeLeagueId || 'main'
     };
 
     await deleteAllRemote();          // clear old live replay rows (safely preserved in the archive above)
-    await savePublishedRosters({});   // clear legacy published-roster fallback so it can't leak stale rosters
-    await saveReplays();              // upserts STATE.replays (empty) + saves shared state (teamMap/settings/archives)
+    await saveReplays();              // creates the new season row and persists its empty live state
+    await savePublishedRosters({});   // clear the new season's published-roster compatibility row
     await logAdminAction('start_new_season', `Started new season "${newName}" after archiving "${currentName}".`, {from:currentName, to:newName, archivedReplayCount:replayCount});
   }
   async function restoreSeasonArchive(key){
@@ -265,18 +280,23 @@
 
     STATE.replays = JSON.parse(JSON.stringify(archive.replays || {}));
     STATE.teamMap = JSON.parse(JSON.stringify(archive.teamMap || {}));
+    const leagueRegistrySnapshot = STATE.settings.leagues || {};
+    const activeLeagueSnapshot = STATE.settings.activeLeagueId || 'main';
     STATE.settings = Object.assign(
-      {caseInsensitiveNames:true, rosters:{}, franchises:{}, conferenceNames:{a:'Conference A',b:'Conference B'}, freeAgency:{mons:[]}, tradeCredits:{}},
+      {caseInsensitiveNames:true, rosters:{}, franchises:{}, franchiseDefinitions:{}, conferenceNames:{a:'Conference A',b:'Conference B'}, freeAgency:{mons:[]}, tradeCredits:{}},
       JSON.parse(JSON.stringify(archive.settings || {}))
     );
     STATE.settings.rosters = STATE.settings.rosters || {};
     STATE.settings.draft = normalizeDraftState(STATE.settings.draft);
     STATE.settings.activeSeason = archive.name || key;
     STATE.settings.seasonArchives = newArchives;
+    STATE.settings.leagues = leagueRegistrySnapshot;
+    STATE.settings.activeLeagueId = activeLeagueSnapshot;
+    STATE.settings.franchiseDefinitions = STATE.settings.franchiseDefinitions || {};
 
     await deleteAllRemote();                         // clear current live replay rows
-    await savePublishedRosters(STATE.settings.rosters||{}); // keep legacy fallback in sync with the restored season
-    await saveReplays();                             // upserts restored replays + saves shared state
+    await saveReplays();                             // activates/materializes the restored season and replays
+    await savePublishedRosters(STATE.settings.rosters||{}); // keep the restored season's compatibility row in sync
     await logAdminAction('restore_season', `Restored archived season "${archive.name || key}" as the current season.`, {archiveKey:key, season:archive.name || key, previousSeason:currentName});
   }
   async function deleteSeasonArchive(key){
@@ -318,17 +338,48 @@
   async function initAdminAuth(){
     const {data, error} = await supabase.auth.getSession();
     if(error) throw error;
-    if(!data.session){
-      showAdminLogin();
-      return false;
-    }
-    const profile = await SBL.profiles.get(data.session.user.id, 'team_name,is_commissioner', supabase);
-    if(!profile?.is_commissioner){
-      location.replace('index.html');
-      return false;
-    }
+    if(!data.session){ showAdminLogin(); return false; }
     adminUser = data.session.user;
-    adminIsCommissioner = true;
+
+    // League administration is scoped to the selected league. A platform
+    // commissioner can administer every league; a league commissioner/manager
+    // can administer only the league(s) where they hold that role.
+    // Authorization comes from normalized league_members, not the legacy
+    // STATE.settings.leagues[*].members mirror.
+    const profile = await SBL.profiles.get(data.session.user.id, 'id,email,team_name,is_commissioner,username,status', supabase);
+    adminIsCommissioner = !!profile?.is_commissioner;
+    if(!adminIsCommissioner){
+      try{
+        const workspaceLeagueId = String(
+          SBL.leagueDb?.selectedLeagueId?.() ||
+          new URLSearchParams(location.search).get('league') || ''
+        ).trim();
+        const isValidWorkspaceLeagueId = typeof SBL.leagueDb?.isUuid === 'function'
+          ? SBL.leagueDb.isUuid(workspaceLeagueId)
+          : /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(workspaceLeagueId);
+        const member = isValidWorkspaceLeagueId
+          ? await SBL.leagueDb.getMembership(workspaceLeagueId, adminUser.id, supabase)
+          : null;
+        const active = String(member?.status||'').toLowerCase()==='active';
+        const role = String(member?.role||'').toLowerCase();
+        if(!active || !['commissioner','manager'].includes(role)){
+          if(isValidWorkspaceLeagueId){
+            location.replace(`league.html?league=${encodeURIComponent(workspaceLeagueId)}`);
+          }else{
+            location.replace('index.html');
+          }
+          return false;
+        }
+        // `requireAdmin()` is intentionally the local gate used by all admin
+        // mutations. A league manager/commissioner is an admin for the selected
+        // league even though they are not a platform commissioner.
+        adminIsCommissioner = true;
+      }catch(e){
+        console.error('League permission check failed:', e);
+        location.replace('index.html');
+        return false;
+      }
+    }
     document.getElementById('app').style.display = '';
     return true;
   }
@@ -924,7 +975,8 @@
     const seasonBadge = document.getElementById('seasonBadge');
     if(seasonBadge) seasonBadge.textContent = loaded ? (STATE.settings.activeSeason || DEFAULT_SEASON) : '';
     if(!loaded){ contentEl.innerHTML = `<div class="empty-state">Loading…</div>`; return; }
-    if(activeTab === 'overview') return renderOverview();
+    if(activeTab === 'league') return renderLeagueManager();
+     if(activeTab === 'overview') return renderOverview();
     if(activeTab === 'process') return renderProcess();
     if(activeTab === 'players') return renderPlayers();
     if(activeTab === 'draft') return renderDraft();
@@ -932,6 +984,7 @@
     if(activeTab === 'trades') return renderTrades();
     if(activeTab === 'updates') return renderUpdates();
     if(activeTab === 'commissioner') return renderCommissioner();
+    if(activeTab === 'franchise-requests') return renderFranchiseRequests();
     if(activeTab === 'admin-log') return drawAdminLog();
     if(activeTab === 'seasonsetup') return renderSeasonSetup();
     if(activeTab === 'settings') return renderSettings('franchises');
@@ -1161,9 +1214,25 @@
             ${r.weekOverride ? '<span class="badge" title="Manual week override — reprocessing will preserve this week">Manual</span>' : '<span class="badge" title="Automatically assigned from replay upload date">Auto</span>'}
           </div>
         </td>
-        <td>${SBL.pokemon.escapeHtml(r.players.p1||'?')} <span style="color:var(--text-dim)">vs</span> ${SBL.pokemon.escapeHtml(r.players.p2||'?')}</td>
+        <td>
+          <div class="replay-matchup-cell">
+            <div class="replay-player-map">
+              <span class="replay-player-name">${SBL.pokemon.escapeHtml(r.players.p1||'?')}</span>
+              <select class="replay-franchise-select" data-replay-team="${SBL.pokemon.escapeHtml(r.id)}" data-side="p1" aria-label="Franchise for ${SBL.pokemon.escapeHtml(r.players.p1||'?')}">
+                <option value="">Unassigned</option>${franchiseOptions(teamFor(r.players?.p1))}
+              </select>
+            </div>
+            <span class="replay-vs">vs</span>
+            <div class="replay-player-map">
+              <span class="replay-player-name">${SBL.pokemon.escapeHtml(r.players.p2||'?')}</span>
+              <select class="replay-franchise-select" data-replay-team="${SBL.pokemon.escapeHtml(r.id)}" data-side="p2" aria-label="Franchise for ${SBL.pokemon.escapeHtml(r.players.p2||'?')}">
+                <option value="">Unassigned</option>${franchiseOptions(teamFor(r.players?.p2))}
+              </select>
+            </div>
+          </div>
+        </td>
         <td style="color:var(--text-dim)">${SBL.pokemon.escapeHtml(r.format||'')}</td>
-        <td class="num" style="white-space:nowrap;"><button class="ghost small" data-save-week="${SBL.pokemon.escapeHtml(r.id)}">Save week</button> ${r.weekOverride ? `<button class="ghost small" data-auto-week="${SBL.pokemon.escapeHtml(r.id)}">Auto</button>` : ''} <button class="ghost small danger-btn" data-remove="${SBL.pokemon.escapeHtml(r.id)}">Remove</button></td>
+        <td class="num" style="white-space:nowrap;"><button class="ghost small" data-save-week="${SBL.pokemon.escapeHtml(r.id)}">Save week</button> <button class="ghost small" data-save-replay-franchises="${SBL.pokemon.escapeHtml(r.id)}">Save franchises</button> ${r.weekOverride ? `<button class="ghost small" data-auto-week="${SBL.pokemon.escapeHtml(r.id)}">Auto</button>` : ''} <button class="ghost small danger-btn" data-remove="${SBL.pokemon.escapeHtml(r.id)}">Remove</button></td>
       </tr>`).join('');
     setTimeout(()=>{
       document.querySelectorAll('[data-save-week]').forEach(btn=>{
@@ -1180,6 +1249,29 @@
           const id = btn.dataset.autoWeek; const replay = STATE.replays[id]; if(!replay) return;
           replay.weekOverride = false; replay.week = automaticWeekForReplay(replay); assignAutomaticWeeks();
           await saveReplays(); await logAdminAction('restore_replay_auto_week', `Restored automatic week assignment for replay ${id}.`, {replayId:id, week:replay.week}); renderTicker(); render();
+        });
+      });
+      document.querySelectorAll('[data-save-replay-franchises]').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          const id = btn.dataset.saveReplayFranchises;
+          const replay = STATE.replays[id];
+          if(!replay) return;
+          const selects = document.querySelectorAll(`[data-replay-team="${CSS.escape(id)}"]`);
+          for(const select of selects){
+            const side = select.dataset.side;
+            const username = String(replay.players?.[side] || '').trim().toLowerCase();
+            const franchise = String(select.value || '').trim();
+            if(username){
+              if(franchise) STATE.teamMap[username] = franchise;
+              else delete STATE.teamMap[username];
+            }
+          }
+          await saveTeamMap();
+          await logAdminAction('set_replay_franchises', `Assigned replay ${id} players to franchises.`, {
+            replayId:id, p1:teamFor(replay.players?.p1), p2:teamFor(replay.players?.p2)
+          });
+          renderTicker();
+          render();
         });
       });
       document.querySelectorAll('[data-remove]').forEach(btn=>{
@@ -2421,8 +2513,8 @@ function renderDraft(){ return drawDraft(); }
     // renders when franchise_trade_limits is missing/empty or profiles fail.
     const [profilesResult, tradeResult, limitResult] = await Promise.allSettled([
       SBL.profiles.list({fields:'*', orderBy:'created_at', ascending:false}, supabase),
-      supabase.from('trade_requests').select('*').order('created_at', {ascending:false}),
-      supabase.from('franchise_trade_limits').select('*').eq('season', ADMIN_TRADE_SEASON).order('team_name')
+      SBL.trades.load(supabase,{force:true}),
+      supabase.from('franchise_trade_limits').select('*').eq('season', ADMIN_TRADE_SEASON).eq('league_id', SBL.leagueDb?.selectedLeagueId?.() || '').order('team_name')
     ]);
 
     if(profilesResult.status === 'fulfilled') COMM_PROFILES = profilesResult.value || [];
@@ -2437,6 +2529,131 @@ function renderDraft(){ return drawDraft(); }
     } else {
       COMM_TRADE_LIMITS = [];
       console.warn('Franchise trade limits unavailable; trade ledger will still load.', limitResult.reason || limitResult.value?.error);
+    }
+  }
+
+  async function loadFranchiseRequests(){
+    requireAdmin();
+    const leagueId = String(SBL.leagueDb?.selectedLeagueId?.() || STATE.settings.activeLeagueId || '').trim();
+    if(!leagueId) throw new Error('No league is selected.');
+
+    const [requestsResult, franchisesResult, profilesResult] = await Promise.all([
+      supabase.from('franchise_requests')
+        .select('id,league_id,user_id,franchise_id,status,created_at,rejection_reason,resolved_at,resolved_by')
+        .eq('league_id', leagueId)
+        .eq('status', 'pending')
+        .order('created_at', {ascending:true}),
+      supabase.from('franchises')
+        .select('id,league_id,name,conference,claim_state,status')
+        .eq('league_id', leagueId)
+        .order('name', {ascending:true}),
+      supabase.from('profiles')
+        .select('id,email,username')
+    ]);
+
+    if(requestsResult.error) throw requestsResult.error;
+    if(franchisesResult.error) throw franchisesResult.error;
+    if(profilesResult.error) throw profilesResult.error;
+
+    const profilesById = new Map((profilesResult.data || []).map(p => [String(p.id), p]));
+    const franchisesById = new Map((franchisesResult.data || []).map(f => [String(f.id), f]));
+    const groups = new Map();
+
+    (requestsResult.data || []).forEach(r => {
+      const franchise = franchisesById.get(String(r.franchise_id));
+      const key = String(r.franchise_id);
+      if(!groups.has(key)) groups.set(key, {franchise, requests:[]});
+      groups.get(key).requests.push({request:r, profile:profilesById.get(String(r.user_id)) || null});
+    });
+
+    return {leagueId, groups:[...groups.values()].sort((a,b)=>String(a.franchise?.name||'').localeCompare(String(b.franchise?.name||'')))};
+  }
+
+  function franchiseRequestDisplayName(profile, userId){
+    return profile?.username || profile?.email || userId || '(unknown user)';
+  }
+
+  function franchiseRequestCard(item){
+    const r = item.request;
+    const p = item.profile;
+    const display = franchiseRequestDisplayName(p, r.user_id);
+    const created = r.created_at ? new Date(r.created_at).toLocaleString() : 'Unknown time';
+    return `<div class="franchise-request-row">
+      <div class="franchise-request-person">
+        <strong>${SBL.pokemon.escapeHtml(display)}</strong>
+        <span class="note">${SBL.pokemon.escapeHtml(p?.email || r.user_id)} · requested ${SBL.pokemon.escapeHtml(created)}</span>
+      </div>
+      <div class="foot-actions">
+        <button class="teal" type="button" data-franchise-request-approve="${SBL.pokemon.escapeHtml(r.id)}">Approve</button>
+        <button class="danger" type="button" data-franchise-request-reject="${SBL.pokemon.escapeHtml(r.id)}">Reject</button>
+      </div>
+    </div>`;
+  }
+
+  async function renderFranchiseRequests(){
+    contentEl.innerHTML = `<div class="empty-state">Loading franchise requests…</div>`;
+    try{
+      const {leagueId, groups} = await loadFranchiseRequests();
+      if(activeTab !== 'franchise-requests') return;
+
+      contentEl.innerHTML = `
+        <div class="panel">
+          <div class="section-head-row">
+            <div><h2>Franchise Requests</h2><div class="note">Pending requests for the selected league. Multiple users may request the same franchise; approve one specific request or reject one with a required reason.</div></div>
+            <div class="foot-actions"><button class="ghost" type="button" id="refreshFranchiseRequests">Refresh</button></div>
+          </div>
+        </div>
+        ${groups.length ? groups.map(g=>`
+          <div class="panel franchise-request-group">
+            <div class="section-head-row">
+              <div><h3>${SBL.pokemon.escapeHtml(g.franchise?.name || '(unknown franchise)')}</h3><div class="note">${g.requests.length} pending request${g.requests.length===1?'':'s'}</div></div>
+              <span class="status-pill requested">requested</span>
+            </div>
+            <div class="franchise-request-list">${g.requests.map(franchiseRequestCard).join('')}</div>
+          </div>`).join('') : `
+          <div class="panel"><div class="empty-state">No pending franchise requests for this league.</div></div>`}
+        <div class="note" id="franchiseRequestStatus"></div>`;
+
+      const statusEl = document.getElementById('franchiseRequestStatus');
+      document.getElementById('refreshFranchiseRequests')?.addEventListener('click', ()=>renderFranchiseRequests());
+
+      contentEl.querySelectorAll('[data-franchise-request-approve]').forEach(btn=>btn.addEventListener('click', async()=>{
+        const requestId = btn.dataset.franchiseRequestApprove;
+        btn.disabled = true;
+        if(statusEl) statusEl.textContent = '';
+        try{
+          const {data,error} = await supabase.rpc('sbl_approve_franchise_request',{p_request_id:requestId});
+          if(error) throw error;
+          if(statusEl) statusEl.textContent = `Approved ${requestId}. Refreshing…`;
+          await renderFranchiseRequests();
+        }catch(e){
+          if(statusEl){ statusEl.className='note danger'; statusEl.textContent=`Could not approve request: ${e?.message||e}`; }
+          btn.disabled = false;
+        }
+      }));
+
+      contentEl.querySelectorAll('[data-franchise-request-reject]').forEach(btn=>btn.addEventListener('click', async()=>{
+        const requestId = btn.dataset.franchiseRequestReject;
+        const reason = window.prompt('Reason for rejecting this franchise request:');
+        if(reason === null) return;
+        const trimmed = String(reason).trim();
+        if(!trimmed){ if(statusEl) statusEl.textContent='A rejection reason is required.'; return; }
+        btn.disabled = true;
+        if(statusEl){ statusEl.className='note'; statusEl.textContent=''; }
+        try{
+          const {data,error} = await supabase.rpc('sbl_reject_franchise_request',{p_request_id:requestId,p_rejection_reason:trimmed});
+          if(error) throw error;
+          if(statusEl) statusEl.textContent = `Rejected ${requestId}. Refreshing…`;
+          await renderFranchiseRequests();
+        }catch(e){
+          if(statusEl){ statusEl.className='note danger'; statusEl.textContent=`Could not reject request: ${e?.message||e}`; }
+          btn.disabled = false;
+        }
+      }));
+    }catch(e){
+      if(activeTab === 'franchise-requests'){
+        contentEl.innerHTML = `<div class="panel"><div class="note danger">Could not load franchise requests: ${SBL.pokemon.escapeHtml(e.message||e)}</div></div>`;
+      }
     }
   }
 
@@ -2928,6 +3145,7 @@ function renderDraft(){ return drawDraft(); }
       console.warn('Could not load admin username for audit log:', e);
     }
     const entry = {
+      league_id: SBL.leagueDb?.selectedLeagueId?.() || null,
       admin_id: user?.id || null,
       admin_email: adminUsername || user?.email || null,
       action_type: actionType,
@@ -2972,8 +3190,10 @@ function renderDraft(){ return drawDraft(); }
     let logs = [];
     let loadError = '';
     try{
-      const {data, error} = await supabase.from('admin_logs')
-        .select('*').order('created_at', {ascending:false}).limit(500);
+      let logQuery=supabase.from('admin_logs').select('*').order('created_at', {ascending:false}).limit(500);
+      const currentLeagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
+      if(currentLeagueId) logQuery=logQuery.eq('league_id',currentLeagueId);
+      const {data, error} = await logQuery;
       if(error) throw error;
       logs = data || [];
     }catch(e){ loadError = e.message || 'Could not load admin log.'; }
@@ -3024,35 +3244,28 @@ function renderDraft(){ return drawDraft(); }
     const pending = COMM_PROFILES.filter(p=>p.status==='pending');
     const approved = COMM_PROFILES.filter(p=>p.status==='approved');
     const rejected = COMM_PROFILES.filter(p=>p.status==='rejected');
-    const draft = normalizeDraftState(STATE.settings.draft);
-    const franchises = draftFranchises();
-    const spentByTeam = {};
-    draft.picks.forEach(p => {
-      spentByTeam[p.team] = (spentByTeam[p.team] || 0) + (Number(p.points) || 0);
-    });
-
-    // Scale the budget cards as the league grows.  The cards remain readable,
-    // but large leagues do not consume the entire commissioner page.
-    const budgetScale = Math.max(0.72, Math.min(1, 1 - Math.max(0, franchises.length - 8) * 0.035));
 
     contentEl.innerHTML = `
       <div class="panel">
         <h2>User Control</h2>
-        <div class="note">User control settings only. Franchise rosters and franchise budget boards are not displayed on this page. Trade management has its own tab.</div>
-      </div>
-
-      <div class="panel">
-        <h2>Pending User / Franchise Claims <span class="badge">${pending.length}</span></h2>
-        ${pending.length ? pending.map(p=>commClaimRow(p,true)).join('') : '<div class="empty-state">No pending claims.</div>'}
+        <div class="note">User administration only. Franchise ownership and franchise requests are managed in Franchise Requests and the normalised franchise system.</div>
       </div>
       <div class="panel">
-        <h2>Approved Users / Franchises <span class="badge">${approved.length}</span></h2>
-        ${approved.length ? approved.map(p=>commClaimRow(p,false)).join('') : '<div class="empty-state">No approved teams yet.</div>'}
-      </div>
-      ${rejected.length ? `<div class="panel">
-        <h2>Rejected User Claims <span class="badge">${rejected.length}</span></h2>
-        ${rejected.map(p=>commClaimRow(p,false)).join('')}
-      </div>` : ''}`;
+        <h3>Profile &amp; permission administration</h3>
+        ${approved.length ? approved.map(p=>`<div class="trade-card">
+          <div class="trade-head">
+            <div><div class="trade-teams">${SBL.pokemon.escapeHtml(p.username || p.email || p.id)}</div><div class="trade-sub">${SBL.pokemon.escapeHtml(p.email || p.id)}</div></div>
+            ${p.is_commissioner ? '<span class="badge">Commissioner</span>' : ''}
+          </div>
+          <div class="foot-actions">
+            ${adminIsCommissioner ? '' : (p.is_commissioner
+              ? `<button class="ghost small" data-comm-action="remove-commissioner" data-id="${p.id}">Remove commissioner</button>`
+              : `<button class="ghost small" data-comm-action="make-commissioner" data-id="${p.id}">Make commissioner</button>`)}
+            <button class="ghost small" data-comm-action="edit-profile" data-id="${p.id}">Edit profile</button>
+          </div>
+          <div class="note danger" id="commErr-${p.id}"></div>
+        </div>`).join('') : '<div class="empty-state">No approved users.</div>'}
+      </div>`;
 
     contentEl.querySelectorAll('button[data-comm-action]').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
@@ -3073,32 +3286,23 @@ function renderDraft(){ return drawDraft(); }
             if(username === null){ btn.disabled=false; return; }
             const clean = username.trim();
             if(!/^[A-Za-z0-9_-]{2,24}$/.test(clean)) throw new Error('Username must be 2–24 characters and use only letters, numbers, underscores or hyphens.');
-            const team = prompt('Franchise name:', profile.team_name || '');
-            if(team === null){ btn.disabled=false; return; }
-            const cleanTeam = team.trim();
-            if(!cleanTeam) throw new Error('Franchise name cannot be empty.');
-            await SBL.profiles.update(id, {username:clean, team_name:cleanTeam}, supabase);
-            await logAdminAction('edit_profile', `Edited profile ${profile.email || id}: username/franchise changed.`, {profileId:id, username:clean, team:cleanTeam});
+            await SBL.profiles.update(id, {username:clean}, supabase);
+            await logAdminAction('edit_profile', `Edited profile ${profile.email || id}: username changed.`, {profileId:id, username:clean});
             await loadCommissionerData();
             if(activeTab==='commissioner') drawCommissioner();
             return;
           }
-          if(action==='approve') patch={status:'approved'};
-          else if(action==='reject') patch={status:'rejected'};
-          else if(action==='revoke') patch={status:'pending'};
-          else if(action==='make-commissioner') patch={is_commissioner:true};
+          if(action==='make-commissioner') patch={is_commissioner:true};
           else if(action==='remove-commissioner') patch={is_commissioner:false};
           if(patch){
             await SBL.profiles.update(id, patch, supabase);
             const profile = (COMM_PROFILES || []).find(p => String(p.id) === String(id));
-            await logAdminAction('commissioner_profile_action', `Changed ${profile?.email || id}: ${action}.`, {
-              profileId:id, action, team:profile?.team_name || null
-            });
+            await logAdminAction('commissioner_profile_action', `Changed ${profile?.email || id}: ${action}.`, {profileId:id, action});
           }
           await loadCommissionerData();
           if(activeTab==='commissioner') drawCommissioner();
         }catch(e){
-          if(errEl){ errEl.className='note danger'; errEl.textContent=e.message; }
+          if(errEl){errEl.className='note danger';errEl.textContent=e.message;}
           else showAdminError(e.message);
           btn.disabled=false;
         }
@@ -3174,8 +3378,7 @@ function renderDraft(){ return drawDraft(); }
   function renderFinalsAdminPanel(){
     const finals=SBL.finals.resolveMatchups(STATE.settings.finals||SBL.finals.defaultFinalsState());
     const monday=finals.startMonday || SBL.finals.mondayISO(new Date(Date.now()+7*86400000));
-    const teams=[...new Set(Object.values(STATE.teamMap||{}).map(v=>String(v||'').trim()).filter(Boolean))]
-      .sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}));
+    const teams=configuredFranchises().map(f=>f.name);
 
     // Build the automatic seed order for the initial editor. Once Finals exist,
     // the saved seed order becomes the editor's starting point instead.
@@ -3213,17 +3416,22 @@ function renderDraft(){ return drawDraft(); }
   // with the league's existing player/team mapping instead of maintaining a
   // second franchise list in Settings.
   function configuredFranchises(){
-    const names = [...new Set(
-      Object.values(STATE.teamMap || {})
-        .map(v => String(v || '').trim())
-        .filter(Boolean)
-    )].sort((a,b)=>a.localeCompare(b, undefined, {sensitivity:'base'}));
-
     const configured = STATE.settings.franchises && typeof STATE.settings.franchises === 'object'
-      ? STATE.settings.franchises
-      : {};
+      ? STATE.settings.franchises : {};
+    const definitions = STATE.settings.franchiseDefinitions && typeof STATE.settings.franchiseDefinitions === 'object'
+      ? STATE.settings.franchiseDefinitions : {};
+    const names = new Set([
+      ...Object.keys(definitions),
+      ...Object.values(STATE.teamMap || {}).map(v => String(v || '').trim()).filter(Boolean)
+    ]);
+    return Array.from(names).filter(Boolean).sort((a,b)=>a.localeCompare(b, undefined, {sensitivity:'base'}))
+      .map(name => ({ name, conference: configured[name] || definitions[name]?.conference || '' }));
+  }
 
-    return names.map(name => ({ name, conference: configured[name] || '' }));
+  function franchiseOptions(selected=''){
+    return configuredFranchises().map(f =>
+      `<option value="${SBL.pokemon.escapeHtml(f.name)}" ${String(selected)===String(f.name)?'selected':''}>${SBL.pokemon.escapeHtml(f.name)}</option>`
+    ).join('');
   }
 
   function saveFranchiseConferences(map){
@@ -4405,6 +4613,352 @@ function fixtureMatchCount(fixtureData){const f=Array.isArray(fixtureData)?fixtu
 
   }
 
+  // ---------- League Manager ----------
+  function leagueRegistry(){
+    STATE.settings.leagues = (STATE.settings.leagues && typeof STATE.settings.leagues === 'object') ? STATE.settings.leagues : {};
+    return STATE.settings.leagues;
+  }
+  function leagueId(value){
+    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || 'league';
+  }
+  function snapshotLeagueState(){
+    const settings = JSON.parse(JSON.stringify(STATE.settings || {}));
+    delete settings.leagues;
+    delete settings.activeLeagueId;
+    return { teamMap:JSON.parse(JSON.stringify(STATE.teamMap||{})), settings, replays:JSON.parse(JSON.stringify(STATE.replays||{})) };
+  }
+  function ensureLeagueRegistry(){
+    const leagues = leagueRegistry();
+    if(!Object.keys(leagues).length){
+      leagues.main = {id:'main', name:'SBL', description:'Primary league', createdAt:new Date().toISOString(), joinCode:makeLeagueJoinCode(), members:[], state:snapshotLeagueState()};
+      STATE.settings.activeLeagueId='main';
+    }
+    Object.values(leagues).forEach(l=>{
+      if(!l.joinCode) l.joinCode=makeLeagueJoinCode();
+      if(!Array.isArray(l.members)) l.members=[];
+      l.members=l.members.map(m=>typeof m==='string'?{userId:m,status:'active',role:'player',franchise:'',team:''}:{...m,status:m.status||'active',role:m.role||'player',franchise:m.franchise||m.team||'',team:m.team||m.franchise||''});
+    });
+    const active = STATE.settings.activeLeagueId || Object.keys(leagues)[0];
+    STATE.settings.activeLeagueId = leagues[active] ? active : Object.keys(leagues)[0];
+    const current = leagues[STATE.settings.activeLeagueId];
+    if(current) current.name = current.name || 'SBL';
+    return leagues;
+  }
+
+  function makeLeagueJoinCode(){
+    const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code='';
+    for(let i=0;i<8;i++) code+=chars[Math.floor(Math.random()*chars.length)];
+    return code;
+  }
+  async function switchLeague(nextId){
+    requireAdmin();
+    const leagues = ensureLeagueRegistry();
+    const target = leagues[nextId];
+    if(!target) throw new Error('League not found.');
+    const currentId = STATE.settings.activeLeagueId;
+    if(nextId === currentId) return;
+    if(!confirm(`Switch from "${leagues[currentId]?.name || currentId}" to "${target.name || nextId}"?\n\nThe current league will be saved as-is, and the selected league will become the live league for this site.`)) return;
+    // Persist the currently selected league before changing the local selection.
+    // The normalized Supabase adapter uses the browser selection to choose its
+    // write target, so switching the selection too early would save the wrong league.
+    if(SBL.leagueDb?.setSelectedLeagueId && currentId) SBL.leagueDb.setSelectedLeagueId(currentId);
+    leagues[currentId] = {...leagues[currentId], state:snapshotLeagueState()};
+    const restored = target.state || {teamMap:{},settings:{},replays:{}};
+    STATE.teamMap = JSON.parse(JSON.stringify(restored.teamMap || {}));
+    STATE.replays = JSON.parse(JSON.stringify(restored.replays || {}));
+    STATE.settings = Object.assign(
+      {caseInsensitiveNames:true, rosters:{}, franchises:{}, franchiseDefinitions:{}, conferenceNames:{a:'Conference A',b:'Conference B'}, draft:defaultDraftState(), seasonArchives:{}, leagueUpdates:[], finals:SBL.finals.defaultFinalsState()},
+      JSON.parse(JSON.stringify(restored.settings || {}))
+    );
+    STATE.settings.leagues = leagues;
+    STATE.settings.activeLeagueId = nextId;
+    STATE.settings.draft = normalizeDraftState(STATE.settings.draft);
+    STATE.settings.seasonArchives = STATE.settings.seasonArchives || {};
+    STATE.settings.franchiseDefinitions = STATE.settings.franchiseDefinitions || {};
+    if(SBL.leagueDb?.setSelectedLeagueId) SBL.leagueDb.setSelectedLeagueId(nextId);
+    await deleteAllRemote();
+    await saveReplays();
+    await savePublishedRosters(STATE.settings.rosters || {});
+    await logAdminAction('switch_league', `Switched active league to "${target.name || nextId}".`, {from:currentId,to:nextId});
+    renderTicker();
+    render();
+  }
+  let leagueSetupStep = 1;
+  let leagueSetupDraft = null;
+  let focusManageFranchisesAfterCreate = false;
+
+  function blankLeagueSetup(){
+    return {
+      name:'', description:'', season:'Season 1',
+      conferenceA:'Conference A', conferenceB:'Conference B',
+      franchises:[], interConferencePerWeek:1, maxGamesPerTeamPerWeek:1,
+      weeks:'', qualification:false
+    };
+  }
+
+  function setupFranchiseRows(){
+    const rows = leagueSetupDraft?.franchises || [];
+    if(!rows.length) return '<div class="empty-state">No franchises added yet. Add them below or paste a list.</div>';
+    return rows.map((f,i)=>`<div class="league-setup-franchise-row">
+      <span class="league-setup-franchise-number">${i+1}</span>
+      <input type="text" value="${SBL.pokemon.escapeHtml(f.name)}" data-setup-franchise-name="${i}" aria-label="Franchise ${i+1} name">
+      <select data-setup-franchise-conf="${i}" aria-label="Conference for ${SBL.pokemon.escapeHtml(f.name)}">
+        <option value="a" ${f.conference==='a'?'selected':''}>${SBL.pokemon.escapeHtml(leagueSetupDraft.conferenceA)}</option>
+        <option value="b" ${f.conference==='b'?'selected':''}>${SBL.pokemon.escapeHtml(leagueSetupDraft.conferenceB)}</option>
+      </select>
+      <button class="ghost small danger-btn" type="button" data-setup-remove-franchise="${i}">Remove</button>
+    </div>`).join('');
+  }
+
+  function setupStepNav(){
+    return `<div class="league-setup-steps" aria-label="League setup steps">
+      ${[['1','Basics'],['2','Franchises'],['3','Competition'],['4','Review']].map(([n,label])=>`<div class="league-setup-step ${Number(n)===leagueSetupStep?'current':''} ${Number(n)<leagueSetupStep?'done':''}"><span>${n}</span><label>${label}</label></div>`).join('')}
+    </div>`;
+  }
+
+  async function loadLeagueMemberProfiles(){
+    return await SBL.profiles.list({fields:'id,email,username,team_name,is_commissioner,status',orderBy:'username',ascending:true}, supabase);
+  }
+
+  function leagueMembers(league){
+    if(!Array.isArray(league.members)) league.members=[];
+    return league.members;
+  }
+
+  function memberDisplayName(member, profiles){
+    const p=(profiles||[]).find(x=>String(x.id)===String(member?.userId));
+    return member?.username || p?.username || member?.email || p?.email || member?.userId || 'Unknown user';
+  }
+
+  function memberFranchiseOptions(league, selected=''){
+    const names=configuredFranchises().map(f=>f.name);
+    return `<option value="">No franchise assigned</option>${names.map(n=>`<option value="${SBL.pokemon.escapeHtml(n)}" ${String(n)===String(selected)?'selected':''}>${SBL.pokemon.escapeHtml(n)}</option>`).join('')}`;
+  }
+
+  function renderLeagueManager(){
+    const leagues=ensureLeagueRegistry();
+    const activeId=STATE.settings.activeLeagueId;
+    const active=leagues[activeId] || {};
+
+    if(leagueSetupDraft){
+      const d=leagueSetupDraft;
+      let body='';
+      if(leagueSetupStep===1) body=`
+        <div class="league-setup-intro"><div class="admin-dashboard-kicker">New league</div><h2>Set up your league</h2><p>Give the league a name, choose its starting season, then we'll build the rest of the structure for you.</p></div>
+        <div class="league-setup-form-grid">
+          <div class="field-wide"><label for="setupLeagueName">League name</label><input id="setupLeagueName" value="${SBL.pokemon.escapeHtml(d.name)}" placeholder="e.g. SBL Academy"></div>
+          <div class="field-wide"><label for="setupLeagueDescription">Description <span class="note">optional</span></label><input id="setupLeagueDescription" value="${SBL.pokemon.escapeHtml(d.description)}" placeholder="A short description of this league"></div>
+          <div><label for="setupSeason">Starting season</label><input id="setupSeason" value="${SBL.pokemon.escapeHtml(d.season)}" placeholder="Season 1"></div>
+          <div><label for="setupConfA">Conference 1</label><input id="setupConfA" value="${SBL.pokemon.escapeHtml(d.conferenceA)}"></div>
+          <div><label for="setupConfB">Conference 2</label><input id="setupConfB" value="${SBL.pokemon.escapeHtml(d.conferenceB)}"></div>
+        </div>`;
+      if(leagueSetupStep===2) body=`
+        <div class="league-setup-intro"><div class="admin-dashboard-kicker">Step 2 of 4</div><h2>Build the franchise list <span class="note">optional</span></h2><p>Add the teams that belong to this league now, or skip this step and add them later in Manage Franchises.</p></div>
+        <div class="league-setup-import-row"><textarea id="setupFranchisePaste" rows="4" placeholder="Paste franchise names, one per line\nAurora\nBlaze\nComets\nDragons"></textarea><button class="ghost" type="button" id="setupPasteAdd">Add pasted franchises</button></div>
+        <div class="league-setup-franchise-list">${setupFranchiseRows()}</div>
+        <div class="league-setup-add-row"><input id="setupFranchiseName" placeholder="Franchise name"><select id="setupFranchiseConf"><option value="a">${SBL.pokemon.escapeHtml(d.conferenceA)}</option><option value="b">${SBL.pokemon.escapeHtml(d.conferenceB)}</option></select><button class="primary" type="button" id="setupAddFranchise">Add franchise</button></div>
+        <div class="note league-setup-tip">You can change conferences later. The important thing here is simply getting the league's teams defined once, so replay assignment, rosters, trades, standings and Finals all use the same franchise list.</div>`;
+      if(leagueSetupStep===3) body=`
+        <div class="league-setup-intro"><div class="admin-dashboard-kicker">Step 3 of 4</div><h2>Choose the competition format</h2><p>These are sensible starting defaults. You can change the detailed season settings later.</p></div>
+        <div class="league-setup-preset-row"><button class="ghost" type="button" data-setup-preset="standard12">12-team, 2-conference</button><button class="ghost" type="button" data-setup-preset="roundrobin">Simple round robin</button></div>
+        <div class="league-setup-form-grid">
+          <div><label for="setupWeeks">Regular-season weeks <span class="note">optional</span></label><input id="setupWeeks" inputmode="numeric" value="${SBL.pokemon.escapeHtml(d.weeks)}" placeholder="Auto-suggest"></div>
+          <div><label for="setupInter">Cross-conference games / week</label><input id="setupInter" type="number" min="0" max="10" value="${d.interConferencePerWeek}"></div>
+          <div><label for="setupMaxGames">Max games / team / week</label><input id="setupMaxGames" type="number" min="1" max="2" value="${d.maxGamesPerTeamPerWeek}"></div>
+          <div class="league-setup-check"><label><input id="setupQualification" type="checkbox" ${d.qualification?'checked':''}> Show playoff qualification information</label></div>
+        </div>
+        <div class="note league-setup-tip">The league starts with an empty draft, free-agency pool, trades, replays and Finals. Once the league exists, Season Management is where you publish rosters and generate or upload the schedule.</div>`;
+      if(leagueSetupStep===4){
+        const a=d.franchises.filter(f=>f.conference==='a'), b=d.franchises.filter(f=>f.conference==='b');
+        body=`<div class="league-setup-intro"><div class="admin-dashboard-kicker">Ready to create</div><h2>${SBL.pokemon.escapeHtml(d.name || 'Unnamed league')}</h2><p>Review the structure below. Creating the league will make it the active league for this installation.</p></div>
+        <div class="league-setup-review-grid">
+          <div><span>Starting season</span><strong>${SBL.pokemon.escapeHtml(d.season || 'Season 1')}</strong></div>
+          <div><span>Franchises</span><strong>${d.franchises.length}</strong></div>
+          <div><span>${SBL.pokemon.escapeHtml(d.conferenceA)}</span><strong>${a.length}</strong></div>
+          <div><span>${SBL.pokemon.escapeHtml(d.conferenceB)}</span><strong>${b.length}</strong></div>
+          <div><span>Cross-conference / week</span><strong>${d.interConferencePerWeek}</strong></div>
+          <div><span>Games / team / week</span><strong>${d.maxGamesPerTeamPerWeek}</strong></div>
+        </div>
+        <div class="league-setup-review-list"><strong>Franchises</strong><div>${d.franchises.map(f=>`<span>${SBL.pokemon.escapeHtml(f.name)} <small>${f.conference==='a'?SBL.pokemon.escapeHtml(d.conferenceA):SBL.pokemon.escapeHtml(d.conferenceB)}</small></span>`).join('') || '<span>No franchises yet</span>'}</div></div>`;
+      }
+      contentEl.innerHTML=`<div class="admin-section league-manager league-setup"><div class="league-setup-shell">${setupStepNav()}${body}<div id="leagueSetupStatus" class="note"></div><div class="league-setup-actions"><button class="ghost" id="leagueSetupCancel">Cancel</button><div><button class="ghost" id="leagueSetupBack" ${leagueSetupStep===1?'disabled':''}>Back</button><button class="primary" id="leagueSetupNext">${leagueSetupStep===4?'Create league':'Continue'}</button></div></div></div></div>`;
+
+      const status=document.getElementById('leagueSetupStatus');
+      function syncStepFields(){
+        if(leagueSetupStep===1){ d.name=document.getElementById('setupLeagueName').value.trim(); d.description=document.getElementById('setupLeagueDescription').value.trim(); d.season=document.getElementById('setupSeason').value.trim()||'Season 1'; d.conferenceA=document.getElementById('setupConfA').value.trim()||'Conference A'; d.conferenceB=document.getElementById('setupConfB').value.trim()||'Conference B'; }
+        if(leagueSetupStep===2){ contentEl.querySelectorAll('[data-setup-franchise-name]').forEach(el=>{const i=Number(el.dataset.setupFranchiseName); if(d.franchises[i]) d.franchises[i].name=el.value.trim();}); contentEl.querySelectorAll('[data-setup-franchise-conf]').forEach(el=>{const i=Number(el.dataset.setupFranchiseConf); if(d.franchises[i]) d.franchises[i].conference=el.value;}); d.franchises=d.franchises.filter(f=>f.name); }
+        if(leagueSetupStep===3){ d.weeks=document.getElementById('setupWeeks').value.trim(); d.interConferencePerWeek=Math.max(0,Math.min(10,Number(document.getElementById('setupInter').value)||0)); d.maxGamesPerTeamPerWeek=Math.max(1,Math.min(2,Number(document.getElementById('setupMaxGames').value)||1)); d.qualification=!!document.getElementById('setupQualification').checked; }
+      }
+      document.getElementById('leagueSetupCancel').onclick=()=>{leagueSetupDraft=null;leagueSetupStep=1;renderLeagueManager();};
+      document.getElementById('leagueSetupBack').onclick=()=>{syncStepFields();leagueSetupStep=Math.max(1,leagueSetupStep-1);renderLeagueManager();};
+      document.getElementById('leagueSetupNext').onclick=async()=>{
+        syncStepFields();
+        if(leagueSetupStep===1 && !d.name){status.textContent='Give the league a name first.';return;}
+        if(leagueSetupStep===1 && d.conferenceA.toLowerCase()===d.conferenceB.toLowerCase()){status.textContent='Conference names must be different.';return;}
+        if(leagueSetupStep<4){leagueSetupStep++;renderLeagueManager();return;}
+        const id=leagueId(d.name);
+        if(leagues[id]){status.textContent='A league with that name already exists.';return;}
+        leagues[activeId]={...leagues[activeId],state:snapshotLeagueState()};
+        const defs={}, confs={}; d.franchises.forEach(f=>{defs[f.name]={name:f.name,conference:f.conference};confs[f.name]=f.conference;});
+        const newSettings={caseInsensitiveNames:true,rosters:{},franchises:confs,franchiseDefinitions:defs,conferenceNames:{a:d.conferenceA,b:d.conferenceB},draft:defaultDraftState(),seasonArchives:{},leagueUpdates:[],finals:SBL.finals.defaultFinalsState(),activeSeason:d.season||'Season 1',qualificationEnabled:d.qualification,fixtureRules:{interConferencePerWeek:d.interConferencePerWeek,maxGamesPerTeamPerWeek:d.maxGamesPerTeamPerWeek}};
+        if(d.weeks) newSettings.fixtureRules.regularSeasonWeeks=Number(d.weeks)||undefined;
+        leagues[id]={id,name:d.name,description:d.description,createdAt:new Date().toISOString(),joinCode:makeLeagueJoinCode(),members:[{userId:String(adminUser.id),email:adminUser.email||'',username:'',franchise:'',team:'',role:'commissioner',status:'active',addedAt:new Date().toISOString()}],state:{teamMap:{},settings:newSettings,replays:{}}};
+        STATE.teamMap={}; STATE.replays={}; STATE.settings=Object.assign({},newSettings,{leagues,activeLeagueId:id});
+        try{
+          if(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(supabase)){
+            // Create the league itself with zero franchises. Franchise definitions
+            // are optional and are added afterward through the same authoritative
+            // sbl_create_franchise RPC used by Manage Franchises.
+            const created=await SBL.leagueDb.createLeague({name:d.name,description:d.description,joinCode:leagues[id].joinCode,createdBy:String(adminUser.id),state:{teamMap:{},settings:newSettings,replays:{}}},supabase);
+            SBL.leagueDb.setSelectedLeagueId(created.id);
+            STATE.settings.activeLeagueId=created.id;
+            for(const franchise of d.franchises){
+              await SBL.leagueDb.createFranchise(created.id,franchise.name,franchise.conference,franchise.metadata||{},supabase);
+            }
+            // Refresh the normalized registry so the admin page immediately sees
+            // the UUID-backed league rather than the temporary legacy slug.
+            const visible=await SBL.leagueDb.listAll(supabase);
+            STATE.settings.leagues={};
+            for(const l of visible){ const full=await SBL.leagueDb.getLeague(l.id,supabase); if(full) STATE.settings.leagues[l.id]=full; }
+            await loadState();
+          }else{
+            await deleteAllRemote();await saveReplays();await savePublishedRosters({});
+          }
+          await logAdminAction('create_league',`Created and activated league "${d.name}".`,{leagueId:STATE.settings.activeLeagueId,name:d.name});
+          leagueSetupDraft=null;leagueSetupStep=1;focusManageFranchisesAfterCreate=true;renderTicker();goToTab('league');
+        }catch(e){console.error(e);status.textContent=e.message||'Could not create the league.';}
+      };
+      document.getElementById('setupAddFranchise')?.addEventListener('click',()=>{const n=document.getElementById('setupFranchiseName').value.trim();if(!n)return; if(d.franchises.some(f=>f.name.toLowerCase()===n.toLowerCase())){status.textContent='That franchise already exists.';return;} d.franchises.push({name:n,conference:document.getElementById('setupFranchiseConf').value});renderLeagueManager();});
+      document.getElementById('setupPasteAdd')?.addEventListener('click',()=>{const names=document.getElementById('setupFranchisePaste').value.split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean);let added=0;names.forEach(n=>{if(!d.franchises.some(f=>f.name.toLowerCase()===n.toLowerCase())){d.franchises.push({name:n,conference:d.franchises.length%2?'b':'a'});added++;}});status.textContent=added?`Added ${added} franchise${added===1?'':'s'}.`:'No new franchise names were found.';renderLeagueManager();});
+      contentEl.querySelectorAll('[data-setup-remove-franchise]').forEach(btn=>btn.addEventListener('click',()=>{d.franchises.splice(Number(btn.dataset.setupRemoveFranchise),1);renderLeagueManager();}));
+      contentEl.querySelectorAll('[data-setup-preset]').forEach(btn=>btn.addEventListener('click',()=>{if(btn.dataset.setupPreset==='standard12'){d.interConferencePerWeek=1;d.maxGamesPerTeamPerWeek=1;if(d.franchises.length===12)d.franchises.forEach((f,i)=>f.conference=i<6?'a':'b');if(!d.weeks)d.weeks='11';}else{d.interConferencePerWeek=0;d.maxGamesPerTeamPerWeek=1;}renderLeagueManager();}));
+      return;
+    }
+
+    const definitions=STATE.settings.franchiseDefinitions && typeof STATE.settings.franchiseDefinitions==='object' ? STATE.settings.franchiseDefinitions : {};
+    const franchiseList=configuredFranchises();
+    const rows=Object.values(leagues).sort((a,b)=>String(a.name||a.id).localeCompare(String(b.name||b.id)));
+    contentEl.innerHTML=`<div class="admin-section league-manager">
+      <div class="admin-section-title"><div><div class="admin-dashboard-kicker">League Manager</div><h2>One installation, multiple leagues</h2><div class="note">Each league has its own franchises, rosters, season, replays, trades, draft and Finals.</div></div><button class="primary" id="startLeagueSetup">Set up a league</button></div>
+      <div class="league-manager-active panel"><div><span class="league-manager-label">Active league</span><strong>${SBL.pokemon.escapeHtml(active.name || activeId)}</strong><span class="note">${SBL.pokemon.escapeHtml(active.description || 'No description')}</span></div><span class="badge update-badge-league">LIVE</span></div>
+      <div class="panel league-manager-quick"><div><h3>Get started</h3><div class="note">New league? Use the guided setup instead of configuring every section separately.</div></div><div class="league-manager-quick-actions"><button class="primary" id="startLeagueSetup2">Set up a new league</button><button class="ghost" id="goCurrentSeason">Open current league settings</button></div></div>
+      <div class="panel manage-franchises-panel"><div class="league-manager-panel-head"><div><h3>Manage Franchises</h3><div class="note">Create franchise definitions independently of membership and ownership. New franchises start available, unlocked and unassigned.</div></div><span class="badge" id="normalizedFranchiseCount">Loading…</span></div><div class="manage-franchise-add-row"><input id="normalizedFranchiseName" type="text" maxlength="120" placeholder="Franchise name" aria-label="Franchise name"><select id="normalizedFranchiseConference" aria-label="Conference"><option value="a">${SBL.pokemon.escapeHtml(STATE.settings.conferenceNames?.a||'Conference A')}</option><option value="b">${SBL.pokemon.escapeHtml(STATE.settings.conferenceNames?.b||'Conference B')}</option></select><button class="primary small" id="addNormalizedFranchise">Add franchise</button></div><div id="normalizedFranchiseStatus" class="note"></div><div id="normalizedFranchiseList" class="league-franchise-list"><div class="empty-state">Loading franchises…</div></div></div>
+      <div class="panel league-members-panel"><div class="league-manager-panel-head"><div><h3>Membership Requests</h3><div class="note">Only genuinely pending rows from authoritative <code>league_members</code> are shown here. Approve/reject uses the CP3.1 RPCs and never assigns a franchise.</div></div><span class="badge" id="leagueMemberCount">0</span></div><div id="leagueMembersList"><div class="empty-state">Loading pending requests…</div></div><div id="leagueMemberStatus" class="note"></div></div>
+      <div class="panel league-members-panel"><div class="league-manager-panel-head"><div><h3>League Members</h3><div class="note">Active/non-pending member management remains separate from the membership-request workflow.</div></div></div><div class="league-invite-strip"><div><span class="admin-dashboard-kicker">Invite code</span><strong>${SBL.pokemon.escapeHtml(active.joinCode||'--------')}</strong><span class="note">Share this code with players you want to invite. Join requests require admin approval.</span></div><button class="ghost small" id="regenerateLeagueCode">Regenerate</button></div><div id="leagueActiveMembersList"><div class="empty-state">Loading members…</div></div><div class="league-member-add"><select id="leagueMemberUser"><option value="">Select a user…</option></select><select id="leagueMemberRole"><option value="manager">Manager</option><option value="commissioner">Commissioner</option></select><button class="primary small" id="addLeagueMember">Add member</button></div></div>
+      <div class="panel"><div class="league-manager-panel-head"><div><h3>Available leagues</h3><div class="note">Switch the live dataset without duplicating the application.</div></div><span class="badge">${rows.length}</span></div><div class="league-manager-list">${rows.map(l=>`<article class="league-manager-card ${l.id===activeId?'active':''}"><div class="league-manager-card-main"><div class="league-manager-card-title">${SBL.pokemon.escapeHtml(l.name||l.id)}</div><div class="note">${SBL.pokemon.escapeHtml(l.description||'No description')}</div><div class="league-manager-meta">${l.id===activeId?'Currently serving this league':'Saved league profile'}</div></div><div class="foot-actions">${l.id!==activeId?`<button class="primary small" data-switch-league="${SBL.pokemon.escapeHtml(l.id)}">Switch to league</button>`:'<span class="badge">Active</span>'}${l.id!=='main'&&l.id!==activeId?`<button class="ghost small danger-btn" data-delete-league="${SBL.pokemon.escapeHtml(l.id)}">Delete</button>`:''}</div></article>`).join('')}</div></div>
+    </div>`;
+    if(focusManageFranchisesAfterCreate){
+      focusManageFranchisesAfterCreate=false;
+      requestAnimationFrame(()=>document.querySelector('.manage-franchises-panel')?.scrollIntoView({behavior:'smooth',block:'start'}));
+    }
+    const franchiseCount=document.getElementById('normalizedFranchiseCount');
+    const franchiseListEl=document.getElementById('normalizedFranchiseList');
+    const franchiseStatus=document.getElementById('normalizedFranchiseStatus');
+    const franchiseNameInput=document.getElementById('normalizedFranchiseName');
+    const franchiseConferenceInput=document.getElementById('normalizedFranchiseConference');
+
+    const drawNormalizedFranchises=async()=>{
+      if(!franchiseListEl || !activeId || !SBL.leagueDb?.listFranchises) return;
+      try{
+        const rows=await SBL.leagueDb.listFranchises(activeId,supabase);
+        if(franchiseCount) franchiseCount.textContent=String(rows.length);
+        if(!rows.length){
+          franchiseListEl.innerHTML='<div class="empty-state">No normalized franchises exist yet. Add the first one above.</div>';
+          return;
+        }
+        franchiseListEl.innerHTML=rows.map(f=>`<div class="league-franchise-row"><div><strong>${SBL.pokemon.escapeHtml(f.name)}</strong><span class="note">${f.conference?SBL.pokemon.escapeHtml((STATE.settings.conferenceNames||{})[f.conference]||f.conference):'Conference not assigned'} · ${SBL.pokemon.escapeHtml(f.claim_state||'available')}</span></div><span class="note">${f.claim_state==='locked'?'Locked':'No owner'}</span></div>`).join('');
+      }catch(e){
+        if(franchiseCount) franchiseCount.textContent='—';
+        if(franchiseListEl) franchiseListEl.innerHTML=`<div class="empty-state">Could not load normalized franchises: ${SBL.pokemon.escapeHtml(e.message||e)}</div>`;
+      }
+    };
+    document.getElementById('addNormalizedFranchise')?.addEventListener('click',async()=>{
+      const name=String(franchiseNameInput?.value||'').trim();
+      const conference=String(franchiseConferenceInput?.value||'').trim();
+      if(!name){ if(franchiseStatus) franchiseStatus.textContent='Enter a franchise name first.'; return; }
+      const btn=document.getElementById('addNormalizedFranchise');
+      if(btn) btn.disabled=true;
+      if(franchiseStatus) franchiseStatus.textContent='Creating franchise…';
+      try{
+        await SBL.leagueDb.createFranchise(activeId,name,conference,{},supabase);
+        if(franchiseNameInput) franchiseNameInput.value='';
+        if(franchiseStatus) franchiseStatus.textContent=`Created "${name}". It has no owner or request.`;
+        await drawNormalizedFranchises();
+      }catch(e){
+        if(franchiseStatus) franchiseStatus.textContent=e.message||'Could not create franchise.';
+      }finally{ if(btn) btn.disabled=false; }
+    });
+    franchiseNameInput?.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('addNormalizedFranchise')?.click();});
+    drawNormalizedFranchises();
+
+    const memberStatus=document.getElementById('leagueMemberStatus');
+    const memberUser=document.getElementById('leagueMemberUser');
+    const memberFranchise=document.getElementById('leagueMemberFranchise');
+    const memberRole=document.getElementById('leagueMemberRole');
+    (async()=>{try{
+      if(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(supabase)){
+        const normalized=await SBL.leagueDb.getLeague(activeId,supabase);
+        if(normalized && Array.isArray(normalized.members)){
+          active.members=normalized.members.map(m=>Object.assign({},m,{status:m.status||'active'}));
+        }
+      }
+      const profiles=await loadLeagueMemberProfiles();
+      const pendingList=document.getElementById('leagueMembersList');
+      const activeList=document.getElementById('leagueActiveMembersList');
+      const pendingMembers=()=>leagueMembers(active).filter(m=>String(m.status||'').toLowerCase()==='pending');
+      const drawPending=()=>{
+        const pending=pendingMembers();
+        document.getElementById('leagueMemberCount').textContent=String(pending.length);
+        pendingList.innerHTML=pending.length ? pending.map((m,i)=>`<div class="league-member-row pending"><div><strong>${SBL.pokemon.escapeHtml(memberDisplayName(m,profiles))}</strong><span class="note">${SBL.pokemon.escapeHtml(m.email||profiles.find(p=>String(p.id)===String(m.userId))?.email||'')} · Join request pending</span></div><span class="league-member-pending">Awaiting approval</span><button class="primary small" data-approve-member="${i}">Approve</button><button class="ghost small danger-btn" data-reject-member="${i}">Reject</button></div>`).join('') : '<div class="empty-state">No pending membership requests.</div>';
+        pendingList.querySelectorAll('[data-approve-member]').forEach(el=>el.addEventListener('click',async()=>{
+          const i=Number(el.dataset.approveMember), m=pendingMembers()[i]; if(!m?.userId) return; el.disabled=true;
+          try{
+            const {data,error}=await supabase.rpc('sbl_approve_league_membership',{p_league_id:activeId,p_user_id:m.userId});
+            if(error) throw error;
+            m.status=data?.status||'active'; m.approvedAt=data?.approved_at||new Date().toISOString();
+            m.franchiseId=data?.franchise_id||null; m.franchise=''; m.team='';
+            await logAdminAction('approve_league_member',`Approved ${memberDisplayName(m,profiles)} for league "${active.name||activeId}".`,{leagueId:activeId,userId:m.userId});
+            memberStatus.textContent=`Approved ${memberDisplayName(m,profiles)}. Membership is active; no franchise was assigned.`;
+            drawPending(); drawActive();
+          }catch(e){ memberStatus.textContent='Could not approve membership: '+(e?.message||e); el.disabled=false; }
+        }));
+        pendingList.querySelectorAll('[data-reject-member]').forEach(el=>el.addEventListener('click',async()=>{
+          const i=Number(el.dataset.rejectMember), m=pendingMembers()[i]; if(!m?.userId) return;
+          const reason=window.prompt(`Reason for rejecting ${memberDisplayName(m,profiles)}'s league membership:`);
+          if(reason===null) return;
+          const trimmed=String(reason).trim();
+          if(!trimmed){ memberStatus.textContent='A rejection reason is required.'; return; }
+          el.disabled=true;
+          try{
+            const {data,error}=await supabase.rpc('sbl_reject_league_membership',{p_league_id:activeId,p_user_id:m.userId});
+            if(error) throw error;
+            m.status=data?.status||'rejected'; m.approvedAt=null;
+            await logAdminAction('reject_league_member',`Rejected ${memberDisplayName(m,profiles)} from league "${active.name||activeId}".`,{leagueId:activeId,userId:m.userId,rejectionReason:trimmed});
+            memberStatus.textContent=`Rejected ${memberDisplayName(m,profiles)}. Reason recorded in the admin action log.`;
+            drawPending(); drawActive();
+          }catch(e){ memberStatus.textContent='Could not reject membership: '+(e?.message||e); el.disabled=false; }
+        }));
+      };
+      const drawActive=()=>{
+        const members=leagueMembers(active).filter(m=>String(m.status||'').toLowerCase()!=='pending');
+        activeList.innerHTML=members.length ? members.map((m,i)=>`<div class="league-member-row"><div><strong>${SBL.pokemon.escapeHtml(memberDisplayName(m,profiles))}</strong><span class="note">${SBL.pokemon.escapeHtml(m.email||profiles.find(p=>String(p.id)===String(m.userId))?.email||'')} · ${SBL.pokemon.escapeHtml(m.status||'active')}</span></div><select data-member-role="${i}"><option value="player" ${(m.role||'player')==='player'?'selected':''}>Player</option><option value="manager" ${(m.role||'player')==='manager'?'selected':''}>Manager</option><option value="commissioner" ${(m.role||'player')==='commissioner'?'selected':''}>Commissioner</option></select><button class="ghost small danger-btn" data-remove-member="${i}">Remove</button></div>`).join('') : '<div class="empty-state">No non-pending members yet.</div>';
+        activeList.querySelectorAll('[data-member-role]').forEach(el=>el.addEventListener('change',async()=>{const i=Number(el.dataset.memberRole);const members=leagueMembers(active).filter(m=>String(m.status||'').toLowerCase()!=='pending');const member=members[i];if(!member?.userId)return;const nextRole=String(el.value||'player').toLowerCase();el.disabled=true;try{const {data,error}=await supabase.rpc('sbl_set_league_member_role',{target_league:activeId,target_user:member.userId,new_role:nextRole});if(error)throw error;member.role=data?.role||nextRole;await saveSharedState();await logAdminAction('set_league_member_role',`Changed league member role to ${member.role}.`,{leagueId:activeId,userId:member.userId,role:member.role});drawActive();}catch(e){el.value=member.role||'player';alert('Could not change league member role: '+(e?.message||e));el.disabled=false;}}));
+        activeList.querySelectorAll('[data-remove-member]').forEach(el=>el.addEventListener('click',async()=>{const i=Number(el.dataset.removeMember);const members=leagueMembers(active).filter(m=>String(m.status||'').toLowerCase()!=='pending');const removed=members[i];if(!removed)return;const actualIndex=leagueMembers(active).indexOf(removed);leagueMembers(active).splice(actualIndex,1);await saveSharedState();await logAdminAction('remove_league_member',`Removed ${memberDisplayName(removed,profiles)} from league "${active.name||activeId}".`,{leagueId:activeId,userId:removed?.userId});drawPending();drawActive();}));
+      };
+      memberUser.innerHTML='<option value="">Select a user…</option>'+profiles.filter(p=>!leagueMembers(active).some(m=>String(m.userId)===String(p.id))).map(p=>`<option value="${SBL.pokemon.escapeHtml(p.id)}">${SBL.pokemon.escapeHtml(p.username||p.email||p.id)}${p.team_name?' · '+SBL.pokemon.escapeHtml(p.team_name):''}</option>`).join('');
+      drawPending(); drawActive();
+      document.getElementById('addLeagueMember').onclick=async()=>{const userId=memberUser.value;if(!userId){memberStatus.textContent='Select a user first.';return;}if(leagueMembers(active).some(m=>String(m.userId)===String(userId))){memberStatus.textContent='That user is already a member.';return;}const p=profiles.find(x=>String(x.id)===String(userId));const member={userId,email:p?.email||'',username:p?.username||'',role:memberRole.value||'manager',status:'active',addedAt:new Date().toISOString()};leagueMembers(active).push(member);await saveSharedState();await logAdminAction('add_league_member',`Added ${memberDisplayName(member,profiles)} to league "${active.name||activeId}".`,{leagueId:activeId,userId,role:member.role});memberUser.value='';drawPending();drawActive();memberStatus.textContent='Member added.';};
+    }catch(e){const pendingList=document.getElementById('leagueMembersList');if(pendingList) pendingList.innerHTML=`<div class="empty-state">Could not load membership requests: ${SBL.pokemon.escapeHtml(e.message||e)}</div>`;}})();
+    document.getElementById('regenerateLeagueCode')?.addEventListener('click',async()=>{active.joinCode=makeLeagueJoinCode();await saveSharedState();await logAdminAction('regenerate_league_code',`Regenerated invite code for league "${active.name||activeId}".`,{leagueId:activeId});renderLeagueManager();});
+
+    const start=()=>{leagueSetupDraft=blankLeagueSetup();leagueSetupStep=1;renderLeagueManager();};
+    document.getElementById('startLeagueSetup')?.addEventListener('click',start);document.getElementById('startLeagueSetup2')?.addEventListener('click',start);
+    document.getElementById('goCurrentSeason')?.addEventListener('click',()=>goToTab('seasonsetup'));
+    contentEl.querySelectorAll('[data-switch-league]').forEach(btn=>btn.addEventListener('click',async()=>{btn.disabled=true;try{await switchLeague(btn.dataset.switchLeague);renderLeagueManager();}catch(e){showAdminError(e.message);btn.disabled=false;}}));
+    contentEl.querySelectorAll('[data-delete-league]').forEach(btn=>btn.addEventListener('click',async()=>{const id=btn.dataset.deleteLeague;if(!confirm(`Delete the saved league "${leagues[id]?.name||id}"? Its saved state will be permanently removed from this installation.`))return;delete leagues[id];await saveSharedState();await logAdminAction('delete_league',`Deleted saved league "${id}".`,{leagueId:id});renderLeagueManager();}));
+  }
+
   function renderSettings(mode='franchises'){
     const showFranchises = mode === 'franchises';
     const showData = mode === 'data';
@@ -4412,7 +4966,7 @@ function fixtureMatchCount(fixtureData){const f=Array.isArray(fixtureData)?fixtu
     contentEl.innerHTML = `
       ${showFranchises ? `
       <div class="admin-section"><div class="admin-section-title"><div><h2>Franchises &amp; Users</h2><div class="note">Manage the mapping between Showdown usernames and league franchises, then clean up likely duplicates.</div></div></div>
-      <div class="panel"><div class="admin-subsection"><h3>Franchise mapping</h3><div class="note">Map each Showdown username to your league's franchise/team name. These mappings are the source for franchise lists, stats grouping, ordering, and budgets.</div><div id="mapRows" style="margin-top:12px;"></div><div class="map-row"><input type="text" id="newUser" placeholder="showdown username"><input type="text" id="newTeam" placeholder="team name"><button class="ghost small" id="addMap">Add</button></div></div></div>
+      <div class="panel"><div class="admin-subsection"><h3>Showdown → franchise mapping</h3><div class="note">Choose from the franchises defined in League Manager. Replay assignment uses these same franchise names, so stats never depend on manually retyping a team name.</div><div id="mapRows" style="margin-top:12px;"></div><div class="map-row"><input type="text" id="newUser" placeholder="Showdown username"><select id="newTeam"><option value="">Select franchise…</option>${franchiseOptions()}</select><button class="ghost small" id="addMap">Add mapping</button></div></div></div>
       <div class="panel"><div class="admin-subsection"><h3>Duplicate users</h3><div class="note">Review usernames that look like the same person typed differently and merge them into the canonical mapping.</div><div id="dupPlayers" style="margin-top:12px;"></div></div></div>
       <div class="panel"><div class="admin-subsection"><h3>Duplicate franchises</h3><div class="note">Review likely duplicate team tags whose rosters overlap heavily and merge them under the established franchise name.</div><div id="dupTeams" style="margin-top:12px;"></div></div></div></div>` : ''}
       ${showSystem ? `
@@ -4429,9 +4983,22 @@ function fixtureMatchCount(fixtureData){const f=Array.isArray(fixtureData)?fixtu
         entries.map(([u,t])=>`
         <div class="map-row">
           <input type="text" value="${SBL.pokemon.escapeHtml(u)}" disabled>
-          <input type="text" value="${SBL.pokemon.escapeHtml(t)}" disabled>
+          <select class="franchise-map-select" data-map-user="${SBL.pokemon.escapeHtml(u)}"><option value="">Unassigned</option>${franchiseOptions(t)}</select>
           <button class="ghost small danger-btn" data-del="${SBL.pokemon.escapeHtml(u)}">Remove</button>
         </div>`).join('');
+      mapRows.querySelectorAll('[data-map-user]').forEach(select=>{
+        select.addEventListener('change', async ()=>{
+          const username = select.dataset.mapUser;
+          const franchise = String(select.value || '').trim();
+          if(!username) return;
+          if(franchise) STATE.teamMap[username] = franchise;
+          else delete STATE.teamMap[username];
+          await saveTeamMap();
+          await logAdminAction('set_player_mapping', `Mapped ${username} to franchise "${franchise || 'Unassigned'}".`, {username, franchise:franchise || null});
+          renderTicker();
+          render();
+        });
+      });
       mapRows.querySelectorAll('[data-del]').forEach(btn=>{
         btn.addEventListener('click', async ()=>{
           const removedTeam = STATE.teamMap[btn.dataset.del];

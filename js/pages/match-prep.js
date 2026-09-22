@@ -819,9 +819,6 @@ const ROLE_RULES=[
 ];
 function inferRoles(m){const moves=new Set((m.gameSets||[]).flatMap(g=>g.moves||[]).map(moveKey));const roles=[];for(const [role,keys] of ROLE_RULES){if(keys.some(k=>moves.has(k)))roles.push(role)}return roles.length?roles:['Unclassified'];}
 function aggregateMoveCounts(mons){const counts={};for(const m of mons)for(const g of m.gameSets||[])for(const move of g.moves||[]){const k=String(move).trim();if(!k)continue;counts[k]=(counts[k]||0)+1}return counts}
-function leadFromReplay(r,side){const candidates=[r.leads?.[side],r.lead?.[side],r.firstPokemon?.[side],r.firstSwitch?.[side]];for(const c of candidates){if(typeof c==='string'&&c)return c;if(c?.species)return c.species}return null}
-function teamLeads(team){const counts={};for(const r of rowsForTeam(team)){const side=sideForTeam(r,team);const lead=side?leadFromReplay(r,side):null;if(lead)counts[lead]=(counts[lead]||0)+1}return counts}
-function weaknessSummary(typesByMon){const out={};for(const t of TYPE_NAMES)out[t]={weak:0,resist:0,immune:0};for(const types of Object.values(typesByMon)){for(const atk of TYPE_NAMES){const m=defensiveMultiplier(atk,types);if(m>=2)out[atk].weak++;else if(m===0)out[atk].immune++;else if(m<=.5)out[atk].resist++}}return out}
 function pct(n,d){return d?Math.round(n/d*100):0}
 
 function roleDescription(role){
@@ -891,6 +888,36 @@ async function comparisonTypes(species){
 }
 
 
+function matchupNoteWeek(team, opponent){
+  const rounds=Array.isArray(STATE.settings?.fixture?.rounds)?STATE.settings.fixture.rounds:[];
+  const same=(a,b)=>teamKey(a)===teamKey(b);
+  const played=(week,home,away)=>Object.values(STATE.replays||{}).some(r=>{
+    if(!r || String(r.week||'Unassigned')!==String(week) || !r.players)return false;
+    const a=teamFor(r.players.p1),b=teamFor(r.players.p2);
+    return (same(a,home)&&same(b,away))||(same(a,away)&&same(b,home));
+  });
+  let historicalMatch='';
+  for(const round of rounds){
+    for(const match of (round.matches||[])){
+      if(!((same(match.home,team)&&same(match.away,opponent))||(same(match.away,team)&&same(match.home,opponent))))continue;
+      const week=String(round.week||'Unassigned');
+      if(!played(week,match.home,match.away))return week;
+      if(!historicalMatch)historicalMatch=week;
+    }
+  }
+  if(historicalMatch)return historicalMatch;
+  const weeks=Object.values(STATE.replays||{}).map(r=>String(r?.week||'').trim()).filter(Boolean);
+  if(weeks.length){
+    weeks.sort((a,b)=>{const na=Number(String(a).replace(/[^0-9.-]/g,'')),nb=Number(String(b).replace(/[^0-9.-]/g,''));if(Number.isFinite(na)&&Number.isFinite(nb))return nb-na;return b.localeCompare(a,undefined,{numeric:true});});
+    return weeks[0];
+  }
+  return 'Unassigned';
+}
+function notesWeekLabel(week){
+  const raw=String(week||'Unassigned');
+  return /^\d+$/.test(raw)?`Week ${raw}`:raw;
+}
+
 async function renderMatchPrep(yourTeam, selectedOpponent){
   const names=teamNames();
   const opponent=selectedOpponent && !sameTeam(selectedOpponent,yourTeam)
@@ -904,6 +931,11 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
   const all=[...your,...opp];
   const typePairs=await Promise.all(all.map(async m=>[m.species,await fetchTypes(m.species)]));
   const typeMap=Object.fromEntries(typePairs);
+  const matchupWeek=matchupNoteWeek(yourTeam,opponent);
+  // Notes are lazy-loaded when the card is opened so team/opponent/section
+  // selectors never wait on a separate notes-history request.
+  const matchupNote=null;
+  const matchupNotes=[];
   const rosterLookup=(team)=>{
     const out=new Map();
     for(const raw of rosterForTeam(team)){
@@ -1539,7 +1571,18 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
   const switchSection=`<section id="prepSwitchAnalyser" class="panel prep-selectable-section" data-prep-section="switch"><div class="switch-analyser-head"><div><h2>Switch-In Analyser</h2><p class="panel-desc">Choose the attacking side, damaging move, and switch-in defender.</p></div><button type="button" id="prepSwitchRoleToggle" class="switch-role-toggle" aria-pressed="false">↔ Swap attacker / defender</button></div><p class="panel-desc">Choose an attacking Pokémon and one of its damaging learnset moves. Set the attacker EVs and each switch-in Pokémon's defensive EVs individually. Weather and terrain only affect moves they actually influence.</p><div class="prep-switch-controls"><div><label>Attacker Pokémon <span class="switch-side-label">(${switchAttackerSide==='your'?'Your Team':'Opponent Team'})</span></label><select id="prepSwitchMon">${switchAttackerMons.map(m=>`<option value="${esc(m.species)}" ${m.species===switchMon?.species?'selected':''}>${esc(displaySpecies(m))}</option>`).join('')}</select></div><div><label>Damaging Move</label><select id="prepSwitchMove"><option value="">${observedMoveOptions.length?'Select a damaging move':'Loading moves…'}</option>${observedMoveOptions.map(m=>`<option value="${esc(m)}" ${norm(m)===norm(defaultMove)?'selected':''}>${esc(m)}</option>`).join('')}</select></div><div id="prepSwitchHitsField" style="display:none"><label>Number of Hits</label><select id="prepSwitchHits"><option value="">Auto</option></select></div></div><div class="prep-item-controls"><div><label>Attacker Item</label>${switchItemSelect('prepSwitchAtkItem',switchAtkItem,'offensive')}</div><div><label>Switch-In Item</label>${switchItemSelect('prepSwitchDefItem',switchDefItem,'defensive')}</div><div><label>Attacker EVs</label><button type="button" id="prepSwitchAtkEVs" class="damage-calc-primary">Set EVs</button></div><div><label>Defensive EVs</label><button type="button" id="prepSwitchAllDefEVs" class="prep-all-evs-btn">Set All EVs</button></div></div><div class="prep-item-controls"><div><label>Weather</label>${switchFieldSelect('prepSwitchWeather',switchWeather,switchWeatherOptions)}</div><div><label>Terrain</label>${switchFieldSelect('prepSwitchTerrain',switchTerrain,switchTerrainOptions)}</div></div>${switchRows}</section>`;
 
   const latestMatchesSection=matchHistoryForTeam(opponent,false).replace('<section class="panel">','<section id="prepLatestMatches" class="panel prep-selectable-section" data-prep-section="matches">');
-  return `<section class="panel prep-hero-panel"><div class="prep-hero"><div><h2>Match Prep</h2><p class="panel-desc" style="margin:0">Prepare <strong>${esc(yourTeam)}</strong> for a match against <strong>${esc(opponent)}</strong>. Match usage, scouting, recent replays and battle tools are combined here.</p></div><div class="prep-hero-controls"><div><label>Your Team</label><select id="prepYourTeam">${names.map(n=>`<option value="${esc(n)}" ${sameTeam(n,yourTeam)?'selected':''}>${esc(n)}</option>`).join('')}</select></div><div><label>Opponent</label><select id="prepOpponent">${names.filter(n=>!sameTeam(n,yourTeam)).map(n=>`<option value="${esc(n)}" ${sameTeam(n,opponent)?'selected':''}>${esc(n)}</option>`).join('')}</select></div></div><div class="prep-side-swap"><span class="prep-side-swap-label">Team sides</span><button type="button" id="prepSwapTeams" aria-label="Swap your team and opponent">↔ Swap Team</button></div></div></section>
+  return `<section class="panel prep-hero-panel"><div class="prep-hero"><div><h2>Match Prep</h2><p class="panel-desc" style="margin:0">Prepare <strong>${esc(yourTeam)}</strong> for a match against <strong>${esc(opponent)}</strong>. Match usage, scouting, recent replays and battle tools are combined here.</p></div><div class="prep-hero-controls"><div><label>Your Team</label><select id="prepYourTeam">${names.map(n=>`<option value="${esc(n)}" ${sameTeam(n,yourTeam)?'selected':''}>${esc(n)}</option>`).join('')}</select></div><div><label>Opponent</label><select id="prepOpponent">${names.filter(n=>!sameTeam(n,yourTeam)).map(n=>`<option value="${esc(n)}" ${sameTeam(n,opponent)?'selected':''}>${esc(n)}</option>`).join('')}</select></div></div><div class="prep-side-swap"><span class="prep-side-swap-label">Team sides</span><button type="button" id="prepSwapTeams" aria-label="Swap your team and opponent">↔ Swap Team</button><button type="button" id="prepNotesToggle" class="prep-notes-toggle" aria-expanded="false" aria-controls="prepNotesPanel">✎ Notes <kbd>Alt+N</kbd>${matchupNote?.content?.trim()?' ·':''}</button></div></div></section>
+  <div id="prepNotesBackdrop" class="prep-notes-backdrop" hidden></div>
+  <section id="prepNotesPanel" class="prep-notes-panel" hidden aria-label="Matchup notes" role="dialog" aria-modal="true" aria-labelledby="prepNotesTitle">
+    <div class="prep-notes-editor">
+      <div class="prep-notes-head"><div><div class="prep-notes-title-row"><strong id="prepNotesTitle">Notes for ${esc(opponent)}</strong><span class="prep-notes-shortcut">Alt+N</span></div><span class="small">Private matchup notes · organized by week</span></div><div class="prep-notes-head-actions"><span class="prep-notes-save-status" id="prepNotesStatus" aria-live="polite">Saved</span><button type="button" id="prepNotesClose" class="prep-notes-close" aria-label="Close notes">×</button></div></div>
+      <div class="prep-notes-toolbar"><label>Week <select id="prepNotesWeek">${[...new Set([matchupWeek,...matchupNotes.map(n=>String(n.week_key||'legacy'))])].map(w=>`<option value="${esc(w)}" ${String(w)===String(matchupWeek)?'selected':''}>${esc(notesWeekLabel(w))}${w==='legacy'?' · older':''}</option>`).join('')}</select></label><button type="button" id="prepNotesNewWeek" class="prep-notes-action">＋ New week</button><button type="button" id="prepNotesExport" class="prep-notes-action">Export</button></div>
+      <div id="prepNotesNewWeekRow" class="prep-notes-new-week" hidden><input id="prepNotesNewWeekInput" type="text" maxlength="40" placeholder="e.g. Week 6"><button type="button" id="prepNotesStartWeek">Start</button></div>
+      <textarea id="prepMatchupNotes" class="prep-notes-textarea" rows="6" placeholder="Write anything you want to remember about this matchup…">${esc(matchupNote?.content||'')}</textarea>
+      <div class="prep-notes-history"><span id="prepNotesHistoryLabel">${matchupNotes.length?`${matchupNotes.length} saved ${matchupNotes.length===1?'week':'weeks'}`:'No older notes yet'}</span><span>Older notes stay available above</span></div>
+      <div class="prep-notes-footer"><span>Esc to close</span><span>Saved to this matchup</span></div>
+    </div>
+  </section>
   <section class="panel prep-section-picker">
     <div class="prep-section-tabs" id="prepSectionTabs" role="tablist" aria-label="Match Prep sections">
       <button type="button" class="prep-section-tab" data-section="overview" role="tab">Team Overview</button>
@@ -1573,6 +1616,8 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
 }
 
 async function render(){
+  const renderToken=(STATE.prepRenderToken||0)+1;
+  STATE.prepRenderToken=renderToken;
   const sel=$('teamSelect');const team=sel.value;
   if(!team){$('main').innerHTML='<div class="panel"><div class="empty">No franchise data available.</div></div>';return}
   {
@@ -1594,6 +1639,9 @@ async function render(){
     // prevents the visible page-flash that used to look like a reload.
     try{
       const nextMarkup=await renderMatchPrep(yourTeam,opponent);
+      // A selector can change again while the async view is being built. Never
+      // let an older render win the race and replace the newer selection.
+      if(renderToken!==STATE.prepRenderToken) return;
       const main=$('main');
       if(main) main.innerHTML=nextMarkup;
     }catch(e){
@@ -1616,6 +1664,120 @@ async function render(){
       });
     };
     prepSectionTabs.forEach(tab=>tab.addEventListener('click',()=>showPrepSection(tab.dataset.section)));
+
+    const notesStatus=$('prepNotesStatus');
+    const notesWeekSelect=$('prepNotesWeek');
+    const matchupWeek=matchupNoteWeek(yourTeam,opponent);
+    let activeNotesWeek=matchupWeek;
+    let matchupNotes=[];
+    let matchupNotesLoaded=false;
+    let matchupNotesLoadPromise=null;
+    let matchupSaveTimer=null;
+    let matchupSaveInFlight=null;
+    const setNotesStatus=(text)=>{if(notesStatus)notesStatus.textContent=text;};
+    const noteForWeek=(week)=>matchupNotes.find(n=>String(n.week_key||'legacy')===String(week))||null;
+    const refreshWeekOptions=()=>{
+      const values=[activeNotesWeek,...matchupNotes.map(n=>String(n.week_key||'legacy'))];
+      const unique=[...new Set(values)];
+      if(!unique.includes(matchupWeek))unique.unshift(matchupWeek);
+      if(notesWeekSelect){notesWeekSelect.innerHTML=unique.map(w=>`<option value="${esc(w)}" ${String(w)===String(activeNotesWeek)?'selected':''}>${esc(notesWeekLabel(w))}${w==='legacy'?' · older':''}</option>`).join('');}
+    };
+    const loadNotesData=async()=>{
+      if(matchupNotesLoaded)return matchupNotes;
+      if(matchupNotesLoadPromise)return matchupNotesLoadPromise;
+      matchupNotesLoadPromise=(async()=>{
+        try{
+          matchupNotes=await SBL.notes?.getMatchupNotes?.(STATE.prepOpponent)||[];
+          matchupNotesLoaded=true;
+          refreshWeekOptions();
+        }catch(err){
+          console.warn('Matchup notes history load failed:',err);
+          matchupNotes=[];
+          refreshWeekOptions();
+        }finally{
+          matchupNotesLoadPromise=null;
+        }
+        return matchupNotes;
+      })();
+      return matchupNotesLoadPromise;
+    };
+    const loadNotesWeek=async(week)=>{
+      activeNotesWeek=String(week||'Unassigned');
+      const field=$('prepMatchupNotes');
+      if(!field)return;
+      clearTimeout(matchupSaveTimer);
+      await loadNotesData();
+      const note=noteForWeek(activeNotesWeek);
+      field.value=note?.content||'';
+      setNotesStatus('Saved');
+      const hasCurrent=!!note?.content?.trim();
+      const btn=$('prepNotesToggle'); if(btn)btn.classList.toggle('has-note',hasCurrent);
+    };
+    const saveMatchupNote=async()=>{
+      const field=$('prepMatchupNotes'); if(!field)return;
+      const content=field.value;
+      setNotesStatus('Saving…');
+      try{
+        const data=await SBL.notes.setMatchupNote(STATE.prepOpponent,content,{weekKey:activeNotesWeek});
+        matchupNotes=matchupNotes.filter(n=>String(n.week_key||'')!==String(activeNotesWeek));
+        matchupNotes.push(data);
+        matchupNotes.sort((a,b)=>Date.parse(b.updated_at||'')-Date.parse(a.updated_at||''));
+        matchupNotesLoaded=true;
+        refreshWeekOptions();
+        setNotesStatus('Saved');
+      }catch(err){ console.error('Matchup note save failed:',err); setNotesStatus('Could not save'); }
+    };
+    const toggleNotes=async(open)=>{
+      const panel=$('prepNotesPanel'),backdrop=$('prepNotesBackdrop'),button=$('prepNotesToggle'); if(!panel||!button)return;
+      const next=typeof open==='boolean'?open:panel.hidden;
+      panel.hidden=!next; if(backdrop) backdrop.hidden=!next;
+      button.setAttribute('aria-expanded',next?'true':'false');
+      document.body.classList.toggle('prep-notes-open',next);
+      if(next){
+        await loadNotesData();
+        await loadNotesWeek(activeNotesWeek);
+        setTimeout(()=>{$('prepMatchupNotes')?.focus();},0);
+      }
+    };
+    $('prepNotesToggle')?.addEventListener('click',()=>{toggleNotes();});
+    $('prepNotesClose')?.addEventListener('click',()=>{toggleNotes(false);});
+    $('prepNotesBackdrop')?.addEventListener('click',()=>{toggleNotes(false);});
+    notesWeekSelect?.addEventListener('change',async()=>{await saveMatchupNote();await loadNotesWeek(notesWeekSelect.value);});
+    $('prepNotesNewWeek')?.addEventListener('click',()=>{const row=$('prepNotesNewWeekRow');if(row){row.hidden=!row.hidden;if(!row.hidden){$('prepNotesNewWeekInput')?.focus();}}});
+    $('prepNotesStartWeek')?.addEventListener('click',async()=>{
+      const input=$('prepNotesNewWeekInput'); const value=String(input?.value||'').trim();
+      if(!value){input?.focus();return;}
+      await loadNotesData();
+      await saveMatchupNote();
+      activeNotesWeek=value;
+      matchupNotes.push({week_key:value,content:'',updated_at:new Date().toISOString()});
+      refreshWeekOptions();
+      if(notesWeekSelect)notesWeekSelect.value=value;
+      const row=$('prepNotesNewWeekRow');if(row)row.hidden=true;
+      if(input)input.value='';
+      await loadNotesWeek(value);
+    });
+    $('prepNotesExport')?.addEventListener('click',async()=>{
+      try{
+        await loadNotesData();
+        await saveMatchupNote();
+        const rows=await SBL.notes.getMatchupNotes(STATE.prepOpponent);
+        const lines=[`Battle Tower Match Prep Notes`,`Opponent: ${STATE.prepOpponent}`,`Exported: ${new Date().toLocaleString()}`,'' ];
+        rows.slice().sort((a,b)=>String(a.week_key||'').localeCompare(String(b.week_key||''),undefined,{numeric:true})).forEach(row=>{lines.push(`## ${notesWeekLabel(row.week_key)}`,'',String(row.content||'').trim()||'(No note saved for this week.)','',`Last saved: ${row.updated_at||''}`,'');});
+        const blob=new Blob([lines.join('\n')],{type:'text/plain;charset=utf-8'});
+        const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`battle-tower-${String(STATE.prepOpponent).replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'').toLowerCase() || 'matchup'}-notes.txt`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+      }catch(err){console.error('Notes export failed:',err);setNotesStatus('Could not export');}
+    });
+    document.addEventListener('keydown',(event)=>{
+      const target=event.target;
+      const typing=target && (target.matches?.('input,textarea,select,[contenteditable="true"]') || target.isContentEditable);
+      if(event.key==='Escape' && !$('prepNotesPanel')?.hidden){ event.preventDefault(); toggleNotes(false); return; }
+      if(!typing && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.key.toLowerCase()==='n'){ event.preventDefault(); toggleNotes(); }
+    });
+    $('prepMatchupNotes')?.addEventListener('input',()=>{clearTimeout(matchupSaveTimer);setNotesStatus('Unsaved changes');matchupSaveTimer=setTimeout(saveMatchupNote,300);});
+    $('prepMatchupNotes')?.addEventListener('change',()=>{clearTimeout(matchupSaveTimer);saveMatchupNote();});
+    $('prepMatchupNotes')?.addEventListener('blur',()=>{clearTimeout(matchupSaveTimer);saveMatchupNote();});
+    refreshWeekOptions();
     showPrepSection(STATE.prepSection||'overview');
 
     // Type Chart: toggle between Defensive and Offensive matrices.
@@ -2476,6 +2638,8 @@ async function load(){
     const profile=await SBL.profiles.get(user.id, 'team_name', supabase);
     STATE.profileUserId=user.id; STATE.profileTeam=profile?.team_name||'';
     if(!STATE.profileTeam){ location.replace('index.html'); return; }
+    const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    if(!leagueId){ location.replace('index.html'); return; }
     document.getElementById('app').style.display = '';
     const {data,error}=await SBL.replays.load(supabase);
     if(error)throw error;

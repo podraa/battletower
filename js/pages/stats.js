@@ -102,7 +102,12 @@
 
   async function saveSharedState(){
      requireAdmin();
-     await SBL.replays.saveSharedState({teamMap:STATE.teamMap, settings:STATE.settings}, supabase);
+     try{
+       await SBL.replays.saveSharedState({teamMap:STATE.teamMap, settings:STATE.settings}, supabase);
+     }catch(err){
+       alert('Could not save changes: ' + (err?.message || err));
+       throw err;
+     }
    }
   async function saveTeamMap(){ await saveSharedState(); }
   async function saveSettings(){ await saveSharedState(); }
@@ -180,6 +185,11 @@
       return false;
     }
     adminUser = data.session.user;
+    const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    if(!leagueId){
+      location.replace('index.html');
+      return false;
+    }
     const app = document.getElementById('app');
     if(app) app.style.display = '';
     return true;
@@ -694,7 +704,7 @@
     team?.addEventListener('change',async e=>{STATE.settings.bannerTeam=e.target.value; await saveSettingsIfPossible(); renderTicker();});
   }
   async function saveSettingsIfPossible(){
-    if(IS_ADMIN_PAGE && adminUser){ try{ await saveSharedState(); }catch(e){ console.warn(e); } }
+    if(IS_ADMIN_PAGE && adminUser){ try{ await saveSharedState(); }catch(e){ console.warn(e); alert('Could not save changes: ' + (e?.message || e)); } }
     localStorage.setItem('sbl-banner-preferences', JSON.stringify({bannerMode:STATE.settings.bannerMode,bannerTeam:STATE.settings.bannerTeam}));
   }
 
