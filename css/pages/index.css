@@ -1088,3 +1088,74 @@ body{padding-top:58px }
 
 body{padding-top:58px;}
 @media(max-width:700px){body{padding-top:52px}}
+
+/* League selection home */
+body.league-selection-mode{padding-top:0}
+body.league-selection-mode .page-nav{display:flex}
+body.league-selection-mode #app{max-width:1320px;margin:0 auto;padding:64px 42px 56px}
+body.league-selection-mode #app>header{display:none}
+.league-home-shell{display:grid;grid-template-columns:minmax(280px,.72fr) minmax(0,1.28fr);min-height:560px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.league-home-intro{padding:42px 56px 42px 0;display:flex;flex-direction:column;align-items:flex-start;border-right:1px solid var(--border)}
+.league-home-overline{font:800 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--accent)}
+.league-home-mark{margin-top:auto;font:800 clamp(72px,9vw,128px)/.82 var(--sans);letter-spacing:-.09em;color:var(--text);opacity:.96}
+.league-home-intro h2{margin:28px 0 13px;font-size:clamp(34px,4.2vw,58px);line-height:.98;letter-spacing:-.055em;font-weight:780;max-width:480px}
+.league-home-intro p{margin:0;max-width:430px;color:var(--text-dim);font-size:14px;line-height:1.75}
+.league-home-intro-meta{display:flex;gap:20px;flex-wrap:wrap;margin-top:28px;padding-top:16px;border-top:1px solid var(--border);width:100%;font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em}
+.league-home-intro-meta b{font-family:var(--mono);font-size:13px;color:var(--text);margin-right:4px}
+.league-home-directory{padding:28px 0 0 34px;display:flex;flex-direction:column;min-width:0}
+.league-home-directory-head{display:flex;justify-content:space-between;align-items:flex-end;padding:0 4px 16px;border-bottom:1px solid var(--border)}
+.league-home-directory-head>div{display:flex;flex-direction:column;gap:5px}
+.league-home-directory-head span:first-child{font:800 10px/1 var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--text-dim)}
+.league-home-directory-head strong{font-size:18px;letter-spacing:-.02em}
+.league-home-directory-count{font:700 12px var(--mono);color:var(--text-dim)}
+.league-home-list{flex:1}
+.league-home-row{width:100%;display:grid;grid-template-columns:42px minmax(0,1fr) 150px 100px;gap:18px;align-items:center;text-align:left;border:0;border-bottom:1px solid var(--border);background:transparent;color:var(--text);padding:22px 4px;cursor:pointer;font:inherit;transition:background .16s ease,padding .16s ease}
+.league-home-row:hover{background:var(--panel);padding-left:12px;padding-right:12px}
+.league-home-row.selected{background:var(--panel-alt);padding-left:12px;padding-right:12px}
+.league-home-row:disabled{cursor:wait;opacity:.75}
+.league-home-row-index{font:600 11px var(--mono);color:var(--text-dim)}
+.league-home-row-main{min-width:0;display:flex;flex-direction:column;gap:6px}
+.league-home-row-main strong{font-size:18px;line-height:1.1;letter-spacing:-.025em;overflow-wrap:anywhere}
+.league-home-row-main span{font-size:11px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.league-home-row-stats{display:flex;flex-direction:column;gap:5px;font:600 10px/1.2 var(--mono);color:var(--text-dim);text-transform:uppercase}
+.league-home-row-status{display:flex;justify-content:flex-end;align-items:center;gap:8px;font:700 9px/1 var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);white-space:nowrap}
+.league-home-row-status b{font:700 15px/1 var(--sans);color:var(--text);transition:transform .15s ease}
+.league-home-row:hover .league-home-row-status b{transform:translate(2px,-2px)}
+.league-home-row.selected .league-home-row-status{color:var(--accent)}
+.league-home-directory-actions{display:flex;justify-content:flex-end;gap:8px;padding:18px 4px 0}
+.league-home-action-primary,.league-home-action-secondary{font:700 12px/1 var(--sans);cursor:pointer;border-radius:7px;padding:11px 15px;transition:transform .14s ease,border-color .14s ease,background .14s ease}
+.league-home-action-primary{border:1px solid var(--accent);background:var(--accent);color:var(--accent-text)}
+.league-home-action-secondary{border:1px solid var(--border);background:transparent;color:var(--text)}
+.league-home-action-primary:hover,.league-home-action-secondary:hover{transform:translateY(-1px)}
+.league-home-action-secondary:hover{border-color:var(--text-dim);background:var(--panel)}
+.league-home-action-primary span{margin-left:8px}
+.league-home-pending{margin-top:24px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.league-home-pending-head,.league-home-pending-row{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:12px 4px}
+.league-home-pending-head{font:800 9px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim)}
+.league-home-pending-head strong{color:var(--accent)}
+.league-home-pending-row{border-top:1px solid var(--border);font-size:12px}
+.league-home-pending-row span{font-size:10px;color:var(--text-dim)}
+.league-home-footer{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-top:22px;color:var(--text-dim);font-size:10px}
+.league-home-footer button{border:0;background:none;color:var(--text-dim);font:700 10px var(--sans);padding:5px 0;cursor:pointer}
+.league-home-footer button:hover{color:var(--text)}
+.league-home-empty-state{min-height:560px;display:grid;grid-template-columns:1fr 340px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.league-home-empty-state .league-home-intro{padding-right:70px;border-right:1px solid var(--border)}
+.league-home-empty-number{margin-top:auto;font:700 11px var(--mono);color:var(--text-dim)}
+.league-home-empty-state h2{margin:22px 0 12px;font-size:clamp(38px,5vw,66px);line-height:.94;letter-spacing:-.06em}
+.league-home-empty-state p{max-width:510px;margin:0;color:var(--text-dim);font-size:14px;line-height:1.75}
+.league-home-empty-actions{padding:42px;display:flex;flex-direction:column;justify-content:flex-end;gap:8px}
+.league-home-empty-actions button{width:100%;text-align:left;padding:15px 16px}
+.league-action-overlay{position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.58);display:grid;place-items:center;padding:20px}
+.league-action-modal{width:min(560px,100%);background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:24px;box-shadow:0 24px 80px rgba(0,0,0,.28);font-family:var(--sans)}
+.league-action-kicker{font-size:10px;text-transform:uppercase;letter-spacing:.12em;font-weight:800;color:var(--accent)}
+.league-action-modal h2{margin:6px 0 8px;font-size:25px}
+.league-action-modal>p{line-height:1.55;margin:0 0 18px}
+.league-action-modal label{display:block;margin:12px 0 6px;font-size:11px;font-weight:800;color:var(--text-dim)}
+.league-action-modal input,.league-action-modal textarea{width:100%;box-sizing:border-box}
+.league-action-info{display:flex;flex-direction:column;gap:3px;padding:12px 13px;border:1px solid var(--border);border-radius:11px;background:var(--panel-alt);margin-top:14px}
+.league-action-info span{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim)}
+.league-action-info strong{font-size:12px}.league-action-info small{font-size:10px;color:var(--text-dim)}
+.league-action-buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.league-open-error{margin:0 0 12px}
+@media(max-width:900px){body.league-selection-mode #app{padding:46px 24px 48px}.league-home-shell{grid-template-columns:1fr}.league-home-intro{border-right:0;border-bottom:1px solid var(--border);padding:30px 0 34px}.league-home-mark{margin-top:52px}.league-home-directory{padding:24px 0 0}.league-home-row{grid-template-columns:34px minmax(0,1fr) 100px}.league-home-row-status{display:none}.league-home-empty-state{grid-template-columns:1fr}.league-home-empty-state .league-home-intro{border-right:0}.league-home-empty-actions{padding:24px 0;flex-direction:row;justify-content:flex-start}.league-home-empty-actions button{width:auto}}
+@media(max-width:620px){body.league-selection-mode #app{padding:30px 16px 38px}.league-home-shell{min-height:auto}.league-home-intro h2{font-size:40px}.league-home-mark{font-size:82px;margin-top:42px}.league-home-row{grid-template-columns:28px minmax(0,1fr);gap:10px;padding:18px 0}.league-home-row:hover,.league-home-row.selected{padding-left:8px;padding-right:8px}.league-home-row-stats{grid-column:2;flex-direction:row;gap:12px}.league-home-directory-actions{padding-left:0;padding-right:0;justify-content:stretch}.league-home-directory-actions button{flex:1}.league-home-empty-state{min-height:500px}.league-home-empty-actions{flex-direction:column}.league-home-empty-actions button{width:100%}.league-home-footer{align-items:flex-start}}
