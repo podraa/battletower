@@ -18,12 +18,13 @@
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link href="css/sbl-site.css" rel="stylesheet"/>
 <link href="css/sbl-components.css" rel="stylesheet"/>
-<link href="css/sbl-sprites-layout.css" rel="stylesheet"/>
-<link href="css/sbl-ui.css" rel="stylesheet"/>
+<link href="css/sbl-sprites-layout.css?v=cp454-contained-sprites" rel="stylesheet"/>
+<link href="css/sbl-ui.css?v=cp419-viewport-reflow" rel="stylesheet"/>
 <link href="css/pages/admin.css" rel="stylesheet"/>
 
 
 
+<link href="css/sbl-standard-ui.css?v=cp435-ui-standardization" rel="stylesheet">
 </head>
 <body data-admin="true">
 <div id="app" style="display:none">
@@ -32,15 +33,16 @@
 </header>
 <nav class="tabs admin-nav" id="tabs" aria-label="Admin navigation">
   <button type="button" class="admin-sidebar-toggle" id="adminSidebarToggle" aria-label="Collapse sidebar" title="Collapse sidebar"><span class="admin-sidebar-toggle-icon">‹</span><span class="admin-sidebar-toggle-label">Collapse</span></button>
+  <button class="admin-nav-item admin-nav-featured" data-tab="bug-reports">Bug Reports &amp; Feedback</button>
   <div class="admin-nav-group" data-nav-group="home">
-    <div class="admin-nav-group-title">Home</div>
+    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>Home</span><span aria-hidden="true">⌄</span></button>
     <div class="admin-nav-submenu">
       <button class="admin-nav-item active" data-tab="overview">League Dashboard</button>
       <button class="admin-nav-item" data-tab="league">League Manager</button>
     </div>
   </div>
   <div class="admin-nav-group" data-nav-group="season">
-    <div class="admin-nav-group-title">Season</div>
+    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>Season</span><span aria-hidden="true">⌄</span></button>
     <div class="admin-nav-submenu">
       <button class="admin-nav-item" data-tab="seasonsetup">Season Management</button>
       <button class="admin-nav-item" data-tab="draft">Draft</button>
@@ -50,22 +52,22 @@
     </div>
   </div>
   <div class="admin-nav-group" data-nav-group="people">
-    <div class="admin-nav-group-title">People</div>
+    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>People</span><span aria-hidden="true">⌄</span></button>
     <div class="admin-nav-submenu">
-      <button class="admin-nav-item" data-tab="settings">Franchises &amp; Users</button>
-      <button class="admin-nav-item" data-tab="commissioner">User Control</button>
-      <button class="admin-nav-item" data-tab="franchise-requests">Franchise Requests</button>
+      <button class="admin-nav-item" data-tab="people">People &amp; Franchises</button>
+      <button class="admin-nav-item" data-tab="settings-franchises">Showdown Team Mapping</button>
     </div>
   </div>
   <div class="admin-nav-group" data-nav-group="replays">
-    <div class="admin-nav-group-title">Replays</div>
+    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>Replays</span><span aria-hidden="true">⌄</span></button>
     <div class="admin-nav-submenu">
       <button class="admin-nav-item" data-tab="process">Processed Replays</button>
       <button class="admin-nav-item" data-tab="players">Replays by Player</button>
+      <button class="admin-nav-item" data-tab="legacy-migration">Archived Seasons</button>
     </div>
   </div>
   <div class="admin-nav-group" data-nav-group="system">
-    <div class="admin-nav-group-title">System</div>
+    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>System</span><span aria-hidden="true">⌄</span></button>
     <div class="admin-nav-submenu">
       <button class="admin-nav-item" data-tab="settings-data">Data Management</button>
       <button class="admin-nav-item" data-tab="admin-log">Admin Log</button>
@@ -77,26 +79,29 @@
 <div id="content"></div>
 </div>
 <div id="auditModal"></div>
-<script defer="" src="js/sbl-site.js"></script>
+<script defer="" src="js/sbl-site.js?v=cp447-season-roster-authority"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
 <script src="js/pokemon-dex-ids.js" defer></script>
-<script src="js/services/pokemon.js" defer></script>
-<script src="js/services/replays.js" defer></script>
+<script src="js/services/pokemon.js?v=cp455-home-gen5-hd-draft" defer></script><script src="js/services/pokemon-types.js?v=cp424-mega-typing" defer></script>
+<script src="js/services/replays.js?v=cp451" defer></script>
+<script src="js/services/legacy-archive.js" defer></script>
 <script src="js/sbl-supabase.js" defer></script>
-<script src="js/services/league-db.js" defer></script>
-<script src="js/services/franchise-ownership.js" defer></script>
+<script src="js/services/league-db.js?v=cp451" defer></script>
+<script src="js/services/franchise-ownership.js?v=cp422-active-members" defer></script>
 <script src="js/services/admin.js" defer></script>
-<script src="js/services/draft.js" defer></script>
+<script src="js/services/draft.js?v=cp428-stat-metadata-merge" defer></script>
+<script src="js/services/draft-lottery.js" defer></script>
 <script src="js/auth.js" defer></script>
-<script src="js/services/rosters.js" defer></script>
-<script src="js/services/profiles.js" defer></script>
+<script src="js/services/rosters.js?v=cp447-season-roster-authority" defer></script>
+<script src="js/services/profiles.js?v=cp422-active-members" defer></script>
 <script src="js/services/trades.js" defer></script>
-<script src="js/performance.js" defer></script>
+<script src="js/performance.js?v=cp451" defer></script>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
 <script src="js/services/data.js" defer></script>
 <script src="js/services/finals.js" defer></script>
-<script src="js/pages/admin.js" defer></script>
+<script src="js/services/fixture-workflow.js?v=cp451" defer></script>
+<script src="js/pages/admin.js?v=cp454-pick-confirm-contained-sprites" defer></script>
 
 
 <script src="js/app.js" defer></script>
