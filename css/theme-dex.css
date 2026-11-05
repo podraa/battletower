@@ -1,0 +1,150 @@
+/* CP3.8 public Dex skin. Existing markup/layout stays in place. */
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+body {
+  --dex-border: var(--sbl-ink);
+  --dex-shadow: var(--sbl-skin-shadow);
+}
+
+body {
+  background: var(--sbl-page-bg);
+  color: var(--sbl-text);
+  font-family: 'Space Grotesk', var(--sans), sans-serif;
+  letter-spacing: .005em;
+}
+
+body .page-nav {
+  min-height: 62px;
+  padding: 10px 18px;
+  justify-content: flex-start;
+  background: var(--sbl-theme-accent);
+  border-bottom: var(--sbl-outline) solid var(--dex-border);
+  box-shadow: 0 3px 0 var(--dex-border);
+}
+
+body .page-nav a {
+  min-height: 38px;
+  border: var(--sbl-outline) solid transparent;
+  border-radius: var(--sbl-radius);
+  color: var(--sbl-text);
+  font-weight: 700;
+}
+
+body .page-nav a:hover,
+body .page-nav a.active {
+  background: var(--sbl-card-bg);
+  border-color: var(--dex-border);
+  color: var(--sbl-text);
+  box-shadow: 2px 2px 0 var(--dex-border);
+  transform: translate(-1px,-1px);
+}
+
+body .page-nav a.active {
+  box-shadow: 3px 3px 0 var(--dex-border);
+}
+
+body .page-nav,
+body header,
+body .hero,
+body .panel,
+body .card,
+body .team-card,
+body .overview-card,
+body .franchise-card,
+body .pokemon-card,
+body .roster-card,
+body .fixture-match,
+body .conference-block,
+body .free-agent-card,
+body .fa-card,
+body .team-analysis-card,
+body .damage-calc-card,
+body .trade-col,
+body .trade-filter-panel,
+body #proposePanel,
+body #tradeSummary {
+  border-radius: var(--sbl-radius);
+}
+
+body .card,
+body .panel,
+body .team-card,
+body .overview-card,
+body .franchise-card,
+body .pokemon-card,
+body .roster-card,
+body .fixture-match,
+body .conference-block,
+body .free-agent-card,
+body .fa-card,
+body .team-analysis-card,
+body .damage-calc-card,
+body .trade-col,
+body .trade-filter-panel,
+body #proposePanel,
+body #tradeSummary {
+  border: var(--sbl-outline) solid var(--dex-border);
+  box-shadow: var(--dex-shadow);
+}
+
+body button,
+body .button,
+body input,
+body select,
+body textarea {
+  border-radius: var(--sbl-radius-sm);
+}
+
+body button,
+body .button {
+  border-width: var(--sbl-outline);
+  border-color: var(--dex-border);
+  box-shadow: 2px 2px 0 var(--dex-border);
+  font-family: 'Space Grotesk', var(--sans), sans-serif;
+  font-weight: 700;
+}
+
+body button:hover,
+body .button:hover {
+  transform: translate(-1px,-1px);
+  box-shadow: 3px 3px 0 var(--dex-border);
+}
+
+body input,
+body select,
+body textarea {
+  border-width: var(--sbl-outline);
+  border-color: var(--dex-border);
+}
+
+body h1,
+body h2,
+body h3,
+body h4,
+body .page-title,
+body .section-title {
+  font-family: 'Space Grotesk', var(--sans), sans-serif;
+  font-weight: 700;
+  letter-spacing: -.025em;
+}
+
+body .badge,
+body .chip,
+body .meta,
+body .muted,
+body th,
+body small {
+  font-family: 'DM Mono', ui-monospace, monospace;
+}
+
+body :focus-visible {
+  outline: var(--sbl-outline) solid var(--sbl-theme-accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 700px) {
+  body .page-nav {
+    min-height: 56px;
+    padding: 8px 10px;
+  }
+}

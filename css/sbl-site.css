@@ -149,3 +149,33 @@ body {
 .sbl-global-logout, select, input[type="text"], input[type="search"], input[type="number"] {
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text, #fff) 7%, transparent);
 }
+
+
+/* CP4.14: site-admin-only user preview control and visual privilege masking. */
+.page-nav .sbl-user-preview-toggle {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid var(--accent, var(--amber, #ffb454));
+  border-radius: 8px;
+  background: var(--panel-alt, #1c2432);
+  color: var(--text, #e8edf5);
+  font: 750 11px/1 var(--sans, system-ui, sans-serif);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.page-nav .sbl-user-preview-toggle:hover { filter: brightness(1.12); }
+.sbl-user-preview .page-nav [data-admin-only],
+.sbl-user-preview .page-nav [data-site-admin-only],
+.sbl-user-preview .admin-nav,
+.sbl-user-preview #adminAuth,
+.sbl-user-preview .commissioner-budget-card,
+.sbl-user-preview .commissioner-controls,
+.sbl-user-preview .admin-controls,
+.sbl-user-preview .admin-only,
+.sbl-user-preview [data-admin-only],
+.sbl-user-preview [data-commissioner-only] { display: none !important; }
+.sbl-user-preview .page-nav .sbl-user-preview-toggle { display: inline-flex !important; }
+@media (max-width: 700px) {
+  .page-nav .sbl-user-preview-toggle { min-height: 34px; padding: 7px 10px; font-size: 10px; }
+}

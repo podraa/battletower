@@ -1,0 +1,47 @@
+/* CP4.35 shared visual system: consistent controls, surfaces, spacing and focus. */
+:root {
+  --sbl-control-radius: 10px;
+  --sbl-panel-radius: 14px;
+  --sbl-control-height: 40px;
+  --sbl-control-shadow: 0 1px 2px rgba(0,0,0,.05);
+}
+
+/* Controls use theme tokens so light/dark/custom themes stay coherent. */
+:where(input:not([type=checkbox]):not([type=radio]):not([type=range]), select, textarea) {
+  min-width: 0;
+  border: 1px solid var(--border, #454b5c);
+  border-radius: var(--sbl-control-radius);
+  background: var(--panel-alt, var(--panel, #202431));
+  color: var(--text, inherit);
+  box-shadow: var(--sbl-control-shadow);
+  transition: border-color .14s ease, box-shadow .14s ease, background-color .14s ease;
+}
+:where(input:not([type=checkbox]):not([type=radio]):not([type=range]), select) { min-height: var(--sbl-control-height); padding: 8px 11px; }
+:where(textarea) { padding: 10px 11px; }
+:where(input, select, textarea):focus-visible { outline: 2px solid var(--accent, var(--amber, #d8a13a)); outline-offset: 2px; }
+
+:where(button, .btn, .button, [role=button]) {
+  border-radius: var(--sbl-control-radius);
+  transition: color .14s ease, background-color .14s ease, border-color .14s ease, box-shadow .14s ease, transform .14s ease;
+}
+:where(button:not(.type-chip):not(.type-badge):not(.page-nav a), .btn, .button) { font-weight: 650; }
+:where(button, .btn, .button):disabled { cursor: not-allowed; opacity: .55; }
+
+:where(.panel, .card, .stat, .empty-state, .notice, .toolbar, .filter-panel, .settings-panel) {
+  border-color: var(--border, rgba(128,128,128,.3));
+  border-radius: var(--sbl-panel-radius);
+}
+:where(.panel, .card, .filter-panel, .settings-panel) { min-width: 0; }
+:where(label) { line-height: 1.35; }
+
+/* Shared spacing rhythm for common section headers and filter rows. */
+:where(.section-head-row, .section-header, .panel-header, .toolbar-header) { gap: 12px; }
+:where(.empty, .empty-state, .error-state) { border-radius: var(--sbl-panel-radius); }
+
+@media (max-width: 700px) {
+  :root { --sbl-control-height: 42px; }
+  :where(.panel, .card, .filter-panel, .settings-panel) { border-radius: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(button, input, select, textarea, .card, .panel) { transition: none !important; }
+}

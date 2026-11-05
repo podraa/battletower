@@ -1,0 +1,29 @@
+/* CP3.8 shared visual tokens. Behaviour/IDs remain untouched. */
+:root {
+  --sbl-ink: color-mix(in srgb, var(--sbl-text) 90%, var(--sbl-theme-accent));
+  --sbl-radius: 5px;
+  --sbl-radius-sm: 3px;
+  --sbl-outline: 2px;
+  --sbl-shadow-x: 3px;
+  --sbl-shadow-y: 3px;
+  --sbl-space-1: 4px;
+  --sbl-space-2: 8px;
+  --sbl-space-3: 12px;
+  --sbl-space-4: 16px;
+  --sbl-space-5: 24px;
+  --sbl-space-6: 32px;
+  --sbl-owned: var(--sbl-success);
+  --sbl-unowned: var(--sbl-muted);
+  --sbl-data-mismatch: var(--sbl-warning);
+  --sbl-pending: var(--sbl-warning);
+  --sbl-locked: var(--sbl-danger);
+  --sbl-skin-surface: var(--sbl-card-bg);
+  --sbl-skin-surface-alt: var(--sbl-card-alt);
+  --sbl-skin-header: var(--sbl-theme-accent);
+  --sbl-skin-header-text: color-mix(in srgb, var(--sbl-text) 94%, var(--sbl-theme-accent));
+  --sbl-skin-shadow: 3px 3px 0 color-mix(in srgb, var(--sbl-ink) 82%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { scroll-behavior: auto; }
+}

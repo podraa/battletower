@@ -1,0 +1,115 @@
+/* CP3.8 admin Scoreboard skin. Existing admin information architecture remains. */
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=DM+Mono:wght@400;500&display=swap');
+
+body[data-admin="true"], body[data-site-admin="true"] {
+  background: var(--sbl-page-bg);
+  color: var(--sbl-text);
+  font-family: 'DM Mono', ui-monospace, monospace;
+}
+
+body[data-admin="true"] header,
+body[data-site-admin="true"] header {
+  border-bottom: 1px solid var(--sbl-card-border);
+}
+
+body[data-admin="true"] h1,
+body[data-admin="true"] h2,
+body[data-admin="true"] h3,
+body[data-admin="true"] h4,
+body[data-admin="true"] .admin-nav,
+body[data-admin="true"] .admin-nav-item,
+body[data-admin="true"] .admin-nav-group-toggle,
+body[data-site-admin="true"] h1,
+body[data-site-admin="true"] h2,
+body[data-site-admin="true"] h3,
+body[data-site-admin="true"] h4,
+body[data-site-admin="true"] .admin-nav,
+body[data-site-admin="true"] .admin-nav-item,
+body[data-site-admin="true"] .admin-nav-group-toggle {
+  font-family: 'Barlow Condensed', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .045em;
+}
+
+body[data-admin="true"] .admin-nav,
+body[data-site-admin="true"] .admin-nav {
+  border-right: var(--sbl-outline) solid var(--sbl-ink);
+  background: var(--sbl-card-bg);
+  box-shadow: 3px 0 0 color-mix(in srgb, var(--sbl-theme-accent) 30%, transparent);
+}
+
+body[data-admin="true"] .admin-nav-group,
+body[data-site-admin="true"] .admin-nav-group {
+  border-bottom: 1px solid var(--sbl-card-border);
+}
+
+body[data-admin="true"] .admin-nav-item,
+body[data-admin="true"] .admin-nav-group-toggle,
+body[data-site-admin="true"] .admin-nav-item,
+body[data-site-admin="true"] .admin-nav-group-toggle {
+  border-radius: 0;
+  color: var(--sbl-muted);
+}
+
+body[data-admin="true"] .admin-nav-item:hover,
+body[data-admin="true"] .admin-nav-group-toggle:hover,
+body[data-admin="true"] .admin-nav-item.active,
+body[data-site-admin="true"] .admin-nav-item:hover,
+body[data-site-admin="true"] .admin-nav-group-toggle:hover,
+body[data-site-admin="true"] .admin-nav-item.active {
+  color: var(--sbl-text);
+  background: color-mix(in srgb, var(--sbl-theme-accent) 14%, var(--sbl-card-bg));
+  box-shadow: inset 3px 0 0 var(--sbl-theme-accent);
+}
+
+body[data-admin="true"] .admin-nav-item.active::before,
+body[data-site-admin="true"] .admin-nav-item.active::before {
+  background: var(--sbl-theme-accent);
+}
+
+body[data-admin="true"] .card,
+body[data-admin="true"] .panel,
+body[data-admin="true"] .admin-card,
+body[data-admin="true"] .stat-card,
+body[data-admin="true"] .overview-card,
+body[data-site-admin="true"] .card,
+body[data-site-admin="true"] .panel,
+body[data-site-admin="true"] .admin-card,
+body[data-site-admin="true"] .stat-card,
+body[data-site-admin="true"] .overview-card {
+  border-radius: var(--sbl-radius-sm);
+  border-color: var(--sbl-card-border);
+}
+
+body[data-admin="true"] table,
+body[data-site-admin="true"] table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+body[data-admin="true"] th,
+body[data-site-admin="true"] th {
+  font-family: 'Barlow Condensed', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--sbl-theme-accent);
+}
+
+body[data-admin="true"] tr:hover td,
+body[data-site-admin="true"] tr:hover td {
+  background: color-mix(in srgb, var(--sbl-theme-accent) 7%, var(--sbl-card-bg));
+}
+
+body[data-admin="true"] button,
+body[data-site-admin="true"] button {
+  border-radius: var(--sbl-radius-sm);
+  font-family: 'Barlow Condensed', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+body[data-admin="true"] :focus-visible,
+body[data-site-admin="true"] :focus-visible {
+  outline: 2px solid var(--sbl-theme-accent);
+  outline-offset: 2px;
+}
