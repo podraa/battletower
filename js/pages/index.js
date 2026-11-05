@@ -433,7 +433,7 @@
         }
         btn.disabled = true;
         try{
-          await SBL.profiles.update(session.user.id, {username}, supabase);
+          await SBL.profiles.changeUsername(session.user.id, username, supabase);
           await loadProfile();
           renderTeamClaim();
         }catch(e){
@@ -513,7 +513,7 @@
     document.getElementById('changeTeamBtn').onclick = ()=>{ renderTeamClaim(); };
   }
 
-  function recordAdjustKey(){ return `sbl_record_adjust_${session?.user?.id||'anonymous'}_${profile?.team_name||'team'}`; }
+  function recordAdjustKey(){ return `sbl_record_adjust_${session?.user?.id||'anonymous'}_${currentFranchise?.franchise?.id||'unassigned'}`; }
   function getRecordAdjustments(){
     try{ const x=JSON.parse(localStorage.getItem(recordAdjustKey())||'{}'); return {wins:Math.max(0,Number(x.wins)||0),losses:Math.max(0,Number(x.losses)||0)}; }catch(e){ return {wins:0,losses:0}; }
   }
@@ -616,7 +616,7 @@
         status:'new',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()
       });
       await SBL.replays.saveSharedState({teamMap:DASH.teamMap,settings:DASH.settings}, supabase);
-      if(msg){msg.className='note ok';msg.textContent='Submitted. Thanks — the commissioners can review it from the Admin Dashboard.';}
+      if(msg){msg.className='note ok';msg.textContent='Submitted. Thanks — league admins can review it in Admin → Bug Reports.';}
       document.getElementById('feedbackTitle').value=''; document.getElementById('feedbackDescription').value='';
       renderFeedback();
     }catch(e){ if(msg){msg.className='note danger';msg.textContent='Could not submit: '+e.message;} }
@@ -644,29 +644,11 @@
   }
 
   // ---------- My Team tab ----------
-  function nextBattleForTeam(team){
-    const rounds = Array.isArray(DASH.settings?.fixture?.rounds) ? DASH.settings.fixture.rounds : [];
-    const key = v => String(v||'').trim().toLowerCase().replace(/[^a-z0-9]/g);
-    const target = key(team);
-    const played = (week, home, away) => Object.values(DASH.replays||{}).some(r=>{
-      if(!r || (r.week||'Unassigned') !== week || !r.players) return false;
-      const p1=teamFor(r.players.p1), p2=teamFor(r.players.p2), a=key(p1), b=key(p2);
-      return (a===key(home)&&b===key(away)) || (a===key(away)&&b===key(home));
-    });
-    for(const round of rounds){
-      for(const match of (round.matches||[])){
-        if(key(match.home)!==target && key(match.away)!==target) continue;
-        if(played(round.week,match.home,match.away)) continue;
-        return {week:round.week,opponent:key(match.home)===target?match.away:match.home};
-      }
-    }
-    return null;
-  }
   function wireNextBattle(){
     const card=document.getElementById('nextBattleCard'), op=document.getElementById('nextBattleOpponent'), meta=document.getElementById('nextBattleMeta');
     if(!card||!op||!meta) return;
-    const battle=nextBattleForTeam(myLeagueTeam());
-    if(!battle){ op.textContent='No upcoming battle'; meta.textContent='Open Match Prep →'; card.href='match-prep.html'; return; }
+    const battle=SBL.schedule.nextOpponentForTeam(myLeagueTeam(),DASH.settings,DASH.replays,DASH.teamMap);
+    if(battle.status!=='upcoming'){ op.textContent=battle.label; meta.textContent='Open Match Prep →'; card.href='match-prep.html'; return; }
     op.textContent=battle.opponent; meta.textContent=`${battle.week} · Open Match Prep →`;
     card.href=`match-prep.html?team=${encodeURIComponent(battle.opponent)}`;
   }
@@ -743,7 +725,7 @@
     const entries = Object.values(registry);
     const userId = String(session?.user?.id || '').toLowerCase();
     const email = String(session?.user?.email || '').trim().toLowerCase();
-    const commissioner = !!profile?.is_commissioner;
+    const commissioner = !!profile?.is_commissioner && !window.SBL_SITE?.isUserPreview?.();
     return entries.filter(league=>{
       if(commissioner) return true;
       const members = Array.isArray(league?.members) ? league.members : null;
@@ -768,6 +750,7 @@
 
   function isLeagueAdmin(league){
     const role = leagueRoleFor(league);
+    if (window.SBL_SITE?.isUserPreview?.()) return false;
     return !!profile?.is_commissioner || role === 'commissioner' || role === 'manager';
   }
 
@@ -798,7 +781,7 @@
         await SBL.leagueDb.upsertFranchises(league.id,Object.entries(defs).map(([name,v])=>({name,conference:v?.conference||''})),supabase);
         for(const member of (Array.isArray(league.members)?league.members:[])){
           if(!member?.userId) continue;
-          await SBL.leagueDb.setMembership(league.id,member.userId,{role:member.role||'player',status:member.status||'active',franchise:member.franchise||member.team||''},supabase);
+          await SBL.leagueDb.setMembership(league.id,member.userId,{role:member.role||'player',status:member.status||'active'},supabase);
         }
       }
       DASH.leagues = registry;
@@ -840,7 +823,14 @@
             target=await SBL.leagueDb.findByJoinCode(code,supabase);
             if(!target){msg.className='note danger';msg.textContent='No league was found with that invite code.';btn.disabled=false;return;}
             const existing=await SBL.leagueDb.getMembership(target.id,String(session.user.id),supabase);
-            if(existing){msg.className='note';msg.textContent=existing.status==='pending'?'Your join request is already pending.':'You are already a member of this league.';btn.disabled=false;return;}
+            if(existing){
+              if(existing.status==='pending'){
+                msg.className='note';msg.textContent='Your join request is already pending.';btn.disabled=false;return;
+              }
+              if(existing.status==='active'){
+                msg.className='note';msg.textContent='You are already a member of this league.';btn.disabled=false;return;
+              }
+            }
             await SBL.leagueDb.requestJoin(target.id,session.user,supabase);
             msg.className='note ok'; msg.textContent=`Join request sent to ${target.name||'the league'}.`;
             setTimeout(close,700); renderLeagueDashboard();
@@ -960,17 +950,18 @@
       if(status) status.innerHTML='Opening…';
       btn.disabled=true;
       try{
+        const switchSeq=(window.__sblSwitchSeq=(window.__sblSwitchSeq||0)+1);
         saveSelectedLeague(id);
         DASH.leagueId=id;
         DASH.leagueName=target.name||id;
         if(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(supabase)){
-          const snap=await SBL.leagueDb.getSnapshot(id,supabase);
-          if(!snap) throw new Error('That league could not be loaded.');
-          const rows=await SBL.leagueDb.loadReplays(id,supabase);
-          const {sharedState,replays}=SBL.replays.partition([{replay_id:'__dashboard_state__',replay_data:snap.state},...rows.map(r=>({replay_id:r.replay_id,replay_data:r.replay_data}))]);
-          const state=sharedState||{};
-          DASH.teamMap=state.teamMap||{};
-          DASH.settings=Object.assign({rosters:{},freeAgency:{mons:[]}},state.settings||{});
+          const seasonSnap=await SBL.seasons.loadSnapshot({leagueId:id});
+          if(!seasonSnap) throw new Error('That league season could not be loaded.');
+          const rows=await SBL.leagueDb.loadReplays(id,supabase,{seasonId:seasonSnap.seasonId});
+          if(switchSeq!==window.__sblSwitchSeq) return; // a newer league/season selection superseded this one
+          const {replays}=SBL.replays.partition(rows.map(r=>({replay_id:r.replay_id,replay_data:r.replay_data})));
+          DASH.teamMap=seasonSnap.teamMap||{};
+          DASH.settings=Object.assign({rosters:{},freeAgency:{mons:[]}},seasonSnap.settings||{});
           DASH.settings.rosters=normalizeStoredRosters(DASH.settings.rosters||{});
           DASH.replays=replays;
         }
@@ -1714,21 +1705,22 @@
           <div class="account-card-head"><div><div class="account-card-kicker">Profile</div><h3>Your account</h3></div><span class="account-status ${SBL.pokemon.escapeHtml(status)}">${SBL.pokemon.escapeHtml(statusLabel)}</span></div>
           <div class="account-profile-list">
             <div class="account-profile-row"><span>Username</span><strong>${SBL.pokemon.escapeHtml(profile?.username || '—')}</strong></div>
-            <div class="account-profile-row"><span>Franchise</span><strong>${leagueLanding ? 'Managed per league' : SBL.pokemon.escapeHtml(profile?.team_name || '—')}</strong></div>
+            <div class="account-username-editor"><label for="accountUsernameInput">Change username</label><input id="accountUsernameInput" maxlength="24" value="${SBL.pokemon.escapeHtml(profile?.username||'')}" autocomplete="nickname"><div class="note">2–24 characters; letters, numbers, underscores and hyphens. Regular changes are limited to once every 90 days. Site admins can override the limit.</div><button type="button" class="ghost small" id="accountSaveUsername">Save username</button><div class="note" id="accountUsernameMessage"></div></div>
+            <div class="account-profile-row"><span>Franchise</span><strong>${leagueLanding ? 'Managed per league' : SBL.pokemon.escapeHtml(currentFranchise?.franchise?.name || 'Not assigned')}</strong></div>
             <div class="account-profile-row"><span>Trade credits</span><strong>${Number(profile?.trade_credits || 0)}</strong></div>
           </div>
         </section>
 
         <section class="panel account-card account-preferences-card">
-          <div class="account-card-head"><div><div class="account-card-kicker">Display</div><h3>Pokémon sprites</h3><div class="note">Choose the artwork style used for Pokémon across SBL.</div></div></div>
+          <div class="account-card-head"><div><div class="account-card-kicker">Display</div><h3>Pokémon sprites</h3><div class="note">Choose HOME or classic Gen 5 sprites for the rest of SBL. Draft presentations always use HD artwork.</div></div></div>
           <div class="sprite-choice-grid" id="accountSpriteStyle">
             <button type="button" class="sprite-choice${spriteStyle==='3d'?' active':''}" data-sprite-style="3d" aria-pressed="${spriteStyle==='3d'?'true':'false'}">
               <div class="sprite-choice-art">${SBL.pokemon.spriteMarkup('pikachu','sprite-choice-sprite','3d')}</div>
-              <div><strong>3D</strong><span>HOME-style renders</span></div><i aria-hidden="true">✓</i>
+              <div><strong>HOME</strong><span>Modern Pokémon Showdown sprites</span></div><i aria-hidden="true">✓</i>
             </button>
             <button type="button" class="sprite-choice${spriteStyle==='2d'?' active':''}" data-sprite-style="2d" aria-pressed="${spriteStyle==='2d'?'true':'false'}">
               <div class="sprite-choice-art">${SBL.pokemon.spriteMarkup('pikachu','sprite-choice-sprite','2d')}</div>
-              <div><strong>2D</strong><span>Classic battle sprites</span></div><i aria-hidden="true">✓</i>
+              <div><strong>Gen 5</strong><span>Classic pixel-art battle sprites</span></div><i aria-hidden="true">✓</i>
             </button>
           </div>
         </section>
@@ -1765,6 +1757,15 @@
     </div>`;
 
     document.getElementById('accountBackToLeagues')?.addEventListener('click',()=>{activeTab='myteam';leagueLanding=true;document.body.classList.add('league-selection-mode');render();});
+    document.getElementById('accountSaveUsername')?.addEventListener('click',async()=>{
+      const btn=document.getElementById('accountSaveUsername'),input=document.getElementById('accountUsernameInput'),msg=document.getElementById('accountUsernameMessage');
+      const next=String(input?.value||'').trim();
+      if(!/^[A-Za-z0-9_-]{2,24}$/.test(next)){msg.className='note danger';msg.textContent='Username must be 2–24 characters and use only letters, numbers, underscores or hyphens.';return;}
+      if(next===String(profile?.username||'')){msg.className='note';msg.textContent='That is already your username.';return;}
+      btn.disabled=true;msg.className='note';msg.textContent='Saving username…';
+      try{await SBL.profiles.changeUsername(session.user.id,next,supabase);await loadProfile();renderAccount();const updated=document.getElementById('accountUsernameMessage');if(updated){updated.className='note ok';updated.textContent='Username updated successfully.';}}
+      catch(e){msg.className='note danger';msg.textContent=e.message||'Could not update username.';btn.disabled=false;}
+    });
     document.getElementById('accountSpriteStyle')?.addEventListener('click', e=>{
       const btn=e.target.closest('[data-sprite-style]'); if(!btn) return;
       const style=window.SBL?.pokemon?.setSpriteStyle?.(btn.dataset.spriteStyle,true) || btn.dataset.spriteStyle;

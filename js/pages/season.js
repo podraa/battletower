@@ -12,18 +12,43 @@
   const POLL_MS = 10000;
   let adminUser = null;
   let adminIsCommissioner = false;
+  let adminCanSeeDiagnostics = false;
   let loadingFromRemote = false;
 
   function requireAdmin(){
     if(!IS_ADMIN_PAGE || !adminUser) throw new Error('Admin login required to change shared data.');
   }
 
+  const DIAGNOSTICS_PREF_KEY='sbl_admin_diagnostics_visible_v1';
+  function diagnosticsVisible(){ try{return adminCanSeeDiagnostics && localStorage.getItem(DIAGNOSTICS_PREF_KEY)==='1';}catch(_){return false;} }
+  function installDiagnosticsToggle(){
+    if(!adminCanSeeDiagnostics || window.SBL_SITE?.isUserPreview?.()) return;
+    const header=document.querySelector('#app > header');
+    if(!header || document.getElementById('adminDiagnosticsToggle')) return;
+    const wrap=document.createElement('label');
+    wrap.id='adminDiagnosticsToggle';
+    wrap.style.cssText='display:flex;align-items:center;gap:7px;margin:8px 0 0 auto;font-size:12px;opacity:.85;cursor:pointer;';
+    wrap.innerHTML='<input type="checkbox" id="adminDiagnosticsCheckbox"> Show technical diagnostics';
+    header.appendChild(wrap);
+    const input=wrap.querySelector('input');
+    input.checked=diagnosticsVisible();
+    input.addEventListener('change',()=>{
+      try{localStorage.setItem(DIAGNOSTICS_PREF_KEY,input.checked?'1':'0');}catch(_){}
+      render();
+    });
+  }
+
+  // Only the most recently started load may apply its result; a slower,
+  // superseded response must never overwrite newer season state.
+  let loadSeq = 0;
   async function loadState(){
+    const seq = ++loadSeq;
     loadingFromRemote = true;
     try{
       const { data, error } = await SBL.replays.load(supabase);
       if(error) throw error;
-      const { sharedState, replays, publishedRosters } = SBL.replays.partition(data);
+      if(seq !== loadSeq) return;
+      const { sharedState, replays, publishedRosters, normalizedSeason } = SBL.replays.partition(data);
       const snap=SBL.seasons.getSnapshot(sharedState || {});
       const titleEl=document.getElementById('seasonTitle');
       const subTitleEl=document.querySelector('#app > header .sub');
@@ -32,7 +57,7 @@
       if(titleEl) titleEl.textContent=finalsReleased ? `SBL ${snap.name}: Finals` : `SBL ${snap.name}: National Dex Draft`;
       if(subTitleEl) subTitleEl.textContent=finalsReleased ? 'Season Finals · single elimination.' : 'Weekly fixture and conference standings.';
       try { localStorage.setItem('sbl_finals_nav_released', finalsReleased ? '1' : '0'); } catch (_) {}
-      STATE.replays = snap.archived ? snap.replays : replays;
+      STATE.replays = snap.archived && !normalizedSeason ? snap.replays : replays;
       STATE.teamMap = snap.teamMap || {};
       STATE.settings = Object.assign({caseInsensitiveNames:true, teamLogos:{}, bannerMode:'top', bannerTeam:'', rosters:{}}, snap.settings || {});
       STATE.settings.finals = SBL.finals.normalizeFinalsState(STATE.settings.finals);
@@ -43,11 +68,14 @@
       // not accidentally depend on replay-derived team data.
       const dashboardRosters = (STATE.settings.rosters && typeof STATE.settings.rosters === 'object')
         ? STATE.settings.rosters : {};
-      PUBLISHED_ROSTERS = Object.keys(dashboardRosters).length
+      PUBLISHED_ROSTERS = normalizedSeason
         ? dashboardRosters
-        : (publishedRosters && typeof publishedRosters === 'object' ? publishedRosters : {});
+        : (Object.keys(dashboardRosters).length
+            ? dashboardRosters
+            : (publishedRosters && typeof publishedRosters === 'object' ? publishedRosters : {}));
       if(!snap.archived){
         const {data:tradeRows} = await SBL.trades.load(supabase);
+        if(seq !== loadSeq) return;
         PUBLISHED_ROSTERS = SBL.trades.getEffectiveRosters(PUBLISHED_ROSTERS, tradeRows || []);
       }
       STATE.settings.rosters = PUBLISHED_ROSTERS;
@@ -73,6 +101,7 @@
   }
 
   async function saveReplays(){
+     try { await SBL.replays.autoMapReplayUsernames?.(STATE); } catch(e) { console.warn('Automatic replay username mapping skipped:',e); }
      requireAdmin();
      const rows = Object.values(STATE.replays).map(r => ({
        replay_id: r.id,
@@ -144,20 +173,28 @@
     const {data, error} = await supabase.auth.getSession();
     if(error){ showAdminLogin(); return false; }
     if(!data.session){ showAdminLogin(); return false; }
-    const profile = await SBL.profiles.get(data.session.user.id, 'team_name,is_commissioner', supabase);
-     if(!profile?.team_name){
-      // Logged in but hasn't claimed/been assigned a team yet — no access to
-      // the rest of the site until that's done from the login page.
-      showAdminLogin();
-      return false;
-    }
+    const profile = await SBL.profiles.get(data.session.user.id, 'is_commissioner', supabase);
     adminUser = data.session.user;
     const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
     if(!leagueId){
       location.replace('index.html');
       return false;
     }
-    adminIsCommissioner = !!profile?.is_commissioner;
+    adminIsCommissioner = !!profile?.is_commissioner && !window.SBL_SITE?.isUserPreview?.();
+    adminCanSeeDiagnostics = adminIsCommissioner;
+    if(!adminCanSeeDiagnostics && !window.SBL_SITE?.isUserPreview?.()){
+      try{
+        const membership=await SBL.leagueDb?.getMembership?.(leagueId,data.session.user.id,supabase);
+        const role=String(membership?.role||'').toLowerCase();
+        adminCanSeeDiagnostics=String(membership?.status||'').toLowerCase()==='active' && ['commissioner','manager'].includes(role);
+      }catch(_){ adminCanSeeDiagnostics=false; }
+    }
+    if(!adminIsCommissioner){
+      const currentFranchise = SBL.franchiseOwnership?.getUserFranchise
+        ? await SBL.franchiseOwnership.getUserFranchise(leagueId, data.session.user.id, supabase)
+        : null;
+      if(!currentFranchise?.franchiseId){ showAdminLogin(); return false; }
+    }
     document.getElementById('app').style.display = '';
     return true;
   }
@@ -822,7 +859,7 @@
     } else {
       const selected=teams.find(t=>t.team===STATE.settings.bannerTeam)||teams[0];
       if(selected){
-        const list=Object.values(teamPokemonStats('ALL')[selected.team]||{}).sort((a,b)=>b.appearances-a.appearances||b.dealt-a.dealt).slice(0,5);
+        const list=SBL.usage.topUsed(teamPokemonStats('ALL')[selected.team],5);
         cards=`<div class="banner-team-card"><img class="team-logo" src="${SBL.pokemon.escapeHtml(teamLogo(selected.team))}" onerror="this.style.display='none'" alt=""><div><div class="name">${SBL.pokemon.escapeHtml(selected.team)}</div><div class="banner-stat">${selected.wins}-${selected.losses}</div><div class="note" style="margin:2px 0 0">${selected.games?((100*selected.wins/selected.games).toFixed(1)+'% win rate'): 'No games'}</div></div></div>`+list.map(s=>`<div class="banner-pokemon">${SBL.pokemon.spriteMarkup(s.species,'sprite')}<div><div class="name">${SBL.pokemon.escapeHtml(s.species)}</div><div class="banner-stat">${s.appearances} games</div><div class="note" style="margin:2px 0 0">${s.kills} K · ${s.deaths} D</div></div></div>`).join('');
       }
     }
@@ -833,14 +870,14 @@
     contentEl.innerHTML=`<div class="panel"><h2>League Overview</h2><div class="note">Click a franchise for a quick league summary.</div><div id="overviewTeams" style="margin-top:18px"></div></div>`;
     const el=document.getElementById('overviewTeams');
     if(!data.length){el.innerHTML='<div class="empty-state">No team data yet.</div>';return;}
-    el.innerHTML=`<div class="team-card-grid">${data.map(t=>{const mons=Object.values(teamPokemonStats('ALL')[t.team]||{}).sort((a,b)=>b.appearances-a.appearances||b.dealt-a.dealt); const top=mons[0]?.species; const logo=teamLogo(t.team); const sprite=top?`<div class="team-card-top-wrap">${SBL.pokemon.spriteMarkup(top,'team-card-top-sprite')}</div>`:''; return `<div class="team-card" data-team-card="${SBL.pokemon.escapeHtml(t.team)}"><div class="team-card-head"><div class="team-card-copy">${logo?`<img class="team-logo" src="${SBL.pokemon.escapeHtml(logo)}" alt="" style="display:none">`:''}<div class="team-card-name">${SBL.pokemon.escapeHtml(t.team)}</div><div class="team-card-sub">${t.wins}-${t.losses}</div></div>${sprite}</div></div>`}).join('')}</div>`;
+    el.innerHTML=`<div class="team-card-grid">${data.map(t=>{const mons=SBL.usage.topUsed(teamPokemonStats('ALL')[t.team],1); const top=mons[0]?.species; const logo=teamLogo(t.team); const sprite=top?`<div class="team-card-top-wrap">${SBL.pokemon.spriteMarkup(top,'team-card-top-sprite')}</div>`:''; return `<div class="team-card" data-team-card="${SBL.pokemon.escapeHtml(t.team)}"><div class="team-card-head"><div class="team-card-copy">${logo?`<img class="team-logo" src="${SBL.pokemon.escapeHtml(logo)}" alt="" style="display:none">`:''}<div class="team-card-name">${SBL.pokemon.escapeHtml(t.team)}</div><div class="team-card-sub">${t.wins}-${t.losses}</div></div>${sprite}</div></div>`}).join('')}</div>`;
     el.querySelectorAll('[data-team-card]').forEach(card=>card.addEventListener('click',()=>openTeamOverview(card.dataset.teamCard)));
   }
   // Every remaining (unplayed) fixture match involving this team, in
   // schedule order — the literal games left on the "route to qualification".
   function conferenceRemainingFixtures(team){
     const fixture = STATE.settings?.fixture;
-    const rounds = Array.isArray(fixture?.rounds) ? fixture.rounds : [];
+    const rounds = SBL.fixtureWorkflow?.publishedRounds?.(STATE.settings) || (Array.isArray(fixture?.rounds) ? fixture.rounds : []);
     const remaining = [];
     rounds.forEach(r=>{
       (r.matches || []).forEach(m=>{
@@ -861,7 +898,7 @@
   // the finals cut. An exact seed is clinched only if EVERY possible final
   // table gives that same seed.
   function qualificationMatches(conf){
-    const rounds = Array.isArray(STATE.settings?.fixture?.rounds) ? STATE.settings.fixture.rounds : [];
+    const rounds = SBL.fixtureWorkflow?.publishedRounds?.(STATE.settings) || (Array.isArray(STATE.settings?.fixture?.rounds) ? STATE.settings.fixture.rounds : []);
     const out=[];
     for(const r of rounds){
       for(const m of (r.matches||[])){
@@ -1160,7 +1197,7 @@
   function openTeamOverview(team){
     const data=teamStandings('ALL'); const t=data.find(x=>x.team===team); if(!t)return;
     const i=data.indexOf(t); // overall league rank (0-based)
-    const mons=Object.values(teamPokemonStats('ALL')[team]||{}).sort((a,b)=>b.appearances-a.appearances||b.dealt-a.dealt).slice(0,5);
+    const mons=SBL.usage.topUsed(teamPokemonStats('ALL')[team],5);
     // Conference rank: same pool + same ranking rule the standings ladder uses,
     // just filtered down to teams sharing this team's conference (or the
     // Unassigned bucket, when conferenceOf() returns '').
@@ -1175,7 +1212,7 @@
     const confIndex = confList.findIndex(x=>x.team===team);
     const ordinal = idx => { const n=idx+1; return `${n}${n===1?'st':n===2?'nd':n===3?'rd':'th'}`; };
 
-    const summaryTabHtml = `<div class="profile-grid"><div><span>Record</span><strong>${t.wins}-${t.losses}</strong></div><div><span>Win %</span><strong>${t.games?(100*t.wins/t.games).toFixed(1)+'%':'—'}</strong></div><div><span>Games</span><strong>${t.games}</strong></div><div><span>Differential</span><strong>${Number(t.diff||0)>0?'+':''}${Number(t.diff||0)}</strong></div></div><div class="section-divider"></div><h3 class="mini-heading">Top used Pokémon</h3>${mons.map(m=>`<div class="summary-mon">${pokemonLink(m.species,`${SBL.pokemon.spriteMarkup(m.species,'sprite')}<div class="summary-mon-main"><strong>${SBL.pokemon.escapeHtml(m.species)}</strong><div class="summary-mon-stats">${m.appearances} games · ${m.kills} K · ${m.deaths} D</div></div>`)}</div>`).join('')||'<div class="empty-state">No Pokémon data.</div>'}`;
+    const summaryTabHtml = `<div class="profile-grid"><div><span>Record</span><strong>${t.wins}-${t.losses}</strong></div><div><span>Win %</span><strong>${t.games?(100*t.wins/t.games).toFixed(1)+'%':'—'}</strong></div><div><span>Games</span><strong>${t.games}</strong></div><div><span>Differential</span><strong>${Number(t.diff||0)>0?'+':''}${Number(t.diff||0)}</strong></div></div><div class="section-divider"></div><h3 class="mini-heading">Top used Pokémon</h3>${mons.map(m=>`<div class="summary-mon">${pokemonLink(m.species,`${SBL.pokemon.spriteMarkup(m.species,'sprite')}<div class="summary-mon-main"><strong>${SBL.pokemon.escapeHtml(m.species)}</strong><div class="summary-mon-stats">${m.appearances} games · ${m.kills} K · ${m.deaths} D</div></div>`)}</div>`).join('')||'<div class="empty-state">No matches played yet this season.</div>'}`;
 
     // The commissioner can toggle whether the Qualification tab shows at all
     // (typically switched on once the playoff picture matters, near the end
@@ -1880,11 +1917,15 @@
 
   function renderFixturePanel(){
     const fixture = STATE.settings?.fixture;
-    const rounds = Array.isArray(fixture?.rounds) ? fixture.rounds : [];
+    const rounds = SBL.fixtureWorkflow?.publishedRounds?.(STATE.settings) || (Array.isArray(fixture?.rounds) ? fixture.rounds : []);
+    const readLeagueId=String(SBL.leagueDb?.selectedLeagueId?.()||'');
+    const readSeasonId=String(SBL.leagueDb?.selectedSeasonId?.(readLeagueId)||'');
+    const readContextNote=diagnosticsVisible()?`<div class="note" style="margin-bottom:10px;">Reading published fixture from <code>league_id: ${SBL.pokemon.escapeHtml(readLeagueId||'unresolved')}</code> / <code>season_id: ${SBL.pokemon.escapeHtml(readSeasonId||'unresolved')}</code>.</div>`:'';
     if(!rounds.length){
       selectedFixtureWeek = null;
       return `<div class="panel">
         <h2>Fixture</h2>
+        ${readContextNote}
         <div class="empty-state">No fixture has been published yet. The commissioner can generate or upload one from Admin → Season Setup.</div>
       </div>`;
     }
@@ -1904,6 +1945,7 @@
     });
     const matchCount = rounds.reduce((sum,r)=>sum+(r.matches?r.matches.length:0),0);
     return `<div class="panel">
+      ${readContextNote}
       <div class="fixture-panel-head">
         <h2>Fixture</h2>
         <select id="fixtureWeekSelect" class="fixture-week-select">
@@ -2574,6 +2616,7 @@
   (async function init(){
     const ok = await initAdminAuth();
     if(!ok) return;
+    installDiagnosticsToggle();
     await loadState();
     renderTicker();
     render();

@@ -7,10 +7,12 @@ const DEFAULT_SEASON='Season 15';
 async function enforceAccessGate(){
   const {data:{session}} = await db.auth.getSession();
   if(!session){ location.replace('index.html'); return false; }
-  const {data:profile, error} = await db.from('profiles').select('team_name').eq('id', session.user.id).maybeSingle();
-  if(error || !profile?.team_name){ location.replace('index.html'); return false; }
   const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
   if(!leagueId){ location.replace('index.html'); return false; }
+  const currentFranchise = SBL.franchiseOwnership?.getUserFranchise
+    ? await SBL.franchiseOwnership.getUserFranchise(leagueId, session.user.id, db)
+    : null;
+  if(!currentFranchise?.franchiseId){ location.replace('index.html'); return false; }
   document.getElementById('app').style.display = '';
   return true;
 }
@@ -27,6 +29,12 @@ function installSeasonPicker(shared){
 
 let settings={rosters:{},freeAgency:{mons:[]}};
 let allRosters={};
+let draftQueue=[];
+let queueReady=false;
+let queueSaveTimer=null;
+let queueSaveState='';
+let draftPoolIndex=[];
+let draftPoolSignature='';
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??''). replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -44,12 +52,17 @@ const key=s=>String(s||''). trim().toLowerCase()
 let filterName='';
 let filterTypes=new Set();
 let filterPoints='';
+let filterMega='all';
 let filterAvail='all';
 let filterMove='';
 let filterAbility='';
 let filterStat='';
 let filterStatMin='';
-let dexData={pokedex:{},learnsets:{}};
+let filterStatMax='';
+let filterSort=''; // '' | 'desc' | 'asc' (orders each points tier by the selected base stat)
+const STAT_LABELS={hp:'HP',atk:'Atk',def:'Def',spa:'SpA',spd:'SpD',spe:'Spe'};
+let dexData={pokedex:{},learnsets:{},dexLoaded:false,learnsetsLoaded:false,loading:false,error:''};
+const statResolver=SBL.freeAgencyStats.createResolver({pokemon:SBL.pokemon,draftDash:SBL.draftDash,pool:draftPoolIndex,dex:dexData});
 let filterRenderTimer=null;
 
 const ALL_TYPES=['normal','fire','water','electric','grass','ice','fighting','poison',
@@ -77,6 +90,27 @@ function owner(name){
 
 
 function sprite(name){ return SBL.pokemon.spriteMarkup(name, 'sprite'); }
+
+function queueIdFor(mon){
+  const match=draftPoolIndex.find(x=>SBL.pokemon.sameSpeciesForm(x.name,mon.name));
+  return String(match?.id||mon.id||mon.name);
+}
+function queueContains(mon){ return draftQueue.includes(queueIdFor(mon)); }
+function toggleQueue(mon){
+  const id=queueIdFor(mon);
+  const i=draftQueue.indexOf(id);
+  if(i>=0) draftQueue.splice(i,1); else draftQueue.push(id);
+  queueSaveState='Saving…';
+  renderResults();
+  clearTimeout(queueSaveTimer);
+  queueSaveTimer=setTimeout(async()=>{
+    try{
+      const result=await SBL.draft.queue.save(draftQueue);
+      queueSaveState=result?.ok?'Queue saved':'Saved on this device only';
+    }catch(_){ queueSaveState='Saved on this device only'; }
+    const status=$('queueStatus'); if(status) status.textContent=queueSaveState;
+  },350);
+}
 
 // ---- Static Pokémon type table ----
 // Every mon's type is fixed game data — it never changes — so instead of
@@ -165,6 +199,8 @@ const TYPE_ALIASES={
 // hyphen-segment at a time) so any forme not explicitly listed above still
 // resolves to its base species' typing rather than coming up empty.
 function lookupTypes(name){
+  const shared=SBL?.pokemonTypes?.lookupTypes?.(name);
+  if(shared?.length) return shared;
   const normalized=SBL?.pokemon?.normalizeName ? SBL.pokemon.normalizeName(name) : key(name);
   const k=key(normalized);
   if(TYPE_TABLE[k]) return TYPE_TABLE[k];
@@ -186,14 +222,26 @@ function typeBadge(t){
 
 function openSelection(mon){
   const types=lookupTypes(mon.name);
+  const entry=statResolver.resolve(mon);
+  const stats=entry?.baseStats||entry?.stats||null;
+  const statDefs=[['hp','HP'],['atk','Attack'],['def','Defense'],['spa','Sp. Atk'],['spd','Sp. Def'],['spe','Speed']];
+  const resolvedStats=Object.fromEntries(statDefs.map(([key])=>[key,statResolver.statValue(mon,key)]));
+  const statTotal=stats&&statDefs.every(([key])=>resolvedStats[key]!=null&&Number.isFinite(Number(resolvedStats[key])))
+    ?statDefs.reduce((sum,[key])=>sum+Number(resolvedStats[key]),0):null;
+  const statRows=statDefs.map(([key,label])=>{
+    const value=Number(resolvedStats[key]);
+    const valid=Number.isFinite(value)&&value>0;
+    const pct=valid?Math.max(0,Math.min(100,value/255*100)):0;
+    return `<div class="fa-stat-row"><span>${label}</span><div class="fa-stat-track"><i style="width:${pct}%"></i></div><strong>${valid?value:'—'}</strong></div>`;
+  }).join('');
   const modal=document.createElement('div');
   modal.className='modal';
-  modal.innerHTML=`<div class="modalbox">
-    <h2>${esc((SBL.pokemon.displayNameWithForm ? SBL.pokemon.displayNameWithForm(mon.name) : SBL.pokemon.displayName(mon.name)))}</h2>
-    <div class="note">${mon.points} points · ${owner(mon.name)?'Drafted':'Available'}</div>
-    <div class="modal-types">${types.map(typeBadge).join('')||''}</div>
+  modal.innerHTML=`<div class="modalbox fa-mon-modal" role="dialog" aria-modal="true" aria-labelledby="faModalTitle">
+    <div class="fa-modal-heading"><div class="fa-modal-sprite">${sprite(mon.name)}</div><div class="fa-modal-title"><h2 id="faModalTitle">${esc((SBL.pokemon.displayNameWithForm ? SBL.pokemon.displayNameWithForm(mon.name) : SBL.pokemon.displayName(mon.name)))}</h2>
+    <div class="note">${mon.points} points${mon.isMega?' · Mega · cost TBD':''} · ${owner(mon.name)?'Drafted':'Available'}</div><div class="modal-types">${types.map(typeBadge).join('')||''}</div></div></div>
+    <section class="fa-base-stats" aria-label="Base stats"><div class="fa-stats-heading"><h3>Base stats</h3><strong>${statTotal===null?'Stats unavailable':`Total ${statTotal}`}</strong></div>${statRows}${statTotal===null?'<p class="note fa-stat-warning">Some or all base stats could not be resolved for this form.</p>':''}</section>
     <p class="note">${owner(mon.name)?`Drafted by <strong>${esc(owner(mon.name))}</strong>.`:'This Pokémon is available — it does not appear on any currently published roster.'}</p>
-    <div class="actions"><button class="btn" id="modalClose">Close</button></div>
+    <div class="actions"><button class="btn" id="modalClose" type="button">Close</button></div>
   </div>`;
   document.body.appendChild(modal);
   document.body.classList.add('modal-open');
@@ -207,6 +255,12 @@ function openSelection(mon){
 let lastDataSignature=null;
 
 async function load(){
+  try{
+    const draftState=await SBL.draft.read();
+    const nextPool=draftState?.settings?.draft?.pool||[];
+    const nextSignature=JSON.stringify(nextPool);
+    if(nextSignature!==draftPoolSignature){draftPoolIndex=nextPool;draftPoolSignature=nextSignature;statResolver.setSources({pool:draftPoolIndex,dex:dexData});}
+  }catch(_){}
   const result=await SBL.freeAgency.load(db);
   settings=result.settings||settings;
   allRosters=result.rosters||{};
@@ -214,22 +268,20 @@ async function load(){
 
   // Skip the (expensive, focus-stealing) re-render on the periodic 5s poll
   // unless the pool or rosters actually changed since last time.
-  const signature=JSON.stringify({mons,allRosters});
+  const signature=JSON.stringify({mons,allRosters,draftPoolSignature});
   const changed=signature!==lastDataSignature;
   lastDataSignature=signature;
+  statResolver.setSources({pool:draftPoolIndex,dex:dexData});
   if(changed) render();
 }
 
 function dexKey(name){
-  return SBL.pokemon.toShowdownId(name).replace(/[^a-z0-9-]/g,'');
+  return (SBL.pokemon.showdownStatsIdCandidates?.(name)||[SBL.pokemon.toShowdownId(name).replace(/[^a-z0-9-]/g,'')])[0];
 }
 function getDexEntry(name){
-  const k=dexKey(name);
-  if(dexData.pokedex[k]) return dexData.pokedex[k];
-  const compact=k.replace(/-/g,'');
-  if(dexData.pokedex[compact]) return dexData.pokedex[compact];
-  const base=k.split('-')[0];
-  return dexData.pokedex[base]||null;
+  const dex=dexData.pokedex||{};
+  for(const candidate of (SBL.pokemon.showdownStatsIdCandidates?.(name)||[dexKey(name)])) if(dex[candidate]) return dex[candidate];
+  return null;
 }
 function getLearnset(name){
   const k=dexKey(name);
@@ -251,25 +303,33 @@ function hasAbility(name, needle){
   const e=getDexEntry(name);
   const out=Object.values(e?.abilities||{}).some(a=>String(a).toLowerCase().includes(q)); filterMemo.set(mk,out); return out;
 }
-function meetsStat(name, stat, min){
-  if(!stat || min==='') return true;
-  const mk='s|'+key(name)+'|'+stat+'|'+min; if(filterMemo.has(mk)) return filterMemo.get(mk);
-  const e=getDexEntry(name), v=Number(e?.baseStats?.[stat]);
-  const out=Number.isFinite(v) && v>=Number(min); filterMemo.set(mk,out); return out;
+function meetsStat(name, stat, min, max){
+  return statResolver.matches(name,stat,min,max);
 }
 async function loadDexData(){
-  if(dexData.loaded) return;
-  try{
-    const [p,l]=await Promise.all([
-      fetch('https://play.pokemonshowdown.com/data/pokedex.json').then(r=>r.json()),
-      fetch('https://play.pokemonshowdown.com/data/learnsets.json').then(r=>r.json())
-    ]);
-    dexData={pokedex:p,learnsets:l,loaded:true};
-    render();
-  }catch(err){
-    console.warn('Pokémon filter data failed to load:',err);
-    dexData.loaded=true;
+  if(dexData.loading || (dexData.dexLoaded && dexData.learnsetsLoaded)) return;
+  dexData.loading=true;
+  dexData.error='';
+  const fetchJson=async url=>{
+    const response=await fetch(url);
+    if(!response.ok) throw new Error(`HTTP ${response.status} from Pokémon data source`);
+    return response.json();
+  };
+  const [dexResult,learnResult]=await Promise.allSettled([
+    dexData.dexLoaded?Promise.resolve(dexData.pokedex):fetchJson('https://play.pokemonshowdown.com/data/pokedex.json'),
+    dexData.learnsetsLoaded?Promise.resolve(dexData.learnsets):fetchJson('https://play.pokemonshowdown.com/data/learnsets.json')
+  ]);
+  if(dexResult.status==='fulfilled' && dexResult.value && typeof dexResult.value==='object'){
+    dexData.pokedex=dexResult.value; dexData.dexLoaded=true;
   }
+  if(learnResult.status==='fulfilled' && learnResult.value && typeof learnResult.value==='object'){
+    dexData.learnsets=learnResult.value; dexData.learnsetsLoaded=true;
+  }
+  dexData.loading=false;
+  dexData.error=[dexResult,learnResult].filter(x=>x.status==='rejected').map(x=>String(x.reason?.message||x.reason)).join('; ');
+  statResolver.setSources({pool:draftPoolIndex,dex:dexData});
+  filterMemo.clear();
+  render();
 }
 function scheduleFilterRender(){
   clearTimeout(filterRenderTimer);
@@ -282,13 +342,17 @@ function applyFilters(mons){
     if(filterName && !String(m.name).toLowerCase().includes(filterName)) return false;
     // points
     if(filterPoints!=='' && String(Number(m.points))!==filterPoints) return false;
+    // Mega classification
+    const mega=!!m.isMega || !!SBL?.pokemon?.isMega?.(m.name);
+    if(filterMega==='mega'&&!mega) return false;
+    if(filterMega==='standard'&&mega) return false;
     // availability
     const taken=!!owner(m.name);
     if(filterAvail==='available' && taken) return false;
     if(filterAvail==='taken' && !taken) return false;
     if(filterMove && !hasMove(m.name,filterMove)) return false;
     if(filterAbility && !hasAbility(m.name,filterAbility)) return false;
-    if(!meetsStat(m.name,filterStat,filterStatMin)) return false;
+    if(!meetsStat(m.name,filterStat,filterStatMin,filterStatMax)) return false;
     if(filterTypes.size>0){
       const types=lookupTypes(m.name);
       if(!types.some(t=>filterTypes.has(t))) return false;
@@ -305,13 +369,14 @@ function renderResults(){
   visible.forEach(m=>owner(m.name)?taken++:free++);
 
   const groups={};
-  visible.forEach(m=>{const p=Number(m.points)||0;(groups[p]??=[]).push(m);});
+  const ordered=(filterSort&&filterStat)?statResolver.sortPool(visible,filterStat,filterSort):visible;
+  ordered.forEach(m=>{const p=Number(m.points)||0;(groups[p]??=[]).push(m);});
   const tiers=Object.keys(groups).sort((a,b)=>Number(b)-Number(a));
 
   const results=$('results');
   if(!results) return;
 
-  const activeFilters=(filterName?1:0)+(filterTypes.size>0?1:0)+(filterPoints!==''?1:0)+(filterAvail!=='all'?1:0)+(filterMove?1:0)+(filterAbility?1:0)+(filterStat?1:0)+(filterStatMin!==''?1:0);
+  const activeFilters=(filterName?1:0)+(filterTypes.size>0?1:0)+(filterPoints!==''?1:0)+(filterMega!=='all'?1:0)+(filterAvail!=='all'?1:0)+(filterMove?1:0)+(filterAbility?1:0)+(filterStat?1:0)+(filterSort?1:0)+(filterStatMin!==''?1:0)+(filterStatMax!==''?1:0);
 
   results.innerHTML=`
     <div class="summary">
@@ -320,7 +385,9 @@ function renderResults(){
       <div class="stat"><div class="note">Taken</div><b>${taken}</b></div>
       <div class="stat"><div class="note">Total pool</div><b>${allMons.length}</b></div>
       ${activeFilters?`<button class="clear-filters" id="clearFilters">Clear filters (${activeFilters})</button>`:''}
+      <div class="queue-summary"><strong>${draftQueue.length}</strong> in your draft queue <span id="queueStatus" role="status">${esc(queueSaveState|| (queueReady?'Saved':'Loading queue…'))}</span></div>
     </div>
+    ${dexData.error ? `<div class="note danger" role="status">Some Pokémon move/ability fallback data could not be loaded (${esc(dexData.error)}). Persisted draft stats remain available for stat filters. <button type="button" class="ghost small" id="retryDexData">Retry data load</button></div>` : ''}
     ${tiers.length ? tiers.map(p=>{
       const label=Number(p)===1?'1 POINT':`${p} POINTS`;
       return `<section class="tier">
@@ -330,30 +397,38 @@ function renderResults(){
           return `<article class="mon ${o?'taken':''}" data-name="${esc(m.name)}">
             ${sprite(m.name)}
             <div class="mon-name">${esc((SBL.pokemon.displayNameWithForm ? SBL.pokemon.displayNameWithForm(m.name) : SBL.pokemon.displayName(m.name)))}</div>
-            <div class="mon-points">${m.points} pts</div>
+            <div class="mon-points">${m.points??'—'} pts${m.isMega?' · MEGA · COST TBD':''}</div>
             <div class="mon-types">${types.map(typeBadge).join('')}</div>
+            ${filterStat?`<div class="note mon-stat-value">${STAT_LABELS[filterStat]||filterStat} ${esc(String(statResolver.statValue(m.name,filterStat)??'—'))}</div>`:''}
+            <button class="queue-toggle ${queueContains(m)?'queued':''}" type="button" data-queue="${esc(m.id||m.name)}" aria-pressed="${queueContains(m)}">${queueContains(m)?'★ In draft queue':'☆ Add to draft queue'}</button>
             <div class="mon-status ${o?'taken-status':'available'}">${o?'Drafted by '+esc(o):'Available'}</div>
           </article>`;
         }).join('')}</div>
       </section>`;
     }).join('') : `<div class="empty">${allMons.length?'No Pokémon match your filters.':'No Free Agency pool has been published yet.'}</div>`}`;
 
+  const retryDex=$('retryDexData');
+  if(retryDex) retryDex.onclick=()=>loadDexData();
   const clearBtn=$('clearFilters');
   if(clearBtn) clearBtn.onclick=()=>{
-    filterName='';filterTypes.clear();filterPoints='';filterAvail='all';filterMove='';filterAbility='';filterStat='';filterStatMin='';
+    filterName='';filterTypes.clear();filterPoints='';filterMega='all';filterAvail='all';filterMove='';filterAbility='';filterStat='';filterStatMin='';filterStatMax='';filterSort='';
     syncFilterControls();
     renderResults();
   };
 
-  results.querySelectorAll('.mon').forEach(el=>el.onclick=()=>{
+  results.querySelectorAll('.mon').forEach(el=>el.onclick=e=>{
+    if(e.target.closest('[data-queue]')) return;
     const m=allMons.find(x=>key(x.name)===key(el.dataset.name));
     if(m) openSelection(m);
+  });
+  results.querySelectorAll('[data-queue]').forEach(btn=>btn.onclick=e=>{
+    e.stopPropagation(); const m=allMons.find(x=>String(x.id||x.name)===btn.dataset.queue); if(m) toggleQueue(m);
   });
 }
 
 function syncFilterControls(){
   const vals={
-    searchName:filterName, filterMove, filterAbility, filterStatMin
+    searchName:filterName, filterMove, filterAbility, filterStatMin, filterStatMax
   };
   Object.entries(vals).forEach(([id,val])=>{
     const el=$(id); if(el && document.activeElement!==el && el.value!==val) el.value=val;
@@ -367,9 +442,13 @@ function syncFilterControls(){
     points.value=pointValues.some(p=>String(p)===wanted)?wanted:'';
     if(points.value!==wanted) filterPoints='';
   }
+  const mega=$('filterMega'); if(mega && mega.value!==filterMega) mega.value=filterMega;
   const stat=$('filterStat'); if(stat && stat.value!==filterStat) stat.value=filterStat;
+  const sortSel=$('filterSort'); if(sortSel && sortSel.value!==filterSort) sortSel.value=filterSort;
   document.querySelectorAll('[data-avail]').forEach(btn=>btn.classList.toggle('active',btn.dataset.avail===filterAvail));
-  document.querySelectorAll('[data-type]').forEach(chip=>chip.classList.toggle('active',filterTypes.has(chip.dataset.type)));
+  document.querySelectorAll('[data-type]').forEach(chip=>{const active=filterTypes.has(chip.dataset.type);chip.classList.toggle('active',active);chip.setAttribute('aria-pressed',String(active));});
+  const typeCount=$('typeFilterCount'); if(typeCount) typeCount.textContent=filterTypes.size?`${filterTypes.size} selected`:'All types';
+  const typePanel=$('typeFilterPanel'); if(typePanel && filterTypes.size) typePanel.open=true;
 }
 
 function render(){
@@ -385,23 +464,32 @@ function render(){
   $('main').innerHTML=`
     <div class="toolbar">
       <div class="toolbar-wide"><label>Search by name</label><input type="text" id="searchName" value="${esc(filterName)}" placeholder="e.g. Landorus, Cinderace…" autocomplete="off"></div>
+      <div><label for="filterMega">Pokémon form</label><select class="filter-select" id="filterMega"><option value="all" ${filterMega==='all'?'selected':''}>All Pokémon</option><option value="mega" ${filterMega==='mega'?'selected':''}>Mega only</option><option value="standard" ${filterMega==='standard'?'selected':''}>Non-Mega only</option></select></div>
       <div class="points-filter"><label for="filterPoints">Points</label><select class="filter-select" id="filterPoints"><option value="">All point values</option>${pointValues.map(p=>`<option value="${p}" ${filterPoints===String(p)?'selected':''}>${p} pts</option>`).join('')}</select></div>
       <div><label>Availability</label><div class="avail-toggle"><button class="avail-btn ${filterAvail==='all'?'active':''}" data-avail="all">All</button><button class="avail-btn ${filterAvail==='available'?'active':''}" data-avail="available">Available</button><button class="avail-btn ${filterAvail==='taken'?'active':''}" data-avail="taken">Taken</button></div></div>
       <div class="toolbar-wide"><label>Move</label><input type="text" id="filterMove" value="${esc(filterMove)}" placeholder="e.g. Earthquake, Knock Off…" autocomplete="off"></div>
       <div class="toolbar-wide"><label>Ability</label><input type="text" id="filterAbility" value="${esc(filterAbility)}" placeholder="e.g. Intimidate, Levitate…" autocomplete="off"></div>
       <div><label>Base stat</label><select class="filter-select" id="filterStat"><option value=""> </option>${[['hp','HP'],['atk','Attack'],['def','Defense'],['spa','Sp. Atk'],['spd','Sp. Def'],['spe','Speed']].map(([v,n])=>`<option value="${v}" ${filterStat===v?'selected':''}>${n}</option>`).join('')}</select></div>
-      <div><label>Minimum</label><input type="number" id="filterStatMin" min="1" max="255" value="${esc(filterStatMin)}" placeholder="e.g. 120"></div>
+      <div><label for="filterSort">Sort by base stat</label><select class="filter-select" id="filterSort"><option value="">Default order</option><option value="desc" ${filterSort==='desc'?'selected':''}>Highest first</option><option value="asc" ${filterSort==='asc'?'selected':''}>Lowest first</option></select></div>
+      <div><label>Minimum stat</label><input type="number" id="filterStatMin" min="0" max="255" value="${esc(filterStatMin)}" placeholder="No minimum"></div>
+      <div><label>Maximum stat</label><input type="number" id="filterStatMax" min="0" max="255" value="${esc(filterStatMax)}" placeholder="No maximum"></div>
     </div>
-    <div class="type-filter-wrap"><label>Filter by type</label><div class="type-chips">${ALL_TYPES.map(t=>`<span class="type-chip type-${t}${filterTypes.has(t)?' active':''}" data-type="${t}">${t}</span>`).join('')}</div></div>
+    <details class="type-filter-wrap" id="typeFilterPanel" ${filterTypes.size?'open':''}>
+      <summary><span class="type-filter-title">Filter by type</span><span class="type-filter-count" id="typeFilterCount">${filterTypes.size?`${filterTypes.size} selected`:'All types'}</span></summary>
+      <div class="type-filter-content"><p class="type-filter-hint">Choose one or more types. Pokémon matching any selected type will be shown.</p><div class="type-chips">${ALL_TYPES.map(t=>`<button type="button" class="type-chip type-${t}${filterTypes.has(t)?' active':''}" data-type="${t}" aria-pressed="${filterTypes.has(t)}">${t}</button>`).join('')}</div></div>
+    </details>
     <div id="results"></div>`;
 
   const schedule=()=>scheduleFilterRender();
   $('searchName').oninput=e=>{filterName=e.target.value.toLowerCase();schedule();};
   $('filterMove').oninput=e=>{filterMove=e.target.value;schedule();};
   $('filterAbility').oninput=e=>{filterAbility=e.target.value;schedule();};
-  $('filterStatMin').oninput=e=>{filterStatMin=e.target.value;schedule();};
+  $('filterStatMin').oninput=e=>{filterStatMin=e.target.value;if(e.target.value&&!filterStat){filterStat='atk';$('filterStat').value='atk';}schedule();};
+  $('filterStatMax').oninput=e=>{filterStatMax=e.target.value;if(e.target.value&&!filterStat){filterStat='atk';$('filterStat').value='atk';}schedule();};
   $('filterPoints').onchange=e=>{filterPoints=e.target.value;renderResults();syncFilterControls();};
-  $('filterStat').onchange=e=>{filterStat=e.target.value;renderResults();syncFilterControls();};
+  $('filterMega').onchange=e=>{filterMega=e.target.value;renderResults();syncFilterControls();};
+  $('filterStat').onchange=e=>{filterStat=e.target.value;if(!filterStat)filterSort='';renderResults();syncFilterControls();};
+  $('filterSort').onchange=e=>{filterSort=e.target.value;if(filterSort&&!filterStat){filterStat='atk';$('filterStat').value='atk';}renderResults();syncFilterControls();};
 
   document.querySelectorAll('[data-avail]').forEach(btn=>btn.onclick=()=>{filterAvail=btn.dataset.avail;renderResults();syncFilterControls();});
   document.querySelectorAll('[data-type]').forEach(chip=>chip.onclick=()=>{
@@ -416,6 +504,7 @@ function render(){
 (async()=>{
   const ok = await enforceAccessGate();
   if(!ok) return;
+  try{ const draftState=await SBL.draft.read(); draftPoolIndex=draftState?.settings?.draft?.pool||[]; draftPoolSignature=JSON.stringify(draftPoolIndex); statResolver.setSources({pool:draftPoolIndex,dex:dexData}); draftQueue=await SBL.draft.queue.load(); queueReady=true; }catch(_){ draftQueue=[]; queueReady=true; }
   loadDexData();
   load().catch(e=>$("main").innerHTML=`<div class="empty">Could not load Free Agency: ${esc(String(e?.message||e))}</div>`);
   setInterval(()=>{if(!document.hidden)load().catch(()=>{});},5000);

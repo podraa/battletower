@@ -87,10 +87,12 @@
       // Keep the same access rule as before, but do not use it for data loading.
       const {data:{session}} = await supabase.auth.getSession();
       if(!session){ location.replace('index.html'); return; }
-      const {data:gateProfile, error:gateErr} = await supabase.from('profiles').select('team_name').eq('id', session.user.id).maybeSingle();
-      if(gateErr || !gateProfile?.team_name){ location.replace('index.html'); return; }
       const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
       if(!leagueId){ location.replace('index.html'); return; }
+      const currentFranchise = SBL.franchiseOwnership?.getUserFranchise
+        ? await SBL.franchiseOwnership.getUserFranchise(leagueId, session.user.id, supabase)
+        : null;
+      if(!currentFranchise?.franchiseId){ location.replace('index.html'); return; }
 
       const result = await withTimeout(SBL.freeAgency.load(supabase), 10000, 'Loading the roster data');
       let rosters = result?.rosters || {};

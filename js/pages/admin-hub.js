@@ -29,6 +29,12 @@
     return value==='healthy'||value==='reachable'||value==='active' ? 'is-good' : value==='suspended'||value==='archived' ? 'is-muted' : 'is-warn';
   }
 
+  function displayNameForUser(userId){
+    const id=String(userId||'').trim();
+    const user=users.find(u=>String(u?.id||'').trim()===id);
+    return String(user?.username||'').trim() || 'Unknown user';
+  }
+
   function renderHealth(){
     const grid=$('#healthGrid');
     if(!grid || !healthData) return;
@@ -84,10 +90,22 @@
     });
   }
 
+  function renderRegisteredAccounts(){
+    const wrap=$('#registeredAccountTable');if(!wrap)return;
+    if(!users.length){wrap.innerHTML='<div class="site-admin-empty">No registered accounts found.</div>';return;}
+    wrap.innerHTML=`<table><thead><tr><th>Account</th><th>Email</th><th>Site role</th><th>Username action</th></tr></thead><tbody>${users.map(u=>`<tr><td><strong>${esc(String(u.username||'').trim()||'Unknown user')}</strong><span class="cell-sub"><code>${esc(u.id)}</code></span></td><td>${esc(u.email||'—')}</td><td>${esc(u.site_role||'User')}</td><td><button class="table-action" data-account-username="${esc(u.id)}">Change username</button></td></tr>`).join('')}</tbody></table>`;
+    wrap.querySelectorAll('[data-account-username]').forEach(btn=>btn.addEventListener('click',async()=>{
+      const target=users.find(u=>String(u.id)===String(btn.dataset.accountUsername));if(!target)return;
+      const next=prompt(`Set username for ${target.username||target.email||'this account'}:`,target.username||'');if(next===null)return;
+      const clean=next.trim();if(!/^[A-Za-z0-9_-]{2,24}$/.test(clean)){setError('Username must be 2–24 characters and use only letters, numbers, underscores or hyphens.');return;}
+      btn.disabled=true;try{setError('');await SBL.profiles.changeUsername(target.id,clean);await load();}catch(e){setError(e.message||'Could not change username.');btn.disabled=false;}
+    }));
+  }
+
   function renderAdmins(){
     const wrap=$('#adminTable');
     if(!wrap) return;
-    wrap.innerHTML=`<div class="admin-access-form"><div><label for="adminUserSelect">Authorize user</label><select id="adminUserSelect"><option value="">Choose a user…</option>${users.map(u=>`<option value="${esc(u.id)}">${esc(u.username||u.email||u.id)}${u.email && u.username ? ` — ${esc(u.email)}` : ''}</option>`).join('')}</select></div><div><label for="adminRoleSelect">Role</label><select id="adminRoleSelect"><option value="admin">Admin</option><option value="super_admin">Super admin</option></select></div><div><label>&nbsp;</label><button class="site-admin-button primary" id="grantAdmin" type="button">Authorize</button></div></div><table><thead><tr><th>User</th><th>Site role</th><th>League commissioner</th><th>Status</th><th>Action</th></tr></thead><tbody>${users.filter(u=>u.site_role).map(u=>`<tr><td><strong>${esc(u.username||'Unnamed')}</strong><span class="cell-sub">${esc(u.email||u.id)}</span></td><td>${esc(u.site_role)}</td><td>${u.is_commissioner ? 'Yes' : 'No'}</td><td><span class="status-chip ${statusClass(u.site_status)}">${esc(u.site_status)}</span></td><td><button class="table-action" data-admin-user="${esc(u.id)}" data-admin-status="${u.site_status==='active'?'suspended':'active'}">${u.site_status==='active'?'Suspend':'Activate'}</button></td></tr>`).join('') || '<tr><td colspan="5" class="site-admin-empty">No site administrators configured.</td></tr>'}</tbody></table>`;
+    wrap.innerHTML=`<div class="admin-access-form"><div><label for="adminUserSelect">Authorize user</label><select id="adminUserSelect"><option value="">Choose a user…</option>${users.map(u=>`<option value="${esc(u.id)}">${esc(String(u.username||'').trim() || 'Unknown user')}</option>`).join('')}</select></div><div><label for="adminRoleSelect">Role</label><select id="adminRoleSelect"><option value="admin">Admin</option><option value="super_admin">Super admin</option></select></div><div><label>&nbsp;</label><button class="site-admin-button primary" id="grantAdmin" type="button">Authorize</button></div></div><table><thead><tr><th>User</th><th>Site role</th><th>League commissioner</th><th>Status</th><th>Action</th></tr></thead><tbody>${users.filter(u=>u.site_role).map(u=>`<tr><td><strong>${esc(String(u.username||'').trim() || 'Unknown user')}</strong></td><td>${esc(u.site_role)}</td><td>${u.is_commissioner ? 'Yes' : 'No'}</td><td><span class="status-chip ${statusClass(u.site_status)}">${esc(u.site_status)}</span></td><td><button class="table-action" data-admin-user="${esc(u.id)}" data-admin-status="${u.site_status==='active'?'suspended':'active'}">${u.site_status==='active'?'Suspend':'Activate'}</button></td></tr>`).join('') || '<tr><td colspan="5" class="site-admin-empty">No site administrators configured.</td></tr>'}</tbody></table>`;
     $('#grantAdmin')?.addEventListener('click',async()=>{
       const userId=$('#adminUserSelect')?.value;
       if(!userId){setError('Choose a user first.');return;}
@@ -106,7 +124,7 @@
       const results=await Promise.all(base);
       [healthData,leagues,users]=results;
       if(superAdmin) changeLogEntries=results[3]||[];
-      renderHealth(); renderLeagues(); renderAdmins();
+      renderHealth(); renderLeagues(); renderRegisteredAccounts(); renderAdmins();
       if(superAdmin) renderChangeLog();
     }catch(e){setError(e.message||'Could not load site administration data.');}
     finally{$('#refreshHealth').disabled=false;}
@@ -120,7 +138,7 @@
       if(!allowed){ location.replace('index.html'); return; }
       superAdmin=await SBL.siteAdmin.isSuperAdmin(currentUser.id);
       const profile=await SBL.auth.getProfile(currentUser.id);
-      $('#adminIdentity').textContent=`${profile?.username || currentUser.email || 'Site administrator'} · ${superAdmin?'Super admin':'Site admin'}`;
+      $('#adminIdentity').textContent=`${String(profile?.username||'').trim() || displayNameForUser(currentUser.id)} · ${superAdmin?'Super admin':'Site admin'}`;
       $('#changeLogSection').hidden=!superAdmin;
       $('#app').style.display='';
       $('#refreshHealth').addEventListener('click',load);

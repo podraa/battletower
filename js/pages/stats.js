@@ -30,7 +30,7 @@
   // Public dashboard: read-only. Admin page: authenticated writes.
   const SUPABASE_STATE_ID = '__dashboard_state__';
   const supabase = window.SBL.getSupabase();
-  const IS_ADMIN_PAGE = document.body.dataset.admin === 'true';
+  const IS_ADMIN_PAGE = document.body.dataset.admin === 'true' && !window.SBL_SITE?.isUserPreview?.();
   const POLL_MS = 10000;
   let adminUser = null;
   let loadingFromRemote = false;
@@ -39,15 +39,20 @@
     if(!IS_ADMIN_PAGE || !adminUser) throw new Error('Admin login required to change shared data.');
   }
 
+  // Only the most recently started load may apply its result; a slower,
+  // superseded response must never overwrite newer season state.
+  let loadSeq = 0;
   async function loadState(){
+    const seq = ++loadSeq;
     loadingFromRemote = true;
     try{
       const { data, error } = await SBL.replays.load(supabase);
       if(error) throw error;
-      const { sharedState, replays, publishedRosters } = SBL.replays.partition(data);
+      if(seq !== loadSeq) return;
+      const { sharedState, replays, publishedRosters, normalizedSeason } = SBL.replays.partition(data);
       const snap=SBL.seasons.getSnapshot(sharedState || {});
       const titleEl=document.getElementById('seasonTitle'); if(titleEl) titleEl.textContent=`SBL ${snap.name}: National Dex Draft`;
-      STATE.replays = snap.archived ? snap.replays : replays;
+      STATE.replays = snap.archived && !normalizedSeason ? snap.replays : replays;
       STATE.teamMap = snap.teamMap || {};
       STATE.settings = Object.assign({caseInsensitiveNames:true, teamLogos:{}, bannerMode:'top', bannerTeam:'', rosters:{}}, snap.settings || {});
 
@@ -57,11 +62,14 @@
       // not accidentally depend on replay-derived team data.
       const dashboardRosters = (STATE.settings.rosters && typeof STATE.settings.rosters === 'object')
         ? STATE.settings.rosters : {};
-      PUBLISHED_ROSTERS = Object.keys(dashboardRosters).length
+      PUBLISHED_ROSTERS = normalizedSeason
         ? dashboardRosters
-        : (publishedRosters && typeof publishedRosters === 'object' ? publishedRosters : {});
+        : (Object.keys(dashboardRosters).length
+            ? dashboardRosters
+            : (publishedRosters && typeof publishedRosters === 'object' ? publishedRosters : {}));
       if(!snap.archived){
         const {data:tradeRows} = await SBL.trades.load(supabase);
+        if(seq !== loadSeq) return;
         PUBLISHED_ROSTERS = SBL.trades.getEffectiveRosters(PUBLISHED_ROSTERS, tradeRows || []);
       }
       STATE.settings.rosters = PUBLISHED_ROSTERS;
@@ -87,6 +95,7 @@
   }
 
   async function saveReplays(){
+     try { await SBL.replays.autoMapReplayUsernames?.(STATE); } catch(e) { console.warn('Automatic replay username mapping skipped:',e); }
      requireAdmin();
      const rows = Object.values(STATE.replays).map(r => ({
        replay_id: r.id,
@@ -1025,8 +1034,8 @@
     const t=data.find(x=>x.team===team);
     if(!t) return;
     const all=teamPokemonStats('ALL');
-    const mons=Object.values(all[team]||{}).filter(m=>m && m.species).sort((a,b)=>Number(b.appearances||0)-Number(a.appearances||0)||Number(b.dealt||0)-Number(a.dealt||0)).slice(0,6);
-    document.getElementById('auditModal').innerHTML=`<div class="audit-overlay" id="teamOverviewOverlay"><div class="audit-box overview-modal"><div class="summary-header"><div><div class="summary-kicker">League Overview</div><h3>${SBL.pokemon.escapeHtml(team)}</h3><div class="summary-result" style="color:var(--text-dim);font-weight:600;">${t.wins}–${t.losses} · ${t.games} game${t.games===1?'':'s'}</div></div><button class="ghost small" id="teamOverviewClose">Close ✕</button></div><div class="profile-grid"><div><span>Record</span><strong>${t.wins}-${t.losses}</strong></div><div><span>Win %</span><strong>${t.games?(100*t.wins/t.games).toFixed(1)+'%':'—'}</strong></div><div><span>Differential</span><strong>${Number(t.diff||0)>0?'+':''}${Number(t.diff||0)}</strong></div><div><span>Damage dealt</span><strong>${Number(t.dealt||0).toFixed(1)}</strong></div></div><div class="section-divider"></div><h3 class="mini-heading">Top used Pokémon</h3>${mons.length?mons.map(m=>`<div class="summary-mon">${pokemonLink(m.species,`${SBL.pokemon.spriteMarkup(m.species,'sprite')}<div class="summary-mon-main"><strong>${SBL.pokemon.escapeHtml(m.species)}</strong><div class="summary-mon-stats">${m.appearances||0} games · ${m.kills||0} K · ${(m.appearances ? (Number(m.kills||0)/Number(m.appearances)).toFixed(2) : '0.00')} K/G · ${m.deaths||0} D · ${(Number(m.dealt)||0).toFixed(1)} dmg</div></div>`)}</div>`).join(''):'<div class="empty-state">No Pokémon data.</div>'}</div></div>`;
+    const mons=SBL.usage.topUsed(all[team],6);
+    document.getElementById('auditModal').innerHTML=`<div class="audit-overlay" id="teamOverviewOverlay"><div class="audit-box overview-modal"><div class="summary-header"><div><div class="summary-kicker">League Overview</div><h3>${SBL.pokemon.escapeHtml(team)}</h3><div class="summary-result" style="color:var(--text-dim);font-weight:600;">${t.wins}–${t.losses} · ${t.games} game${t.games===1?'':'s'}</div></div><button class="ghost small" id="teamOverviewClose">Close ✕</button></div><div class="profile-grid"><div><span>Record</span><strong>${t.wins}-${t.losses}</strong></div><div><span>Win %</span><strong>${t.games?(100*t.wins/t.games).toFixed(1)+'%':'—'}</strong></div><div><span>Differential</span><strong>${Number(t.diff||0)>0?'+':''}${Number(t.diff||0)}</strong></div><div><span>Damage dealt</span><strong>${Number(t.dealt||0).toFixed(1)}</strong></div></div><div class="section-divider"></div><h3 class="mini-heading">Top used Pokémon</h3>${mons.length?mons.map(m=>`<div class="summary-mon">${pokemonLink(m.species,`${SBL.pokemon.spriteMarkup(m.species,'sprite')}<div class="summary-mon-main"><strong>${SBL.pokemon.escapeHtml(m.species)}</strong><div class="summary-mon-stats">${m.appearances||0} games · ${m.kills||0} K · ${(m.appearances ? (Number(m.kills||0)/Number(m.appearances)).toFixed(2) : '0.00')} K/G · ${m.deaths||0} D · ${(Number(m.dealt)||0).toFixed(1)} dmg</div></div>`)}</div>`).join(''):'<div class="empty-state">No matches played yet this season.</div>'}</div></div>`;
     updateModalPageLock?.();
     const closeBtn=document.getElementById('teamOverviewClose');
     if(closeBtn) closeBtn.onclick=(e)=>{e.preventDefault();e.stopPropagation();closeAudit();};

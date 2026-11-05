@@ -57,39 +57,6 @@ function spriteId(s){ return SBL.pokemon.normalizeName(s); }
 function spriteCandidates(s){ return SBL.pokemon.candidateIds(s); }
 function sprite(s,cls='sprite'){ return SBL.pokemon.spriteMarkup(s, cls); }
 function allRows(){return Object.values(STATE.replays)}
-// Resolve a team's next unplayed fixture opponent. Shared by Match Prep's
-// default-opponent logic and the standalone Damage Calculator, so the
-// calculator can default to "who am I actually playing next" too.
-function nextScheduledOpponent(team){
-  const key=v=>teamKey(v);
-  const target=key(team);
-  // Finals Mode takes precedence once the regular season is over. The first
-  // unresolved finals match involving this team is its next opponent.
-  const finals=window.SBL?.finals?.resolveMatchups ? window.SBL.finals.resolveMatchups(STATE.settings?.finals||{}) : null;
-  if(finals && finals.status!=='inactive') {
-    for(const round of (finals.rounds||[])){
-      for(const match of (round.matches||[])){
-        if(match.winner || !match.teamA || !match.teamB) continue;
-        if(key(match.teamA)===target) return match.teamB;
-        if(key(match.teamB)===target) return match.teamA;
-      }
-    }
-  }
-  const rounds=Array.isArray(STATE.settings?.fixture?.rounds) ? STATE.settings.fixture.rounds : [];
-  const played=(week,home,away)=>Object.values(STATE.replays||{}).some(r=>{
-    if(!r || String(r.week||'Unassigned')!==String(week) || !r.players) return false;
-    const a=key(teamFor(r.players.p1)), b=key(teamFor(r.players.p2));
-    return (a===key(home)&&b===key(away)) || (a===key(away)&&b===key(home));
-  });
-  for(const round of rounds){
-    for(const match of (round.matches||[])){
-      if(key(match.home)!==target && key(match.away)!==target) continue;
-      if(played(round.week,match.home,match.away)) continue;
-      return key(match.home)===target ? match.away : match.home;
-    }
-  }
-  return '';
-}
 function rowsForTeam(team){return allRows().filter(r=>sameTeam(teamFor(r.players?.p1),team)||sameTeam(teamFor(r.players?.p2),team))}
 function sideForTeam(r,team){if(sameTeam(teamFor(r.players?.p1),team))return 'p1';if(sameTeam(teamFor(r.players?.p2),team))return 'p2';return null}
 function formBaseKey(s){
@@ -1623,9 +1590,10 @@ async function render(){
   {
     if(!STATE.prepYourTeam || !teamNames().some(n=>sameTeam(n,STATE.prepYourTeam))) STATE.prepYourTeam=STATE.profileTeam||team;
     const yourTeam=STATE.prepYourTeam;
-    const scheduledOpponent=nextScheduledOpponent(yourTeam);
-    let opponent=(STATE.prepOpponent && !sameTeam(STATE.prepOpponent,yourTeam)) ? STATE.prepOpponent : scheduledOpponent || teamNames().find(n=>!sameTeam(n,yourTeam))||'';
-    if(!opponent || sameTeam(opponent,yourTeam)) opponent=scheduledOpponent || teamNames().find(n=>!sameTeam(n,yourTeam))||'';
+    const scheduled=SBL.schedule.nextOpponentForTeam(yourTeam,STATE.settings,STATE.replays,STATE.teamMap);
+    const scheduledOpponent=scheduled.status==='upcoming' ? scheduled.opponent : '';
+    let opponent=(STATE.prepOpponent && !sameTeam(STATE.prepOpponent,yourTeam)) ? STATE.prepOpponent : scheduledOpponent;
+    if(scheduled.status!=='upcoming' || !opponent || sameTeam(opponent,yourTeam)) opponent='';
     STATE.prepOpponent=opponent;
     // Switch-In Analyser role swapping: mirror the same attacker/defender side
     // logic used inside renderMatchPrep so the event handlers below (which run
@@ -1920,7 +1888,7 @@ async function render(){
 $('prepYourTeam')?.addEventListener('change',async e=>{
       STATE.prepSection=STATE.prepSection||'overview';
       STATE.prepYourTeam=e.target.value;
-      STATE.prepOpponent=nextScheduledOpponent(STATE.prepYourTeam)||teamNames().find(n=>!sameTeam(n,STATE.prepYourTeam))||'';
+      { const next=SBL.schedule.nextOpponentForTeam(STATE.prepYourTeam,STATE.settings,STATE.replays,STATE.teamMap); STATE.prepOpponent=next.status==='upcoming'?next.opponent:''; }
       STATE.prepSwitchMon='';STATE.prepSwitchMove='';STATE.prepSwitchHits='';STATE.prepSwitchAtkItem='';STATE.prepSwitchDefItem='';STATE.prepSwitchEVsByMon={};STATE.prepCoverageMon='';
       await render();
     });
@@ -2635,25 +2603,28 @@ async function load(){
     const {data:authData}=await supabase.auth.getUser();
     const user=authData?.user||null;
     if(!user){ location.replace('index.html'); return; }
-    const profile=await SBL.profiles.get(user.id, 'team_name', supabase);
-    STATE.profileUserId=user.id; STATE.profileTeam=profile?.team_name||'';
-    if(!STATE.profileTeam){ location.replace('index.html'); return; }
+    STATE.profileUserId=user.id;
     const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
     if(!leagueId){ location.replace('index.html'); return; }
+    const currentFranchise = SBL.franchiseOwnership?.getUserFranchise
+      ? await SBL.franchiseOwnership.getUserFranchise(leagueId, user.id, supabase)
+      : null;
+    STATE.profileTeam=currentFranchise?.franchise?.name||'';
+    if(!currentFranchise?.franchiseId){ location.replace('index.html'); return; }
     document.getElementById('app').style.display = '';
     const {data,error}=await SBL.replays.load(supabase);
     if(error)throw error;
-    const { sharedState, replays, publishedRosters } = SBL.replays.partition(data);
+    const { sharedState, replays, publishedRosters, normalizedSeason } = SBL.replays.partition(data);
     const shared = sharedState || {};
     const snap=SBL.seasons.getSnapshot(shared);
     STATE.teamMap=snap.teamMap;
     STATE.settings=Object.assign(STATE.settings,snap.settings||{});
     STATE.settings.rosters=STATE.settings.rosters||{};
-    const seasonReplays=snap.archived ? snap.replays : replays;
+    const seasonReplays=snap.archived && !normalizedSeason ? snap.replays : replays;
     if(seasonReplays && typeof seasonReplays==='object'){
       for(const [id,replay] of Object.entries(seasonReplays)) if(id && replay) STATE.replays[id]=replay;
     }
-    if(publishedRosters && typeof publishedRosters==='object' && Object.keys(STATE.settings.rosters||{}).length===0){
+    if(!normalizedSeason && publishedRosters && typeof publishedRosters==='object' && Object.keys(STATE.settings.rosters||{}).length===0){
       STATE.settings.rosters=publishedRosters;
     }
     const {data:tradeRows} = await SBL.trades.load(supabase);
@@ -2753,7 +2724,7 @@ window.__dashboardGetTeams = function(){
     .sort((a,b)=>String(a).localeCompare(String(b)));
 };
 window.__dashboardProfileTeam = function(){ return typeof STATE!=='undefined' ? (STATE.profileTeam||'') : ''; };
-window.__dashboardNextOpponent = function(team){ try{ return nextScheduledOpponent(team||STATE.profileTeam)||''; }catch(e){ return ''; } };
+window.__dashboardNextOpponent = function(team){ try{ const next=SBL.schedule.nextOpponentForTeam(team||STATE.profileTeam,STATE.settings,STATE.replays,STATE.teamMap); return next.status==='upcoming'?next.opponent:''; }catch(e){ return ''; } };
 window.__dashboardGetRosterNames = function(team){
   const raw=rosterForTeam(team);
   const arr=Array.isArray(raw)?raw:[];
