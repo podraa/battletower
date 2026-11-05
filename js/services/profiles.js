@@ -34,6 +34,11 @@
     }
     if (options.status) query = query.eq('status', options.status);
     if (options.excludeUserId) query = query.neq('id', options.excludeUserId);
+    if (Array.isArray(options.userIds)) {
+      const ids = [...new Set(options.userIds.map(x => String(x || '').trim()).filter(Boolean))];
+      if (!ids.length) return [];
+      query = query.in('id', ids);
+    }
     const { data, error } = await query;
     if (error) throw error;
     return data || [];
@@ -51,6 +56,9 @@
 
   async function update(userId, patch, db) {
     if (!userId) throw new Error('Profile id is required.');
+    if (patch && Object.prototype.hasOwnProperty.call(patch, 'username')) {
+      throw new Error('Username changes must use the secure username-change service.');
+    }
     const { data, error } = await client(db)
       .from('profiles')
       .update(patch || {})
@@ -61,6 +69,22 @@
     return data || null;
   }
 
-  SBL.services.profiles = { get, list, create, update };
+  // Secure global username change. The database enforces self-only access,
+  // the 90-day cooldown, and the site-admin override.
+  async function changeUsername(userId, username, db) {
+    if (!userId) throw new Error('Account id is required.');
+    const clean = String(username || '').trim();
+    if (!/^[A-Za-z0-9_-]{2,24}$/.test(clean)) {
+      throw new Error('Username must be 2–24 characters and use only letters, numbers, underscores or hyphens.');
+    }
+    const { data, error } = await client(db).rpc('sbl_change_username', {
+      p_user_id: userId,
+      p_username: clean
+    });
+    if (error) throw error;
+    return data;
+  }
+
+  SBL.services.profiles = { get, list, create, update, changeUsername };
   SBL.profiles = SBL.services.profiles;
 })();

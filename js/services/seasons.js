@@ -29,6 +29,25 @@
   function getSnapshot(shared, options) {
     const source=shared||{};
     const registry=source?.settings?.leagues && typeof source.settings.leagues==='object' ? source.settings.leagues : {};
+    // A normalized season snapshot is already resolved for one exact
+    // league+season by replays.load(). Never replace it with registry[id].state:
+    // that state belongs to the legacy league-level record, not this season.
+    if(source.__normalizedSeason && typeof source.__normalizedSeason==='object'){
+      const context=source.__normalizedSeason;
+      const requestedLeague=options?.league || SBL.leagueDb?.selectedLeagueId?.() || '';
+      const league=registry[requestedLeague] || null;
+      const status=String(context.status||'').toLowerCase();
+      const settings=source.settings && typeof source.settings==='object' ? source.settings : {};
+      return {
+        name:context.name || settings.activeSeason || DEFAULT_SEASON,
+        key:context.key || '', seasonId:context.id || '',
+        leagueId:league?.id || requestedLeague || '', leagueName:league?.name || '',
+        leagues:registry, teamMap:source.teamMap || {}, settings,
+        replays:source.replays || null,
+        archived:status==='archived' || status==='complete', status:context.status || '',
+        archives:archivesFrom(source)
+      };
+    }
     const archives=archivesFrom(source);
     const requestedSeason=requestedKey(options);
     const requestedLeague=options?.league || SBL.leagueDb?.selectedLeagueId?.() || '';
@@ -60,12 +79,22 @@
       const shared=await loadState(db);
       return getSnapshot(shared,options);
     }
-    const season=await SBL.leagueDb.getSeasonContext(leagueId,db,{seasonId:options.seasonId,seasonKey:seasonKey(requestedKey(options))});
+    const requested=requestedKey(options);
+    const lookup={};
+    if(options.seasonId) lookup.seasonId=options.seasonId;
+    else if(requested) lookup.seasonKey=seasonKey(requested);
+    // An empty request must remain an empty request. seasonKey('') returns
+    // the slug 'season', which used to be passed as an explicit lookup and
+    // prevented getSeasonContext() from resolving the selected/active season.
+    const season=await SBL.leagueDb.getSeasonContext(leagueId,db,lookup);
     if(season){
-      SBL.leagueDb.setSelectedSeasonId?.(season.id);
-      SBL.leagueDb.setSelectedSeasonKey?.(season.season_key);
+      SBL.leagueDb.setSelectedSeasonId?.(season.id,leagueId);
+      SBL.leagueDb.setSelectedSeasonKey?.(season.season_key,leagueId);
       const payload=season.data&&typeof season.data==='object'?season.data:{};
       const settings=payload.settings&&typeof payload.settings==='object'?payload.settings:{};
+      // The normalized season row owns the display name; do not let an older
+      // embedded settings.activeSeason value relabel the selected season.
+      settings.activeSeason=season.name;
       return {name:season.name,key:season.season_key,seasonId:season.id,leagueId,leagueName:'',teamMap:payload.teamMap||{},settings,replays:payload.replays||null,archived:['archived','complete'].includes(season.status),status:season.status,archives:{}};
     }
     const snap=await SBL.leagueDb.getSnapshot(leagueId,db);

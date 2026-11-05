@@ -34,19 +34,43 @@
       document.dispatchEvent(new CustomEvent('sbl:league-selection-changed',{detail:{leagueId:value}}));
     }catch(_){}
   }
-  function selectedSeasonId(){
+  function seasonStorageKey(kind,leagueId){ return `sbl_selected_season_${kind}:${String(leagueId||selectedLeagueId()||'legacy')}`; }
+  function selectedSeasonId(leagueId){
     try{
       const q=new URLSearchParams(location.search).get('season_id')||'';
       if(q && isUuid(q)) return q;
+      const scoped=localStorage.getItem(seasonStorageKey('id',leagueId))||'';
+      if(isUuid(scoped)) return scoped;
+      // Read the old global value only as a migration bridge. The caller still
+      // verifies that the season belongs to the requested league.
       const stored=localStorage.getItem(SELECTED_SEASON)||'';
       return isUuid(stored) ? stored : '';
     }catch(_){ return ''; }
   }
-  function setSelectedSeasonId(id){ try{ localStorage.setItem(SELECTED_SEASON,String(id||'')); }catch(_){} }
-  function selectedSeasonKey(){
-    try{ return new URLSearchParams(location.search).get('season') || localStorage.getItem('sbl_selected_season_key') || ''; }catch(_){ return ''; }
+  // The page URL is the person's explicit request; localStorage is only a
+  // remembered preference. getSeasonContext() consults these first so a stale
+  // stored season can never override a link such as season.html?season=season-14.
+  function routeSeasonId(){
+    try{ const q=new URLSearchParams(location.search).get('season_id')||''; return isUuid(q)?q:''; }catch(_){ return ''; }
   }
-  function setSelectedSeasonKey(key){ try{ localStorage.setItem('sbl_selected_season_key',String(key||'')); }catch(_){} }
+  function routeSeasonKey(){
+    try{ return String(new URLSearchParams(location.search).get('season')||'').trim(); }catch(_){ return ''; }
+  }
+  function syncSeasonRoute(leagueId,seasonId,seasonKey){
+    try{
+      const url=new URL(location.href);
+      const routeLeague=url.searchParams.get('league')||selectedLeagueId();
+      if(!leagueId||String(routeLeague)!==String(leagueId)||['index.html','admin-hub.html'].includes((url.pathname.split('/').pop()||'').toLowerCase())) return;
+      if(seasonId) url.searchParams.set('season_id',String(seasonId)); else url.searchParams.delete('season_id');
+      if(seasonKey!==undefined){ if(seasonKey) url.searchParams.set('season',String(seasonKey)); else url.searchParams.delete('season'); }
+      history.replaceState(history.state,'',url.href);
+    }catch(_){}
+  }
+  function setSelectedSeasonId(id,leagueId){ try{ localStorage.setItem(seasonStorageKey('id',leagueId),String(id||'')); localStorage.setItem(SELECTED_SEASON,String(id||'')); }catch(_){} syncSeasonRoute(leagueId,id,undefined); }
+  function selectedSeasonKey(leagueId){
+    try{ return new URLSearchParams(location.search).get('season') || localStorage.getItem(seasonStorageKey('key',leagueId)) || ''; }catch(_){ return ''; }
+  }
+  function setSelectedSeasonKey(key,leagueId){ try{ localStorage.setItem(seasonStorageKey('key',leagueId),String(key||'')); localStorage.setItem('sbl_selected_season_key',String(key||'')); }catch(_){} syncSeasonRoute(leagueId,selectedSeasonId(leagueId),key); }
   function clone(v){ try{return JSON.parse(JSON.stringify(v));}catch(_){return v;} }
   function isMissingTable(error){ return !!error && (error.code==='42P01' || /relation .* does not exist/i.test(error.message||'')); }
 
@@ -78,18 +102,14 @@
   async function listForUser(userId, client){
     if(!userId) return [];
     const D=db(client);
-    const {data:members,error:memberError}=await D.from('league_members').select('id,league_id,user_id,franchise_id,role,status,requested_at,approved_at,created_at,updated_at').eq('user_id',userId);
+    const {data:members,error:memberError}=await D.from('league_members').select('id,league_id,user_id,role,status,member_type,requested_franchise_id,requested_at,approved_at,created_at,updated_at').eq('user_id',userId);
     if(memberError) throw memberError;
     if(!members?.length) return [];
     const ids=[...new Set(members.map(m=>m.league_id).filter(Boolean))];
     const {data:leagues,error:leagueError}=await D.from('leagues').select('id,name,description,join_code,created_by,status,created_at,updated_at,state').in('id',ids);
     if(leagueError) throw leagueError;
-    const franchiseIds=[...new Set(members.map(m=>m.franchise_id).filter(Boolean))];
-    let franchises=[];
-    if(franchiseIds.length){ const r=await D.from('franchises').select('id,league_id,name,conference,created_at').in('id',franchiseIds); if(r.error) throw r.error; franchises=r.data||[]; }
-    const fMap=new Map(franchises.map(f=>[f.id,f]));
     return (leagues||[]).map(l=>{
-      const ms=members.filter(m=>m.league_id===l.id).map(m=>Object.assign({},m,{userId:m.user_id,franchise:fMap.get(m.franchise_id)?.name||'',team:fMap.get(m.franchise_id)?.name||''}));
+      const ms=members.filter(m=>m.league_id===l.id).map(m=>Object.assign({},m,{userId:m.user_id}));
       return toLegacyLeague(l,ms);
     });
   }
@@ -107,23 +127,18 @@
     const {data:row,error}=await D.from('leagues').select('id,name,description,join_code,created_by,status,created_at,updated_at,state').eq('id',id).maybeSingle();
     if(error) throw error;
     if(!row) return null;
-    const {data:members,error:me}=await D.from('league_members').select('id,league_id,user_id,franchise_id,role,status,requested_at,approved_at,created_at,updated_at').eq('league_id',id).order('created_at',{ascending:true});
+    const {data:members,error:me}=await D.from('league_members').select('id,league_id,user_id,role,status,member_type,requested_franchise_id,requested_at,approved_at,created_at,updated_at').eq('league_id',id).order('created_at',{ascending:true});
     if(me) throw me;
-    const franchiseIds=[...new Set((members||[]).map(m=>m.franchise_id).filter(Boolean))];
-    let fMap=new Map();
-    if(franchiseIds.length){ const r=await D.from('franchises').select('id,league_id,name,conference,created_at').in('id',franchiseIds); if(r.error) throw r.error; fMap=new Map((r.data||[]).map(f=>[f.id,f])); }
-    const ms=(members||[]).map(m=>Object.assign({},m,{userId:m.user_id,franchise:fMap.get(m.franchise_id)?.name||'',team:fMap.get(m.franchise_id)?.name||''}));
+    const ms=(members||[]).map(m=>Object.assign({},m,{userId:m.user_id}));
     return toLegacyLeague(row,ms);
   }
 
   async function getMembership(leagueId,userId,client){
     if(!leagueId||!userId) return null;
-    const {data,error}=await db(client).from('league_members').select('id,league_id,user_id,franchise_id,role,status,requested_at,approved_at,created_at,updated_at').eq('league_id',leagueId).eq('user_id',userId).maybeSingle();
+    const {data,error}=await db(client).from('league_members').select('id,league_id,user_id,role,status,member_type,requested_franchise_id,requested_at,approved_at,created_at,updated_at').eq('league_id',leagueId).eq('user_id',userId).maybeSingle();
     if(error) throw error;
     if(!data) return null;
-    let franchise='';
-    if(data.franchise_id){ const r=await db(client).from('franchises').select('name').eq('id',data.franchise_id).maybeSingle(); if(r.error) throw r.error; franchise=r.data?.name||''; }
-    return Object.assign({},data,{userId:data.user_id,franchise,team:franchise});
+    return Object.assign({},data,{userId:data.user_id});
   }
 
   async function getSnapshot(leagueId,client){
@@ -141,26 +156,82 @@
     const id=leagueId || selectedLeagueId();
     if(!id) return null;
     const D=db(client);
-    const requestedId=options.seasonId || selectedSeasonId();
-    const requestedKey=options.seasonKey || selectedSeasonKey();
-    let data=null,error=null;
-    if(requestedId && isUuid(requestedId)) {
-      const r=await D.from('league_seasons').select('id,league_id,season_key,name,status,data,created_at,updated_at').eq('league_id',id).eq('id',requestedId).maybeSingle();
-      data=r.data; error=r.error;
-    } else if(requestedKey) {
-      const key=String(requestedKey).trim();
-      const normalized=key.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-      let r=await D.from('league_seasons').select('id,league_id,season_key,name,status,data,created_at,updated_at').eq('league_id',id).eq('season_key',normalized).maybeSingle();
-      if(!r.error && !r.data) r=await D.from('league_seasons').select('id,league_id,season_key,name,status,data,created_at,updated_at').eq('league_id',id).ilike('name',key).maybeSingle();
-      data=r.data; error=r.error;
-    } else {
-      const r=await D.from('league_seasons').select('id,league_id,season_key,name,status,data,created_at,updated_at').eq('league_id',id).eq('status','active').order('created_at',{ascending:true}).limit(1).maybeSingle();
-      data=r.data; error=r.error;
-      if(!error && !data){ const r2=await D.from('league_seasons').select('id,league_id,season_key,name,status,data,created_at,updated_at').eq('league_id',id).order('created_at',{ascending:true}).limit(1).maybeSingle(); data=r2.data; error=r2.error; }
+    const explicitSeasonId=String(options.seasonId||'').trim();
+    const explicitSeasonKey=String(options.seasonKey||'').trim();
+    const fields='id,league_id,season_key,name,status,data,created_at,updated_at';
+
+    // Explicit operation targets always win over browser selection. This is
+    // critical for season creation/restoration: the caller names the target
+    // season while localStorage still points at the previous season.
+    if(explicitSeasonId){
+      const r=await D.from('league_seasons').select(fields).eq('league_id',id).eq('id',explicitSeasonId).maybeSingle();
+      if(r.error) throw r.error;
+      return r.data||null;
     }
-    if(error) throw error;
-    if(!data) return null;
-    return data;
+    if(explicitSeasonKey){
+      const key=explicitSeasonKey.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+      let r=await D.from('league_seasons').select(fields).eq('league_id',id).eq('season_key',key).maybeSingle();
+      if(r.error) throw r.error;
+      if(!r.data){
+        r=await D.from('league_seasons').select(fields).eq('league_id',id).ilike('name',explicitSeasonKey).maybeSingle();
+        if(r.error) throw r.error;
+      }
+      return r.data||null;
+    }
+
+    // 1) The URL is an explicit request for this page view and wins over any
+    //    remembered browser preference.
+    const routeId=routeSeasonId();
+    if(routeId){
+      const r=await D.from('league_seasons').select(fields).eq('league_id',id).eq('id',routeId).maybeSingle();
+      if(r.error) throw r.error;
+      if(r.data) return r.data;
+    }
+    const routeKey=routeSeasonKey();
+    if(routeKey){
+      const key=routeKey.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+      let r=await D.from('league_seasons').select(fields).eq('league_id',id).eq('season_key',key).maybeSingle();
+      if(r.error) throw r.error;
+      if(!r.data){
+        r=await D.from('league_seasons').select(fields).eq('league_id',id).ilike('name',routeKey).maybeSingle();
+        if(r.error) throw r.error;
+      }
+      if(r.data) return r.data;
+    }
+
+    // Browser selection is a preference, not authority. A stale ID from a
+    // different league must not make all season data disappear; try the saved
+    // key and then the league's current (newest active) season if that ID is
+    // invalid.
+    const storedId=selectedSeasonId(id);
+    if(storedId){
+      const r=await D.from('league_seasons').select(fields).eq('league_id',id).eq('id',storedId).maybeSingle();
+      if(r.error) throw r.error;
+      if(r.data) return r.data;
+    }
+    const storedKey=selectedSeasonKey(id);
+    if(storedKey){
+      const key=storedKey.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+      let r=await D.from('league_seasons').select(fields).eq('league_id',id).eq('season_key',key).maybeSingle();
+      if(r.error) throw r.error;
+      if(!r.data){
+        r=await D.from('league_seasons').select(fields).eq('league_id',id).ilike('name',storedKey).maybeSingle();
+        if(r.error) throw r.error;
+      }
+      if(r.data) return r.data;
+    }
+    // Default to the league's CURRENT season. When several rows are marked
+    // active (a known legacy-data defect) the newest one is current; the oldest
+    // is, by definition, the historical one. If nothing is active (for example
+    // the current season is still 'planned'), the newest season is the best
+    // available default. Never default to the oldest season: that silently
+    // presents a historical season as the current one.
+    let active=await D.from('league_seasons').select(fields).eq('league_id',id).eq('status','active').order('created_at',{ascending:false}).limit(1).maybeSingle();
+    if(active.error) throw active.error;
+    if(active.data) return active.data;
+    const newest=await D.from('league_seasons').select(fields).eq('league_id',id).order('created_at',{ascending:false}).limit(1).maybeSingle();
+    if(newest.error) throw newest.error;
+    return newest.data||null;
   }
 
   async function listSeasons(leagueId,client){
@@ -178,11 +249,11 @@
     const {data,error}=await db(client).from('league_seasons').update({data:clean,updated_at:new Date().toISOString()}).eq('id',seasonId).eq('league_id',leagueId).select('id,league_id,season_key,name,status,data,updated_at').maybeSingle();
     if(error) throw error;
     if(!data) throw new Error('Season could not be saved.');
-    setSelectedSeasonId(data.id); setSelectedSeasonKey(data.season_key);
+    setSelectedSeasonId(data.id,leagueId); setSelectedSeasonKey(data.season_key,leagueId);
     return data;
   }
 
-  async function saveState(leagueId,state,client){
+  async function saveState(leagueId,state,client,options={}){
     if(!leagueId) throw new Error('League id is required.');
     const clean={teamMap:clone(state?.teamMap||{}),settings:clone(state?.settings||{})};
     delete clean.settings.leagues;
@@ -199,20 +270,52 @@
     // league_seasons row instead of silently continuing to write the old one.
     const targetName=String(clean.settings.activeSeason||'Season 1').trim()||'Season 1';
     const targetKey=targetName.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'season-1';
-    let season=await getSeasonContext(leagueId,client,{seasonKey:targetKey});
+    let season=options.seasonId
+      ? await getSeasonContext(leagueId,client,{seasonId:options.seasonId})
+      : await getSeasonContext(leagueId,client,{seasonKey:targetKey});
     if(!season){
-      const current=await getSeasonContext(leagueId,client,{});
-      if(current && current.status==='active') await db(client).from('league_seasons').update({status:'archived',updated_at:new Date().toISOString()}).eq('id',current.id).eq('league_id',leagueId);
+      // Archive every currently-active row rather than trusting browser
+      // selection to identify the active season. This also repairs legacy
+      // databases that accidentally contain more than one active season.
+      const archived=await db(client).from('league_seasons')
+        .update({status:'archived',updated_at:new Date().toISOString()})
+        .eq('league_id',leagueId).eq('status','active');
+      if(archived.error) throw archived.error;
       const created=await db(client).from('league_seasons').upsert({league_id:leagueId,season_key:targetKey,name:targetName,status:'active',data:{teamMap:clean.teamMap,settings:clean.settings}}, {onConflict:'league_id,season_key'}).select('id,league_id,season_key,name,status,data,created_at,updated_at').single();
       if(created.error) throw created.error;
       season=created.data;
     } else {
-      const active=await getSeasonContext(leagueId,client,{});
-      if(active && active.id!==season.id && active.status==='active') await db(client).from('league_seasons').update({status:'archived',updated_at:new Date().toISOString()}).eq('id',active.id).eq('league_id',leagueId);
-      await db(client).from('league_seasons').update({status:'active'}).eq('id',season.id).eq('league_id',leagueId);
+      // The target may be archived already. Archive all other active seasons
+      // by database state, not by stale localStorage ID, then activate target.
+      const archived=await db(client).from('league_seasons')
+        .update({status:'archived',updated_at:new Date().toISOString()})
+        .eq('league_id',leagueId).eq('status','active').neq('id',season.id);
+      if(archived.error) throw archived.error;
+      const activated=await db(client).from('league_seasons').update({status:'active',updated_at:new Date().toISOString()}).eq('id',season.id).eq('league_id',leagueId);
+      if(activated.error) throw activated.error;
       season=await saveSeasonState(leagueId,season.id,{teamMap:clean.teamMap,settings:clean.settings},client);
     }
-    setSelectedSeasonId(season.id); setSelectedSeasonKey(season.season_key);
+    setSelectedSeasonId(season.id,leagueId); setSelectedSeasonKey(season.season_key,leagueId);
+    return data;
+  }
+
+
+  async function renameSeason(leagueId,seasonId,name,client){
+    const cleanName=String(name||'').trim();
+    if(!leagueId||!seasonId) throw new Error('League and season are required.');
+    if(!cleanName) throw new Error('Enter a season name.');
+    const current=await getSeasonContext(leagueId,client,{seasonId});
+    if(!current) throw new Error('The selected season could not be found.');
+    const payload=clone(current.data||{});
+    payload.settings=payload.settings||{};
+    payload.settings.activeSeason=cleanName;
+    const {data,error}=await db(client).from('league_seasons')
+      .update({name:cleanName,data:payload,updated_at:new Date().toISOString()})
+      .eq('id',seasonId).eq('league_id',leagueId)
+      .select('id,league_id,season_key,name,status,data,created_at,updated_at').maybeSingle();
+    if(error) throw error;
+    if(!data) throw new Error('Season name could not be updated.');
+    setSelectedSeasonId(data.id,leagueId); setSelectedSeasonKey(data.season_key,leagueId);
     return data;
   }
 
@@ -232,7 +335,7 @@
     const {error}=await db(client).from('leagues').delete().eq('id',leagueId);
     if(error) throw error;
     if(selectedLeagueId()===leagueId) setSelectedLeagueId('');
-    setSelectedSeasonId(''); setSelectedSeasonKey('');
+    setSelectedSeasonId('',leagueId); setSelectedSeasonKey('',leagueId);
     return true;
   }
 
@@ -262,15 +365,16 @@
     if(!created?.id) throw new Error('League creation RPC returned no league.');
     const activeSeason=String(initial.settings?.activeSeason||'Season 1').trim()||'Season 1';
     const seasonKey=activeSeason.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'season-1';
-    setSelectedSeasonKey(seasonKey);
-    setSelectedSeasonId('');
+    setSelectedSeasonKey(seasonKey,created.id);
+    setSelectedSeasonId('',created.id);
+    setSelectedLeagueId(created.id);
     return getLeague(created.id,D);
   }
 
   async function listFranchises(leagueId,client){
     if(!leagueId) return [];
     const {data,error}=await db(client).from('franchises')
-      .select('id,league_id,name,conference,metadata,claim_state,locked_reason,locked_by,locked_at,created_at,updated_at')
+      .select('id,league_id,name,conference,metadata,status,archived_at,claim_state,locked_reason,locked_by,locked_at,created_at,updated_at')
       .eq('league_id',leagueId)
       .order('name',{ascending:true});
     if(error) throw error;
@@ -287,6 +391,18 @@
     });
     if(error) throw error;
     return Array.isArray(data)?data[0]:data;
+  }
+
+  async function updateFranchiseDefinition(leagueId,franchiseId,name,conference,client){
+    if(!leagueId||!franchiseId) throw new Error('League and franchise ids are required.');
+    const value=String(name||'').trim();
+    if(!value) throw new Error('Franchise name cannot be blank.');
+    const {data,error}=await db(client).rpc('sbl_update_franchise_definition',{
+      p_league_id:leagueId,p_franchise_id:franchiseId,p_name:value,
+      p_conference:String(conference||'').trim()||null
+    });
+    if(error) throw error;
+    return data;
   }
 
   async function findByJoinCode(code,client){
@@ -314,7 +430,7 @@
   }
 
   async function setMembership(leagueId,userId,patch,client){
-    const ownershipFields=['franchise','team','franchise_id'];
+    const ownershipFields=['franchise','team','franchise_id','franchiseId'];
     const attemptedOwnership=ownershipFields.filter(field =>
       Object.prototype.hasOwnProperty.call(patch || {}, field)
     );
@@ -334,31 +450,46 @@
   }
 
   async function upsertFranchises(leagueId,items,client){
-    const payload=(Array.isArray(items)?items:[]).map(x=>({league_id:leagueId,name:String(x?.name||x||'').trim(),conference:String(x?.conference||'').trim()||null,metadata:x?.metadata||{}})).filter(x=>x.name);
+    const payload=(Array.isArray(items)?items:[]).map(x=>({name:String(x?.name||x||'').trim(),conference:String(x?.conference||'').trim()||null,metadata:x?.metadata||{}})).filter(x=>x.name);
     if(!payload.length) return [];
-    const {data,error}=await db(client).from('franchises').upsert(payload,{onConflict:'league_id,name'}).select('*');
-    if(error) throw error; return data||[];
+    const {data,error}=await db(client).rpc('sbl_upsert_franchises',{p_league_id:leagueId,p_franchises:payload});
+    if(error) throw error;
+    return data||[];
   }
 
   async function loadReplays(leagueId,client,options={}){
-    let q=db(client).from('league_replays').select('replay_id,replay_data,updated_at,season_id').eq('league_id',leagueId);
-    const seasonId=options.seasonId || selectedSeasonId();
-    if(seasonId) q=q.eq('season_id',seasonId);
-    const {data,error}=await q;
+    if(!leagueId) return [];
+    // Replay rows always belong to exactly one season. An explicit seasonId is
+    // trusted (the caller resolved it). Otherwise resolve through
+    // getSeasonContext(), which validates that the season belongs to this
+    // league. If no season can be resolved, return nothing: an unscoped query
+    // would return every season's replays and leak historical usage into the
+    // current season.
+    let seasonId=String(options.seasonId||'').trim();
+    if(!seasonId){
+      const season=await getSeasonContext(leagueId,client);
+      seasonId=season?.id||'';
+    }
+    if(!seasonId) return [];
+    const {data,error}=await db(client).from('league_replays').select('replay_id,replay_data,updated_at,season_id').eq('league_id',leagueId).eq('season_id',seasonId);
     if(error) throw error; return data||[];
   }
   async function upsertReplays(leagueId,rows,client){
-    const seasonId=selectedSeasonId();
+    const seasonId=selectedSeasonId(leagueId);
     const payload=(Array.isArray(rows)?rows:[]).map(r=>Object.assign({},r,{league_id:leagueId,season_id:r.season_id||seasonId||null,updated_at:r.updated_at||new Date().toISOString()}));
     if(!payload.length) return [];
     const {data,error}=await db(client).from('league_replays').upsert(payload,{onConflict:'league_id,replay_id'}).select('replay_id,replay_data,updated_at');
     if(error) throw error; return data||[];
   }
-  async function deleteReplays(leagueId,ids,client){
+  async function deleteReplays(leagueId,ids,client,options={}){
     const vals=(Array.isArray(ids)?ids:[]).filter(Boolean); if(!vals.length)return [];
-    const {data,error}=await db(client).from('league_replays').delete().eq('league_id',leagueId).in('replay_id',vals).select('replay_id');
+    const seasonId=options.seasonId || selectedSeasonId(leagueId);
+    let q=db(client).from('league_replays').delete().eq('league_id',leagueId).in('replay_id',vals);
+    // Always scope destructive replay operations to the selected season.
+    if(seasonId) q=q.eq('season_id',seasonId);
+    const {data,error}=await q.select('replay_id');
     if(error) throw error; return data||[];
   }
 
-  SBL.leagueDb={selectedLeagueId,setSelectedLeagueId,selectedSeasonId,setSelectedSeasonId,selectedSeasonKey,setSelectedSeasonKey,getSeasonContext,listSeasons,saveSeasonState,updateLeague,deleteLeague,isUuid,isAvailable,listAll,listForUser,getLeague,getMembership,getSnapshot,saveState,createLeague,listFranchises,createFranchise,findByJoinCode,requestJoin,setMembership,upsertFranchises,loadReplays,upsertReplays,deleteReplays,clearAvailability:()=>{availability=null;availabilityPromise=null;}};
+  SBL.leagueDb={selectedLeagueId,setSelectedLeagueId,selectedSeasonId,setSelectedSeasonId,selectedSeasonKey,setSelectedSeasonKey,getSeasonContext,listSeasons,saveSeasonState,renameSeason,updateLeague,deleteLeague,isUuid,isAvailable,listAll,listForUser,getLeague,getMembership,getSnapshot,saveState,createLeague,listFranchises,createFranchise,updateFranchiseDefinition,findByJoinCode,requestJoin,setMembership,upsertFranchises,loadReplays,upsertReplays,deleteReplays,clearAvailability:()=>{availability=null;availabilityPromise=null;}};
 })();

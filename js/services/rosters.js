@@ -34,14 +34,17 @@
         state=snapshot?.settings||{};
       }
       let rosters=state?.rosters&&typeof state.rosters==='object'?state.rosters:{};
-      if(!Object.keys(rosters).length){
+      // A normalized season row is authoritative even when its roster is {}.
+      // Do not resurrect a stale league-wide __rosters__ compatibility record.
+      const hasNormalizedSeason=!!snapshot?.seasonId;
+      if(!hasNormalizedSeason && !Object.keys(rosters).length){
         const leagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
         let q=db.from('league_replays').select('replay_id,replay_data').eq('replay_id','__rosters__');
         if(leagueId) q=q.eq('league_id',leagueId);
         const normalized=await q.maybeSingle();
         if(!normalized.error&&normalized.data) rosters=unwrap(normalized.data)?.rosters||{};
       }
-      if(!Object.keys(rosters).length){
+      if(!hasNormalizedSeason && !Object.keys(rosters).length){
         const leagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
         let q=db.from('replays').select('replay_id,replay_data').eq('replay_id','__rosters__');
         if(leagueId) q=q.eq('league_id',leagueId);

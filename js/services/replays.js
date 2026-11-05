@@ -22,12 +22,33 @@
   const STATE_ID = '__dashboard_state__';
   const ROSTERS_ID = '__rosters__';
   const FREE_AGENCY_ID = '__free_agency__';
+  // Season-scoped load cache. The cache key is always the scope that was
+  // actually RESOLVED for the cached payload (league|season id|season key); it
+  // is never re-read from the live browser selection after the fact, because
+  // the selection can change while a request is in flight.
   let loadCache = null;
   let loadCacheKey = '';
-  let loadPromise = null;
-  let loadPromiseKey = '';
+  const loadPromises = new Map(); // requestKey -> in-flight promise
+  // Monotonic request counter. Only the most recently started load may mutate
+  // shared state (browser selection, load cache). A slower response for a
+  // season/league that is no longer selected still resolves for its own caller
+  // but is inert: it cannot overwrite the newer selection or cache.
+  let loadEpoch = 0;
 
-  async function loadNormalized(db) {
+  function selectionKey() {
+    return `${SBL.leagueDb?.selectedLeagueId?.() || 'legacy'}|${SBL.leagueDb?.selectedSeasonId?.() || ''}|${SBL.leagueDb?.selectedSeasonKey?.() || ''}`;
+  }
+  function resolvedKey(rows) {
+    const state = (Array.isArray(rows) ? rows : []).find(r => r && r.replay_id === STATE_ID);
+    const season = state?.normalizedSeason || state?.replay_data?.__normalizedSeason || null;
+    const leagueId = state?.replay_data?.settings?.activeLeagueId || '';
+    if (!season?.id || !leagueId) return '';
+    return `${leagueId}|${season.id}|${season.key || ''}`;
+  }
+
+  async function loadNormalized(db, isCurrent) {
+    const current = typeof isCurrent === 'function' ? isCurrent : () => true;
+    // Capture the league ONCE. Everything below is read for this league only.
     let id = SBL.leagueDb?.selectedLeagueId?.() || '';
     if (!SBL.leagueDb?.isAvailable || !(await SBL.leagueDb.isAvailable(db))) return null;
     // Do not guess a league when no valid selection exists. The league
@@ -46,19 +67,29 @@
     // season selections from another league can never select that league's row.
     let sr;
     try {
-      sr=await SBL.leagueDb.getSeasonContext(id,db);
+      sr = await SBL.leagueDb.getSeasonContext(id, db);
     } catch (seasonError) {
       throw new Error('Could not load the selected season: ' + (seasonError?.message || seasonError));
     }
     if (!sr || !sr.data || typeof sr.data!=='object') {
       throw new Error('Could not load the selected season for this league.');
     }
-    const seasonData=sr.data||{};
-    scopedState={teamMap:seasonData.teamMap||{},settings:seasonData.settings||{}};
-    scopedState.settings.activeSeason=sr.name || scopedState.settings.activeSeason;
-    SBL.leagueDb.setSelectedSeasonId?.(sr.id);
-    SBL.leagueDb.setSelectedSeasonKey?.(sr.season_key);
-    snapshot.state=scopedState;
+    const seasonData = sr.data || {};
+    scopedState = { teamMap: seasonData.teamMap || {}, settings: seasonData.settings || {} };
+    scopedState.settings.activeSeason = sr.name || scopedState.settings.activeSeason;
+    // Remember the resolved season, but only if this is still the newest
+    // request. A superseded load must not drag the selection back.
+    if (current()) {
+      SBL.leagueDb.setSelectedSeasonId?.(sr.id, id);
+      SBL.leagueDb.setSelectedSeasonKey?.(sr.season_key, id);
+    }
+    // Carry the exact normalized season identity with the in-memory snapshot.
+    // This marker is never persisted; it prevents legacy league.state and the
+    // compatibility __rosters__ row from being mistaken for this season's data.
+    scopedState.__normalizedSeason = {
+      id: sr.id, key: sr.season_key || '', name: sr.name || '', status: sr.status || ''
+    };
+    snapshot.state = scopedState;
     const leagues = await SBL.leagueDb.listAll(db);
     const registry = {};
     for (const league of leagues) {
@@ -68,15 +99,20 @@
     snapshot.state.settings = snapshot.state.settings || {};
     snapshot.state.settings.leagues = registry;
     snapshot.state.settings.activeLeagueId = id;
-    const replayRows = await SBL.leagueDb.loadReplays(id, db, {seasonId:SBL.leagueDb.selectedSeasonId?.()});
-    return [{ replay_id: STATE_ID, replay_data: snapshot.state }, ...replayRows.map(r => ({ replay_id:r.replay_id, replay_data:r.replay_data, updated_at:r.updated_at }))];
+    // Replays are read by the season that was just resolved, never by
+    // re-reading the (mutable) browser selection: the state and the replay
+    // rows of one payload must always describe the same season.
+    const replayRows = await SBL.leagueDb.loadReplays(id, db, { seasonId: sr.id });
+    return [{ replay_id: STATE_ID, replay_data: snapshot.state, normalizedSeason: scopedState.__normalizedSeason }, ...replayRows.map(r => ({ replay_id:r.replay_id, replay_data:r.replay_data, updated_at:r.updated_at }))];
   }
 
   function invalidateLoadCache() {
     loadCache = null;
     loadCacheKey = '';
-    loadPromise = null;
-    loadPromiseKey = '';
+    loadPromises.clear();
+    // Anything still in flight was started before this invalidation and may
+    // describe pre-write data: make it inert.
+    loadEpoch++;
   }
 
   // Backward-compatible global hook for older admin/page code.
@@ -87,31 +123,37 @@
     const db = client || (SBL.getSupabase ? SBL.getSupabase() : null);
     if (!db) throw new Error('Supabase client is not available.');
     if (options?.force) invalidateLoadCache();
-    const requestKey=`${SBL.leagueDb?.selectedLeagueId?.()||'legacy'}|${SBL.leagueDb?.selectedSeasonId?.()||''}|${SBL.leagueDb?.selectedSeasonKey?.()||''}`;
-    if (loadCache && loadCacheKey===requestKey) return { data: loadCache, error: null };
-    if (loadPromise && loadPromiseKey===requestKey) {
-      const data = await loadPromise;
+    const requestKey = selectionKey();
+    if (loadCache && loadCacheKey === requestKey) return { data: loadCache, error: null };
+    const pending = loadPromises.get(requestKey);
+    if (pending) {
+      const data = await pending;
       return { data, error: null };
     }
-    loadPromiseKey=requestKey;
-    loadPromise = (async () => {
-      const normalized = await loadNormalized(db);
-      if (normalized) { loadCache = normalized; loadCacheKey=`${SBL.leagueDb?.selectedLeagueId?.()||'legacy'}|${SBL.leagueDb?.selectedSeasonId?.()||''}|${SBL.leagueDb?.selectedSeasonKey?.()||''}`; return loadCache; }
+    const epoch = ++loadEpoch;
+    const isCurrent = () => epoch === loadEpoch;
+    const promise = (async () => {
+      const normalized = await loadNormalized(db, isCurrent);
+      if (normalized) {
+        if (isCurrent()) { loadCache = normalized; loadCacheKey = resolvedKey(normalized) || requestKey; }
+        return normalized;
+      }
       let query = db.from('replays').select('replay_id,replay_data');
       const legacyLeagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
       if (legacyLeagueId) query = query.eq('league_id',legacyLeagueId);
       const { data, error } = await query;
       if (error) throw error;
-      loadCache = data || [];
-      loadCacheKey=requestKey;
-      return loadCache;
+      const rows = data || [];
+      if (isCurrent()) { loadCache = rows; loadCacheKey = requestKey; }
+      return rows;
     })();
+    loadPromises.set(requestKey, promise);
     try {
-      const data = await loadPromise;
+      const data = await promise;
       return { data, error: null };
     } finally {
-      loadPromise = null;
-      loadPromiseKey='';
+      // Only clear our own entry; a newer request for the same key must keep its promise.
+      if (loadPromises.get(requestKey) === promise) loadPromises.delete(requestKey);
     }
   }
 
@@ -120,6 +162,7 @@
     let sharedState = null;
     let publishedRosters = {};
     let publishedFreeAgency = null;
+    let normalizedSeason = null;
     const replays = {};
 
     for (const row of list) {
@@ -127,6 +170,7 @@
 
       if (row.replay_id === STATE_ID) {
         sharedState = row.replay_data || {};
+        normalizedSeason = row.normalizedSeason || sharedState.__normalizedSeason || null;
         continue;
       }
 
@@ -149,7 +193,8 @@
       sharedState,
       replays,
       publishedRosters,
-      publishedFreeAgency
+      publishedFreeAgency,
+      normalizedSeason
     };
   }
 
@@ -161,8 +206,10 @@
   function extractReplayId(value) {
     const raw = String(value ?? '').trim();
     if (!raw) return '';
+    // Showdown private replays append a private access key after the numeric
+    // replay timestamp. Keep that complete slug intact for the JSON endpoint.
     const valid = id => {
-      try { return !!id && /^[a-z0-9][a-z0-9-]*-[0-9]+$/i.test(decodeURIComponent(String(id))); }
+      try { return !!id && /^[a-z0-9][a-z0-9-]*-[0-9]+(?:-[a-z0-9]+)?$/i.test(decodeURIComponent(String(id)).replace(/\.json$/i,'')); }
       catch (_) { return false; }
     };
     const clean = id => {
@@ -183,7 +230,7 @@
     } catch (_) {}
     // Last-resort parsing also handles pasted JSON endpoint URLs and URLs with
     // query/hash suffixes. Never return an unvalidated string to the importer.
-    const match = raw.match(/(?:^|\/)([a-z0-9][a-z0-9-]*-[0-9]+)(?:\.json)?(?:[/?#]|$)/i);
+    const match = raw.match(/(?:^|\/)([a-z0-9][a-z0-9-]*-[0-9]+(?:-[a-z0-9]+)?)(?:\.json)?(?:[/?#]|$)/i);
     return match && valid(match[1]) ? clean(match[1]) : '';
   }
 
@@ -195,6 +242,82 @@
     };
   }
 
+  // Build current-season Showdown username mappings only from active player
+  // memberships and authoritative franchise_assignments. Profiles.team_name is
+  // a legacy sitewide field and must never decide current league ownership.
+  async function autoMapReplayUsernames(state, options={}){
+    if(!state || !state.replays || !state.teamMap) return {exact:0,alts:0};
+    const db=options.client || SBL.getSupabase?.();
+    const leagueId=String(options.leagueId || SBL.leagueDb?.selectedLeagueId?.() || '').trim();
+    if(!db || !leagueId || !SBL.franchiseOwnership?.listActiveMemberFranchises || !SBL.profiles?.list || !SBL.rosters?.getAll) return {exact:0,alts:0};
+    let assignments, profiles, rosters;
+    try{
+      [assignments,rosters]=await Promise.all([
+        SBL.franchiseOwnership.listActiveMemberFranchises(leagueId,db),
+        SBL.rosters.getAll({force:!!options.force})
+      ]);
+      const userIds=[...new Set((assignments||[]).map(x=>String(x.userId||'')).filter(Boolean))];
+      if(!userIds.length) return {exact:0,alts:0};
+      profiles=await SBL.profiles.list({fields:'id,username',userIds},db);
+    }catch(_){ return {exact:0,alts:0}; }
+    let archivedSeason=false;
+    try{
+      const selectedSeason=await SBL.leagueDb?.getSeasonContext?.(leagueId,db);
+      archivedSeason=!!selectedSeason && ['archived','complete'].includes(String(selectedSeason.status||'').toLowerCase());
+    }catch(_){ /* Legacy deployments have no normalized season context. */ }
+    const norm=v=>String(v||'').trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+    const species=v=>norm(typeof v==='string'?v:(v?.species||v?.name||v?.pokemon||''));
+    const assignmentByUser=new Map((assignments||[]).map(x=>[String(x.userId),x]));
+    const known=(profiles||[]).filter(p=>p?.username && assignmentByUser.has(String(p.id))).map(p=>{
+      const assignment=assignmentByUser.get(String(p.id));
+      return {id:p.id,username:p.username,team_name:assignment.franchise.name};
+    });
+    const rosterSets={};
+    for(const [team,raw] of Object.entries(rosters||{})){
+      const arr=Array.isArray(raw)?raw:(raw?.pokemon||raw?.roster||raw?.members||[]);
+      rosterSets[norm(team)]=new Set(arr.map(species).filter(Boolean));
+    }
+    const byUsername=new Map(known.map(p=>[norm(p.username),p]));
+    let exact=0, alts=0;
+    state.settings=state.settings||{};
+    state.settings.replayUsernameAliases=state.settings.replayUsernameAliases||{};
+    for(const profile of known){
+      const key=String(profile.username).trim().toLowerCase();
+      // Exact current account names follow the active assignment. This is a
+      // season-scoped replay identity mapping, not the ownership record.
+      if(!state.teamMap[key] || !archivedSeason){
+        if(state.teamMap[key] !== profile.team_name){ state.teamMap[key]=profile.team_name; exact++; }
+      }
+      if(!state.settings.replayUsernameAliases[key] || !archivedSeason) state.settings.replayUsernameAliases[key]=profile.username;
+    }
+    const observations=new Map();
+    for(const replay of Object.values(state.replays)) for(const side of ['p1','p2']){
+      const username=String(replay?.players?.[side]||'').trim();
+      if(!username || byUsername.has(norm(username))) continue;
+      const obs=observations.get(norm(username))||{username,mons:new Set()};
+      for(const mon of replay?.teamRoster?.[side]||[]){ const k=species(mon); if(k) obs.mons.add(k); }
+      observations.set(norm(username),obs);
+    }
+    for(const obs of observations.values()){
+      if(obs.mons.size<4 || state.teamMap[obs.username.toLowerCase()]) continue;
+      const matches=[];
+      for(const profile of known){
+        const roster=rosterSets[norm(profile.team_name)]; if(!roster?.size) continue;
+        let overlap=0; for(const mon of obs.mons) if(roster.has(mon)) overlap++;
+        const ratio=overlap/obs.mons.size;
+        if(ratio>0.70) matches.push({profile,ratio});
+      }
+      if(!matches.length) continue;
+      matches.sort((a,b)=>b.ratio-a.ratio); const best=matches[0];
+      if(matches.some((m,i)=>i>0 && Math.abs(m.ratio-best.ratio)<0.000001 && norm(m.profile.team_name)!==norm(best.profile.team_name))) continue;
+      const alias=obs.username.toLowerCase();
+      state.teamMap[alias]=best.profile.team_name;
+      state.settings.replayUsernameAliases[alias]=best.profile.username;
+      alts++;
+    }
+    return {exact,alts};
+  }
+
   SBL.replays = {
     STATE_ID,
     ROSTERS_ID,
@@ -203,6 +326,7 @@
     partition,
     isReplayId,
     extractReplayId,
+    autoMapReplayUsernames,
     getSpecialIds,
     invalidateCache: invalidateLoadCache,
     clearCache: invalidateLoadCache
@@ -219,6 +343,10 @@
   'use strict';
   window.SBL=window.SBL||{};
   const SBL=window.SBL;
+  // The parser/persistence IIFE is separate from the loader IIFE above. Route
+  // cache invalidation through the already-exported loader API rather than an
+  // out-of-scope function name.
+  function invalidateReplayLoadCache(){ SBL.replays?.invalidateCache?.(); }
   // Keep the replay namespace stable even if this service is bundled or loaded
   // in a different order in a future page.
   SBL.replays=SBL.replays||{};
@@ -1935,7 +2063,7 @@
     const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
     if(leagueId && SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db)){
       const data = await SBL.leagueDb.upsertReplays(leagueId,payload,db);
-      invalidateLoadCache();
+      invalidateReplayLoadCache();
       await SBL.performance?.invalidate?.('replays:all');
       return { data, error:null };
     }
@@ -1946,7 +2074,7 @@
       .upsert(legacyPayload, { onConflict:'replay_id' })
       .select('replay_id,replay_data');
     if(error) throw error;
-    invalidateLoadCache();
+    invalidateReplayLoadCache();
     await SBL.performance?.invalidate?.('replays:all');
     return { data: data || [], error: null };
   }
@@ -1957,14 +2085,17 @@
     if(!values.length) return { data: [], error: null };
     const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
     if(leagueId && SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db)){
-      const data=await SBL.leagueDb.deleteReplays(leagueId,values,db);
-      invalidateLoadCache();
+      const seasonId=SBL.leagueDb?.selectedSeasonId?.(leagueId) || null;
+      const data=await SBL.leagueDb.deleteReplays(leagueId,values,db,{seasonId});
+      invalidateReplayLoadCache();
       await SBL.performance?.invalidate?.('replays:all');
       return {data,error:null};
     }
     let query = db.from('replays').delete().in('replay_id', values);
     const legacyLeagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    const legacySeasonId = SBL.leagueDb?.selectedSeasonId?.(legacyLeagueId) || null;
     if (legacyLeagueId) query = query.eq('league_id',legacyLeagueId);
+    if (legacySeasonId) query = query.eq('season_id',legacySeasonId);
     const { data, error } = await query.select('replay_id');
     if(error) throw error;
     await SBL.performance?.invalidate?.('replays:all');
@@ -1975,11 +2106,13 @@
     const db = client || SBL.getSupabase();
     const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
     if(leagueId && SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db)){
-      return (await SBL.leagueDb.loadReplays(leagueId,db)).map(r=>({replay_id:r.replay_id}));
+      return (await SBL.leagueDb.loadReplays(leagueId,db,{seasonId:SBL.leagueDb?.selectedSeasonId?.(leagueId)})).map(r=>({replay_id:r.replay_id}));
     }
     let query = db.from('replays').select('replay_id');
     const legacyLeagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    const legacySeasonId = SBL.leagueDb?.selectedSeasonId?.(legacyLeagueId) || null;
     if (legacyLeagueId) query = query.eq('league_id',legacyLeagueId);
+    if (legacySeasonId) query = query.eq('season_id',legacySeasonId);
     const { data, error } = await query;
     if(error) throw error;
     return data || [];
@@ -1993,10 +2126,10 @@
     return deleteIds(ids, db);
   }
 
-  async function saveSharedState(state, client){
+  async function saveSharedState(state, client, options={}){
     const db = client || SBL.getSupabase();
-    const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
-    const seasonId = SBL.leagueDb?.selectedSeasonId?.() || '';
+    const leagueId = String(options.leagueId || SBL.leagueDb?.selectedLeagueId?.() || '').trim();
+    const seasonId = String(options.seasonId || SBL.leagueDb?.selectedSeasonId?.(leagueId) || '').trim();
     if(!leagueId) throw new Error('Cannot save shared state without a selected league.');
     if(!seasonId) throw new Error('Cannot save shared state without a selected season.');
     if(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db)){
@@ -2005,11 +2138,11 @@
       const hasRegistry=Object.keys(registry).length>0;
       const entry=registry[leagueId]||null;
       if(hasRegistry && !entry){
-        await SBL.leagueDb.deleteLeague(leagueId,db);
-        invalidateLoadCache();
-        return {data:[],error:null};
+        // A partial/stale registry is not authority to delete a real league.
+        // Refuse the save and leave all league and season records untouched.
+        throw new Error('The selected league is missing from the shared league registry. Reload the league before saving.');
       }
-      await SBL.leagueDb.saveState(leagueId,{teamMap:state?.teamMap||{},settings},db);
+      await SBL.leagueDb.saveState(leagueId,{teamMap:state?.teamMap||{},settings},db,{seasonId});
 
       const franchises=Object.entries(settings.franchiseDefinitions||settings.franchises||{}).map(([name,v])=>({name,conference:v?.conference||v?.division||''}));
       if(franchises.length) await SBL.leagueDb.upsertFranchises(leagueId,franchises,db);
@@ -2018,23 +2151,25 @@
       // legacy shared-state members. This save path persists season/shared state
       // only. Membership lifecycle is owned by the normalized membership and
       // franchise services/RPCs.
-      if(entry.name || entry.description || entry.joinCode || entry.status){
+      if(entry && (entry.name || entry.description || entry.joinCode || entry.status)){ 
         await SBL.leagueDb.updateLeague(leagueId,{name:entry.name,description:entry.description||'',join_code:entry.joinCode||null,status:entry.status||'active'},db);
       }
-      invalidateLoadCache();
+      invalidateReplayLoadCache();
       await SBL.performance?.invalidate?.('replays:all');
       return {data:[],error:null};
     }
     throw new Error('Normalized league storage is unavailable; shared state was not saved.');
   }
 
-  async function savePublishedRosters(rosters, client){
+  async function savePublishedRosters(rosters, client, options={}){
     const db = client || SBL.getSupabase();
-    const leagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
+    const leagueId=String(options.leagueId || SBL.leagueDb?.selectedLeagueId?.() || '').trim();
+    const requestedSeasonId=String(options.seasonId || SBL.leagueDb?.selectedSeasonId?.(leagueId) || '').trim();
+    if(!leagueId) throw new Error('Select a league before publishing rosters.');
+    if(!requestedSeasonId) throw new Error('Select a season before publishing rosters.');
     if(leagueId && SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db)){
       const league=await SBL.leagueDb.getLeague(leagueId,db);
-      const targetName=league?.state?.settings?.activeSeason || '';
-      const season=await SBL.leagueDb.getSeasonContext(leagueId,db,{seasonKey:targetName||''});
+      const season=await SBL.leagueDb.getSeasonContext(leagueId,db,{seasonId:requestedSeasonId});
       if(season){
         const payload=JSON.parse(JSON.stringify(season.data||{}));
         payload.settings=payload.settings||{};
@@ -2042,14 +2177,15 @@
         await SBL.leagueDb.saveSeasonState(leagueId,season.id,payload,db);
       }
       // Keep the normalized special row as a compatibility/readback artifact.
-      const rows=await SBL.leagueDb.upsertReplays(leagueId,[{replay_id:'__rosters__',replay_data:{rosters:rosters||{}},season_id:season?.id||null,updated_at:new Date().toISOString()}],db);
-      invalidateLoadCache();
+      if(!season) throw new Error('The selected season could not be found in this league.');
+      const rows=await SBL.leagueDb.upsertReplays(leagueId,[{replay_id:'__rosters__',replay_data:{rosters:rosters||{}},season_id:season.id,updated_at:new Date().toISOString()}],db);
+      invalidateReplayLoadCache();
       return {data:rows,error:null};
     }
     return upsertRows([{
       replay_id:'__rosters__',
       league_id:leagueId||null,
-      season_id:SBL.leagueDb?.selectedSeasonId?.()||null,
+      season_id:requestedSeasonId,
       replay_data:{rosters:rosters||{}},
       updated_at:new Date().toISOString()
     }],db);

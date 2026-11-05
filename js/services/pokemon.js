@@ -20,13 +20,18 @@
   };
   const SPRITE_PREF_KEY='sbl_sprite_style';
   function getSpriteStyle(){
+    // Keep the existing stored values for backwards compatibility: 3d = HOME,
+    // 2d = Gen 5. HD is an explicit per-render override and is never a user preference.
     try { return localStorage.getItem(SPRITE_PREF_KEY)==='2d' ? '2d' : '3d'; } catch { return '3d'; }
   }
   function setSpriteStyle(style, persist=true){
-    const next=style==='2d'?'2d':'3d';
+    const next=style==='2d'||style==='gen5'?'2d':'3d';
     try { if(persist) localStorage.setItem(SPRITE_PREF_KEY,next); } catch {}
     document.documentElement.dataset.sblSpriteStyle=next;
     document.querySelectorAll('img.sbl-remote-sprite').forEach(img=>{
+      // Draft showcase artwork is deliberately pinned to HD and must not be
+      // changed when a user switches their normal site-wide sprite preference.
+      if(img.dataset.sblSpriteStyle==='hd') return;
       const name=img.getAttribute('alt')||img.getAttribute('title')||'';
       applySpriteSource(img,name,next);
     });
@@ -229,6 +234,42 @@
     return TYPO_CANONICAL[raw] || raw;
   }
 
+  // Draft-stat API resolver. Unlike sprite/replay canonicalisation this MUST
+  // preserve form identity: several forms have different base-stat spreads.
+  // Candidate zero is the exact PokeAPI form where a league label needs an alias.
+  const DRAFT_STATS_API_ALIASES={
+    'landorus':'landorus-incarnate','thundurus':'thundurus-incarnate','tornadus':'tornadus-incarnate','enamorus':'enamorus-incarnate',
+    'darmanitan':'darmanitan-standard','darmanitan-galar':'darmanitan-galar-standard',
+    // Default gender/visual forms and league shorthand used by older workbooks.
+    'jellicent':'jellicent-male','frillish':'frillish-male','pyroar':'pyroar-male','basculin':'basculin-red-striped',
+    'tauros-paldea-aqua':'tauros-paldea-aqua-breed','tauros-paldea-blaze':'tauros-paldea-blaze-breed','tauros-paldea-combat':'tauros-paldea-combat-breed',
+    'squawkabilly-b':'squawkabilly-blue-plumage','squawkabilly-w':'squawkabilly-white-plumage',
+    'squawkabilly-y':'squawkabilly-yellow-plumage','squawkabilly-g':'squawkabilly-green-plumage',
+    'mega-meowstic':'meowstic-female-mega','meowstic-mega':'meowstic-female-mega',
+    'terapagos-middle':'terapagos-terastal','terapagos-mid':'terapagos-terastal',
+    'ogerpon-teal':'ogerpon','ogerpon-teal-mask':'ogerpon',
+    'ogerpon-cornerstone':'ogerpon-cornerstone-mask','ogerpon-hearthflame':'ogerpon-hearthflame-mask','ogerpon-wellspring':'ogerpon-wellspring-mask',
+    'aegislash':'aegislash-shield','keldeo':'keldeo-ordinary','zygarde':'zygarde-50',
+    'mimikyu':'mimikyu-disguised','meloetta':'meloetta-aria','shaymin':'shaymin-land',
+    'maushold':'maushold-family-of-four','dudunsparce':'dudunsparce-two-segment',
+    'minior':'minior-red-meteor','tatsugiri':'tatsugiri-curly','wishiwashi':'wishiwashi-solo','eiscue':'eiscue-ice','morpeko':'morpeko-full-belly',
+    'toxtricity':'toxtricity-amped','oricorio':'oricorio-baile'
+  };
+  function draftStatsApiCandidates(name){
+    const raw=String(name??'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'')
+      .replace(/[’']/g,'').replace(/[♀]/g,'-f').replace(/[♂]/g,'-m')
+      .replace(/[._]/g,'-').replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'').replace(/-+/g,'-').replace(/^-|-$/g,'');
+    const alias=DRAFT_STATS_API_ALIASES[raw];
+    const candidates=[alias,raw].filter(Boolean);
+    // PokeAPI spells these named forms with a trailing -forme or -mask.
+    const suffixAliases={
+      'ogerpon-cornerstone-mask':'ogerpon-cornerstone-mask','ogerpon-hearthflame-mask':'ogerpon-hearthflame-mask','ogerpon-wellspring-mask':'ogerpon-wellspring-mask',
+      'landorus-incarnate-forme':'landorus-incarnate','thundurus-incarnate-forme':'thundurus-incarnate','tornadus-incarnate-forme':'tornadus-incarnate','enamorus-incarnate-forme':'enamorus-incarnate'
+    };
+    if(suffixAliases[raw]) candidates.unshift(suffixAliases[raw]);
+    return [...new Set(candidates)];
+  }
+
   function toShowdownId(id){ return normalizeName(id); }
 
   // Shared roster/trade comparison helpers. These intentionally normalize the
@@ -283,26 +324,114 @@
   }
 
   function spriteUrl(name,styleOverride){
+    if(styleOverride==='hd') return spriteUrlCandidates(name,'hd')[0]||'';
     const style=styleOverride==='2d'?'2d':styleOverride==='3d'?'3d':getSpriteStyle();
     const file=spriteFilename(name);
     return file ? `${SPRITE_ROOTS[style]}${encodeURIComponent(file)}.png` : '';
   }
 
+  /* Mega forms: "Mega Charizard X" / "Charizard-Mega-X" -> Showdown's "charizard-megax";
+     "Mega Floette" -> "floette-mega". Returns [] for non-megas. */
+  function megaParts(name){
+    const id=normalizeName(name);
+    let m=id.match(/^mega-(.+?)-([xyz])$/); if(m) return {base:m[1],suffix:'mega'+m[2]};
+    m=id.match(/^(.+?)-mega-([xyz])$/); if(m) return {base:m[1],suffix:'mega'+m[2]};
+    m=id.match(/^mega-(.+)$/); if(m) return {base:m[1],suffix:'mega'};
+    m=id.match(/^(.+?)-(mega[xyz]?)$/); if(m) return {base:m[1],suffix:m[2]};
+    return null;
+  }
+  function isMega(name){ return !!megaParts(name); }
+  function hasAlternateForm(name){
+    const id=normalizeName(name);
+    if(!id.includes('-'))return false;
+    const base=id.split('-')[0];
+    return FORM_BASES.has(base)||!!megaParts(id);
+  }
+
+  // Exact Showdown Pokedex keys for stat lookup. Preserve form identity and
+  // never infer a base-species key for a different form.
+  function showdownStatsIdCandidates(name){
+    const id=normalizeName(name), out=[];
+    const add=value=>{const v=String(value||'').toLowerCase().replace(/[^a-z0-9]/g,'');if(v&&!out.includes(v))out.push(v);};
+    const mega=megaParts(id);
+    if(mega) add(mega.base+mega.suffix);
+    let m=id.match(/^alolan-(.+)$/); if(m) add(m[1]+'alola');
+    m=id.match(/^(.+?)-alola$/); if(m) add(m[1]+'alola');
+    m=id.match(/^galarian-(.+)$/); if(m) add(m[1]+'galar');
+    m=id.match(/^(.+?)-galar$/); if(m) add(m[1]+'galar');
+    m=id.match(/^hisuian-(.+)$/); if(m) add(m[1]+'hisui');
+    m=id.match(/^(.+?)-hisui$/); if(m) add(m[1]+'hisui');
+    m=id.match(/^paldean-(.+)$/); if(m) add(m[1]+'paldea');
+    m=id.match(/^(.+?)-paldea-(.+)$/); if(m) add(m[1]+'paldea'+m[2]);
+    add(id);
+    add(id.replace(/-/g,''));
+    return out;
+  }
+
+  // A few Mega filenames collapse or abbreviate the base form differently
+  // from the roster's canonical species name.
+  const MEGA_FORM_FILES={
+    'meowstic-male':'meowstic-mmega',
+    'meowstic-female':'meowstic-fmega'
+  };
+  const MEGA_BASE_FILES={
+    'meowstic-male':'meowstic',
+    'meowstic-female':'meowstic-f',
+    'tatsugiri-curly':'tatsugiri',
+    'tatsugiri-droopy':'tatsugiri-droopy',
+    'tatsugiri-stretchy':'tatsugiri-stretchy'
+  };
+
   function spriteUrlCandidates(name,styleOverride){
-    const style=styleOverride==='2d'?'2d':styleOverride==='3d'?'3d':getSpriteStyle();
+    const showcase=styleOverride==='hd';
+    const style=styleOverride==='2d'?'2d':styleOverride==='3d'?'3d':showcase?'3d':getSpriteStyle();
     const ids=candidateIds(name);
     const files=[];
     const addFile=f=>{ if(!f) return; const v=String(f).toLowerCase(); if(!files.includes(v)) files.push(v); };
+    const mega=megaParts(name);
+    if(mega){
+      addFile(MEGA_FORM_FILES[mega.base] || (mega.base+'-'+mega.suffix));
+      if(mega.suffix.length>4) addFile(mega.base+'-mega-'+mega.suffix.slice(4));
+    }
     ids.forEach(id=>{
       addFile(EXTRA_FORM_FILES[id]);
       addFile(FORM_FILES[id]);
       addFile(id);
       addFile(id.replace(/-/g,''));
     });
-    // Showdown's two sprite sets are mostly aligned, but a handful of
-    // legacy/form names use compact filenames. Keep a deterministic fallback
-    // list so hyphenated roster names never result in a broken image.
-    return files.map(file=>`${SPRITE_ROOTS[style]}${encodeURIComponent(file)}.png`);
+    const urls=[];
+    const addUrl=(root,file)=>{
+      if(!file) return;
+      const url=`${root}${encodeURIComponent(file)}.png`;
+      if(!urls.includes(url)) urls.push(url);
+    };
+    const addOfficialArtwork=()=>{
+      const normalized=normalizeName(name);
+      const dexId=window.SBL.pokemon.dexIds?.[normalized];
+      // Official artwork is intentionally reserved for the Draft Room's HD
+      // showcase mode. Standard HOME/Gen 5 pages always use sprite sheets.
+      if(showcase&&dexId&&!hasAlternateForm(name)&&!mega){
+        const official=`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${Number(dexId)}.png`;
+        if(!urls.includes(official)) urls.push(official);
+      }
+    };
+    if(mega){
+      const roots=showcase?[SPRITE_ROOTS['3d'],SPRITE_ROOTS['2d']]:[SPRITE_ROOTS[style],SPRITE_ROOTS[style==='3d'?'2d':'3d']];
+      const megaFiles=files.filter(file=>file!==mega.base);
+      roots.forEach(root=>megaFiles.forEach(file=>addUrl(root,file)));
+      const baseFile=MEGA_BASE_FILES[mega.base] || FORM_FILES[mega.base] || mega.base;
+      roots.forEach(root=>addUrl(root,baseFile));
+      return urls;
+    }
+    addOfficialArtwork();
+    // Standard pages honour the user's selected HOME/Gen 5 style for every
+    // species and form. Draft showcase mode prefers official art, then exact
+    // HOME form art, then Gen 5 as a resilient fallback.
+    const roots=showcase
+      ? [SPRITE_ROOTS['3d'],SPRITE_ROOTS['2d']]
+      : [SPRITE_ROOTS[style],SPRITE_ROOTS[style==='3d'?'2d':'3d']];
+    roots.forEach(root=>files.forEach(file=>addUrl(root,file)));
+    return urls;
   }
 
   function applySpriteSource(img,name,style){
@@ -333,13 +462,15 @@
 
   function spriteMarkup(name,cls,styleOverride){
     const safe=escapeHtml(name);
-    const baseClass=cls||'sprite';
+    const isHyphenated=normalizeName(name).includes('-');
+    const baseClass=(cls||'sprite')+(isHyphenated?' sbl-form-sprite':'');
     const urls=spriteUrlCandidates(name,styleOverride);
+    const spriteMode=styleOverride==='hd'?'hd':'user';
     if(!urls.length){
       return `<span class="${baseClass} sbl-remote-sprite missing" role="img" aria-label="${safe}" title="${safe}"></span>`;
     }
     const candidates=escapeHtml(JSON.stringify(urls));
-    return `<img class="${baseClass} sbl-remote-sprite" src="${urls[0]}" alt="${safe}" title="${safe}" width="96" height="96" decoding="async" data-sbl-sprite-candidates='${candidates}' data-sbl-sprite-index="0" onerror="SBL.pokemon.handleSpriteError(this)">`;
+    return `<img class="${baseClass} sbl-remote-sprite" src="${urls[0]}" alt="${safe}" title="${safe}" width="96" height="96" decoding="async" data-sbl-sprite-style="${spriteMode}" data-sbl-sprite-candidates='${candidates}' data-sbl-sprite-index="0" onerror="SBL.pokemon.handleSpriteError(this)">`;
   }
 
   function spriteCandidates(name){ return candidateIds(name); }
@@ -347,6 +478,7 @@
   function scanSprites(){}
 
   window.SBL.pokemon.normalizeName=normalizeName;
+  window.SBL.pokemon.draftStatsApiCandidates=draftStatsApiCandidates;
   window.SBL.pokemon.toShowdownId=toShowdownId;
   window.SBL.pokemon.matchKey=matchKey;
   window.SBL.pokemon.sameSpeciesForm=sameSpeciesForm;
@@ -357,6 +489,9 @@
   window.SBL.pokemon.spriteCandidates=spriteCandidates;
   window.SBL.pokemon.spriteUrl=spriteUrl;
   window.SBL.pokemon.spriteUrlCandidates=spriteUrlCandidates;
+  window.SBL.pokemon.isMega=isMega;
+  window.SBL.pokemon.hasAlternateForm=hasAlternateForm;
+  window.SBL.pokemon.showdownStatsIdCandidates=showdownStatsIdCandidates;
   window.SBL.pokemon.handleSpriteError=handleSpriteError;
   window.SBL.pokemon.spriteMarkup=spriteMarkup;
   window.SBL.pokemon.getSpriteStyle=getSpriteStyle;

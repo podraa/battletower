@@ -53,16 +53,44 @@
     };
   }
 
+  async function loadActiveOwnershipMap(leagueId, client) {
+    const league = requireId(leagueId, 'leagueId');
+    const D = db(client);
+    const { data, error } = await D
+      .from('franchise_assignments')
+      .select('franchise_id,user_id')
+      .eq('league_id', league)
+      .eq('status', 'active');
+    if (error) throw error;
+    const map = new Map();
+    for (const row of (data || [])) {
+      if (row?.franchise_id && row?.user_id) {
+        map.set(String(row.franchise_id), String(row.user_id));
+      }
+    }
+    return map;
+  }
+
   async function getFranchiseOwner(leagueId, franchiseId, client) {
     const league = requireId(leagueId, 'leagueId');
     const franchise = requireId(franchiseId, 'franchiseId');
     const D = db(client);
+
+    const ownership = await loadActiveOwnershipMap(league, D);
+    const ownerUserId = ownership.get(franchise);
+    if (!ownerUserId) return null;
+    const { data: membership, error: membershipError } = await D
+      .from('league_members').select('status,member_type')
+      .eq('league_id', league).eq('user_id', ownerUserId).maybeSingle();
+    if (membershipError) throw membershipError;
+    if (!membership || String(membership.status || '').toLowerCase() !== 'active' || String(membership.member_type || 'player') !== 'player') return null;
 
     const { data: assignment, error: assignmentError } = await D
       .from('franchise_assignments')
       .select('id,league_id,franchise_id,user_id,status,assigned_at,vacated_at')
       .eq('league_id', league)
       .eq('franchise_id', franchise)
+      .eq('user_id', ownerUserId)
       .eq('status', 'active')
       .maybeSingle();
 
@@ -78,19 +106,62 @@
 
     if (franchiseError) throw franchiseError;
     if (!franchiseRow) throw new Error('Ownership assignment references a franchise that could not be loaded.');
+    if (String(franchiseRow.status || '').toLowerCase() !== 'active') return null;
 
     return assignmentResult(assignment, franchiseRow);
+  }
+
+  async function listActiveMemberFranchises(leagueId, client) {
+    const league = requireId(leagueId, 'leagueId');
+    const D = db(client);
+    const { data: members, error: memberError } = await D
+      .from('league_members')
+      .select('user_id,role,member_type,status')
+      .eq('league_id', league)
+      .eq('status', 'active');
+    if (memberError) throw memberError;
+    const playerIds = [...new Set((members || [])
+      .filter(m => String(m.member_type || 'player') === 'player')
+      .map(m => String(m.user_id || '')).filter(Boolean))];
+    if (!playerIds.length) return [];
+
+    const [{ data: assignments, error: assignmentError }, { data: franchises, error: franchiseError }] = await Promise.all([
+      D.from('franchise_assignments').select('id,league_id,franchise_id,user_id,status,assigned_at,vacated_at')
+        .eq('league_id', league).eq('status', 'active').in('user_id', playerIds),
+      D.from('franchises').select('id,league_id,name,conference,status,archived_at')
+        .eq('league_id', league).eq('status', 'active')
+    ]);
+    if (assignmentError) throw assignmentError;
+    if (franchiseError) throw franchiseError;
+    const byFranchise = new Map((franchises || []).map(f => [String(f.id), f]));
+    const memberByUser = new Map((members || []).map(m => [String(m.user_id), m]));
+    return (assignments || []).map(a => {
+      const franchise = byFranchise.get(String(a.franchise_id));
+      const member = memberByUser.get(String(a.user_id));
+      if (!franchise || !member) return null;
+      return { userId: String(a.user_id), role: member.role || 'player', memberType: member.member_type || 'player', assignment: a, franchise: franchiseResult(franchise) };
+    }).filter(Boolean).sort((a,b) => a.franchise.name.localeCompare(b.franchise.name, undefined, {sensitivity:'base'}));
   }
 
   async function getUserFranchise(leagueId, userId, client) {
     const league = requireId(leagueId, 'leagueId');
     const user = requireId(userId, 'userId');
     const D = db(client);
+    const { data: membership, error: membershipError } = await D
+      .from('league_members').select('status,member_type')
+      .eq('league_id', league).eq('user_id', user).maybeSingle();
+    if (membershipError) throw membershipError;
+    if (!membership || String(membership.status || '').toLowerCase() !== 'active' || String(membership.member_type || 'player') !== 'player') return null;
+
+    const ownership = await loadActiveOwnershipMap(league, D);
+    const franchiseId = [...ownership.entries()].find(([, assignedUserId]) => String(assignedUserId) === user)?.[0];
+    if (!franchiseId) return null;
 
     const { data: assignment, error: assignmentError } = await D
       .from('franchise_assignments')
       .select('id,league_id,franchise_id,user_id,status,assigned_at,vacated_at')
       .eq('league_id', league)
+      .eq('franchise_id', franchiseId)
       .eq('user_id', user)
       .eq('status', 'active')
       .maybeSingle();
@@ -107,6 +178,7 @@
 
     if (franchiseError) throw franchiseError;
     if (!franchiseRow) throw new Error('Ownership assignment references a franchise that could not be loaded.');
+    if (String(franchiseRow.status || '').toLowerCase() !== 'active') return null;
 
     return assignmentResult(assignment, franchiseRow);
   }
@@ -126,16 +198,8 @@
     if (franchiseError) throw franchiseError;
     if (!franchiseRow || franchiseRow.status !== 'active') return false;
 
-    const { data: assignment, error: assignmentError } = await D
-      .from('franchise_assignments')
-      .select('id')
-      .eq('league_id', league)
-      .eq('franchise_id', franchise)
-      .eq('status', 'active')
-      .maybeSingle();
-
-    if (assignmentError) throw assignmentError;
-    return !assignment;
+    const ownership = await loadActiveOwnershipMap(league, D);
+    return !ownership.has(franchise);
   }
 
   async function canUserActForFranchise(leagueId, userId, franchiseId, client) {
@@ -144,17 +208,17 @@
     const franchise = requireId(franchiseId, 'franchiseId');
     const D = db(client);
 
-    const { data: assignment, error } = await D
-      .from('franchise_assignments')
-      .select('id')
-      .eq('league_id', league)
-      .eq('user_id', user)
-      .eq('franchise_id', franchise)
-      .eq('status', 'active')
-      .maybeSingle();
-
-    if (error) throw error;
-    return !!assignment;
+    const { data: membership, error: membershipError } = await D
+      .from('league_members').select('status,member_type')
+      .eq('league_id', league).eq('user_id', user).maybeSingle();
+    if (membershipError) throw membershipError;
+    if (!membership || String(membership.status || '').toLowerCase() !== 'active' || String(membership.member_type || 'player') !== 'player') return false;
+    const ownership = await loadActiveOwnershipMap(league, D);
+    if (ownership.get(franchise) !== user) return false;
+    const { data: franchiseRow, error: franchiseError } = await D
+      .from('franchises').select('id,status').eq('id', franchise).eq('league_id', league).maybeSingle();
+    if (franchiseError) throw franchiseError;
+    return String(franchiseRow?.status || '').toLowerCase() === 'active';
   }
 
   async function validateFranchiseClaim(leagueId, userId, franchiseId, client) {
@@ -185,27 +249,11 @@
     if (!franchiseRow) return { valid: false, reason: 'franchise_not_found', membership, franchise: null };
     if (franchiseRow.status !== 'active') return { valid: false, reason: 'franchise_inactive', membership, franchise: franchiseResult(franchiseRow) };
 
-    const { data: franchiseAssignment, error: franchiseAssignmentError } = await D
-      .from('franchise_assignments')
-      .select('id,user_id')
-      .eq('league_id', league)
-      .eq('franchise_id', franchise)
-      .eq('status', 'active')
-      .maybeSingle();
-
-    if (franchiseAssignmentError) throw franchiseAssignmentError;
-    if (franchiseAssignment) return { valid: false, reason: 'franchise_owned', membership, franchise: franchiseResult(franchiseRow) };
-
-    const { data: userAssignment, error: userAssignmentError } = await D
-      .from('franchise_assignments')
-      .select('id,franchise_id')
-      .eq('league_id', league)
-      .eq('user_id', user)
-      .eq('status', 'active')
-      .maybeSingle();
-
-    if (userAssignmentError) throw userAssignmentError;
-    if (userAssignment) return { valid: false, reason: 'user_already_has_franchise', membership, franchise: franchiseResult(franchiseRow) };
+    const ownership = await loadActiveOwnershipMap(league, D);
+    if (ownership.has(franchise)) return { valid: false, reason: 'franchise_owned', membership, franchise: franchiseResult(franchiseRow) };
+    if ([...ownership.values()].some(ownerUserId => String(ownerUserId) === user)) {
+      return { valid: false, reason: 'user_already_has_franchise', membership, franchise: franchiseResult(franchiseRow) };
+    }
 
     return { valid: true, reason: null, membership, franchise: franchiseResult(franchiseRow) };
   }
@@ -244,7 +292,114 @@
     }, client);
   }
 
+  async function removeLeagueMember(leagueId, userId, client, lock = false) {
+    return rpc('sbl_remove_league_member', {
+      p_league_id: requireId(leagueId, 'leagueId'),
+      p_user_id: requireId(userId, 'userId'),
+      p_lock: !!lock
+    }, client);
+  }
+
+  async function rejectLeagueMembership(leagueId, userId, client) {
+    return rpc('sbl_reject_league_membership', {
+      p_league_id: requireId(leagueId, 'leagueId'),
+      p_user_id: requireId(userId, 'userId')
+    }, client);
+  }
+
+  async function approveMembershipAndAssign(leagueId, userId, franchiseId = null, client) {
+    return rpc('sbl_approve_membership_and_assign', {
+      p_league_id: requireId(leagueId, 'leagueId'),
+      p_user_id: requireId(userId, 'userId'),
+      p_franchise_id: franchiseId ? requireId(franchiseId, 'franchiseId') : null
+    }, client);
+  }
+
+  async function commissionerAssignFranchise(leagueId, userId, franchiseId, client) {
+    return rpc('sbl_commissioner_assign_franchise', {
+      p_league_id: requireId(leagueId, 'leagueId'),
+      p_user_id: requireId(userId, 'userId'),
+      p_franchise_id: requireId(franchiseId, 'franchiseId')
+    }, client);
+  }
+
+  async function vacateFranchise(leagueId, franchiseId, userId, client, lock = false) {
+    return rpc('sbl_vacate_franchise', {
+      p_league_id: requireId(leagueId, 'leagueId'),
+      p_franchise_id: requireId(franchiseId, 'franchiseId'),
+      p_user_id: requireId(userId, 'userId'),
+      p_lock: !!lock
+    }, client);
+  }
+
+  async function reassignFranchise(leagueId, franchiseId, fromUserId, toUserId, client) {
+    return rpc('sbl_reassign_franchise', {
+      p_league_id: requireId(leagueId, 'leagueId'),
+      p_franchise_id: requireId(franchiseId, 'franchiseId'),
+      p_from_user_id: requireId(fromUserId, 'fromUserId'),
+      p_to_user_id: requireId(toUserId, 'toUserId')
+    }, client);
+  }
+
+  async function lockFranchise(leagueId, franchiseId, reason, client) {
+    const trimmed = String(reason || '').trim();
+    if (!trimmed) throw new Error('A lock reason is required.');
+    return rpc('sbl_lock_franchise', {
+      p_league_id: requireId(leagueId, 'leagueId'),
+      p_franchise_id: requireId(franchiseId, 'franchiseId'),
+      p_reason: trimmed
+    }, client);
+  }
+
+  async function reopenFranchise(leagueId, franchiseId, client) {
+    return rpc('sbl_reopen_franchise', {
+      p_league_id: requireId(leagueId, 'leagueId'),
+      p_franchise_id: requireId(franchiseId, 'franchiseId')
+    }, client);
+  }
+
+
+  async function setSeasonMemberStatus(leagueId, seasonId, userId, status, client) {
+    return rpc('sbl_set_season_member_status', {
+      p_league_id: requireId(leagueId, 'leagueId'),
+      p_season_id: requireId(seasonId, 'seasonId'),
+      p_user_id: requireId(userId, 'userId'),
+      p_status: String(status || '')
+    }, client);
+  }
+
+  async function resetFranchiseMappings(leagueId, seasonId, client) {
+    return rpc('sbl_reset_franchise_mappings', {
+      p_league_id: requireId(leagueId, 'leagueId'),
+      p_season_id: requireId(seasonId, 'seasonId')
+    }, client);
+  }
+
+  async function archiveFranchise(leagueId, franchiseId, client) {
+    return rpc('sbl_archive_franchise', {
+      p_league_id: requireId(leagueId, 'leagueId'),
+      p_franchise_id: requireId(franchiseId, 'franchiseId')
+    }, client);
+  }
+
+  async function restoreFranchise(leagueId, franchiseId, client) {
+    return rpc('sbl_restore_franchise', {
+      p_league_id: requireId(leagueId, 'leagueId'),
+      p_franchise_id: requireId(franchiseId, 'franchiseId')
+    }, client);
+  }
+
+  async function addLeagueMember(leagueId, userId, role, client) {
+    return rpc('sbl_admin_add_league_member', {
+      p_league_id: requireId(leagueId, 'leagueId'),
+      p_user_id: requireId(userId, 'userId'),
+      p_role: String(role || 'player')
+    }, client);
+  }
+
   SBL.franchiseOwnership = {
+    loadActiveOwnershipMap,
+    listActiveMemberFranchises,
     getFranchiseOwner,
     getUserFranchise,
     isFranchiseAvailable,
@@ -253,6 +408,19 @@
     requestFranchiseClaim,
     approveFranchiseClaim,
     rejectFranchiseClaim,
-    cancelFranchiseClaim
+    cancelFranchiseClaim,
+    removeLeagueMember,
+    approveMembershipAndAssign,
+    commissionerAssignFranchise,
+    rejectLeagueMembership,
+    vacateFranchise,
+    reassignFranchise,
+    lockFranchise,
+    reopenFranchise,
+    resetFranchiseMappings,
+    setSeasonMemberStatus,
+    archiveFranchise,
+    restoreFranchise,
+    addLeagueMember
   };
 })();

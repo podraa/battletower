@@ -52,14 +52,15 @@
   }
 
   function getTeams(state) {
+    // Synchronous legacy helper: return only explicitly configured franchise
+    // definitions. Never infer current franchises from replay username maps;
+    // current ownership is resolved asynchronously by franchiseOwnership.
     const settings = getSettings(state);
     const franchises = settings.franchises;
-    if (franchises && typeof franchises === 'object') {
-      return Object.keys(franchises);
-    }
-
-    const teamMap = getTeamMap(state);
-    return [...new Set(Object.values(teamMap).filter(Boolean))];
+    if (franchises && typeof franchises === 'object') return Object.keys(franchises).filter(Boolean);
+    const definitions = settings.franchiseDefinitions;
+    if (definitions && typeof definitions === 'object') return Object.keys(definitions).filter(Boolean);
+    return [];
   }
 
   function getActiveSeason(state) {

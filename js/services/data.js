@@ -21,6 +21,7 @@
       sharedState: partition.sharedState||{},
       replays: partition.replays||{},
       publishedRosters: partition.publishedRosters||{},
+      normalizedSeason: partition.normalizedSeason||null,
       publishedFreeAgency: partition.publishedFreeAgency||null
     };
   }
