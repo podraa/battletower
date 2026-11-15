@@ -533,6 +533,7 @@
   .fixture-match:last-child .fixture-vs,
   .fixture-match:last-child .fixture-status{border-bottom:0;}
   .fixture-match.fixture-played .fixture-status{color:var(--teal);}
+.fixture-inter-tag{display:inline-block;margin-right:7px;color:var(--amber);font:800 7px var(--mono);letter-spacing:.08em;white-space:nowrap;}
   .fixture-match.fixture-inter .fixture-team,.fixture-match.fixture-inter .fixture-vs,.fixture-match.fixture-inter .fixture-status{background:color-mix(in srgb, var(--amber) 16%, transparent);}
   @media(max-width:900px){.fixture-weeks{max-width:100%;}}
   @media(max-width:620px){
@@ -752,6 +753,7 @@ button{touch-action:manipulation;}
 .fixture-week{border-radius:16px;background:transparent;border:0;overflow:visible;}
 .fixture-week-title{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 2px 9px;background:none;border:0;color:var(--text);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;}
 .fixture-matches{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;font-size:13px;}
+.fixture-matches.fixture-matches-odd > .fixture-match:last-child{grid-column:1 / -1;width:calc(50% - 4.5px);justify-self:center;}
 .fixture-match{
   position:relative;display:grid;grid-template-columns:minmax(0,1fr) 64px minmax(0,1fr);grid-template-rows:minmax(54px,1fr) 25px auto;
   min-height:88px;padding:0;border:1px solid rgba(255,255,255,.075);border-radius:13px;overflow:hidden;
@@ -778,6 +780,7 @@ button{touch-action:manipulation;}
 @media(max-width:900px){
   .standings-row{grid-template-columns:38px minmax(0,1fr) 62px 62px 70px 78px;gap:9px;padding:12px;}
   .fixture-matches{grid-template-columns:1fr;}
+  .fixture-matches.fixture-matches-odd > .fixture-match:last-child{grid-column:auto;width:100%;}
 }
 @media(max-width:680px){
   .conference-standings{gap:14px}.conference-heading{padding:15px 14px}.standings-ladder{padding:6px}.standings-row{grid-template-columns:34px minmax(0,1fr) 50px 50px 44px;gap:8px;padding:11px 10px}.standings-stat:nth-last-child(-n+2){display:none}.standings-rank{width:29px;height:29px;font-size:13px}.standings-team-name{font-size:13px}
@@ -1076,3 +1079,39 @@ body.modal-page-locked {
 }
 
 
+
+
+/* CP4.63 follow-up: subtle franchise colour tint on each Season standings row.
+   Finals qualification keeps its amber cue while allowing the franchise colour
+   to remain visible as a restrained secondary tint. */
+.standings-row.has-team-color:not(.finals-bound){
+  background:linear-gradient(90deg,
+    color-mix(in srgb,var(--team-color) 11%,transparent),
+    color-mix(in srgb,var(--team-color) 4%,transparent) 68%,
+    rgba(255,255,255,.018));
+  border-color:color-mix(in srgb,var(--team-color) 20%,rgba(255,255,255,.055));
+}
+.standings-row.has-team-color:not(.finals-bound):hover{
+  background:linear-gradient(90deg,
+    color-mix(in srgb,var(--team-color) 16%,transparent),
+    color-mix(in srgb,var(--team-color) 7%,transparent) 68%,
+    rgba(255,255,255,.045));
+}
+.standings-row.has-team-color.finals-bound{
+  background:linear-gradient(90deg,
+    color-mix(in srgb,var(--amber) 15%,transparent),
+    color-mix(in srgb,var(--team-color) 10%,transparent) 58%,
+    color-mix(in srgb,var(--team-color) 4%,transparent));
+  border-color:color-mix(in srgb,var(--team-color) 24%,color-mix(in srgb,var(--amber) 24%,transparent));
+}
+.standings-row.has-team-color.finals-bound:hover{
+  background:linear-gradient(90deg,
+    color-mix(in srgb,var(--amber) 19%,transparent),
+    color-mix(in srgb,var(--team-color) 14%,transparent) 58%,
+    color-mix(in srgb,var(--team-color) 6%,transparent));
+}
+
+/* Subtle franchise-colour wash behind each fixture team's name. */
+.fixture-match .fixture-team[style*="--team-color"]{background:linear-gradient(135deg,color-mix(in srgb,var(--team-color) 13%,transparent),color-mix(in srgb,var(--team-color) 6%,transparent));}
+.fixture-match.fixture-inter .fixture-team[style*="--team-color"]{background:linear-gradient(135deg,color-mix(in srgb,var(--team-color) 16%,transparent),color-mix(in srgb,var(--amber) 7%,transparent));}
+.fixture-match .fixture-team[style*="--team-color"].fixture-winner{background:linear-gradient(135deg,color-mix(in srgb,var(--team-color) 17%,transparent),color-mix(in srgb,var(--amber) 8%,transparent));}

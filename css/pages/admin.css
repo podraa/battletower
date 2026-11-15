@@ -19,6 +19,14 @@
   }
   #app{max-width:1080px; margin:0 auto; padding:24px 20px 60px;}
 
+
+  .admin-page-header{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;}
+  .admin-page-header h1{margin:0;min-width:0;}
+  .admin-refresh-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;min-height:36px;}
+  .admin-refresh-button span{font-size:19px;line-height:1;}
+  .admin-refresh-button:disabled{opacity:.65;cursor:wait;}
+  @media(max-width:520px){.admin-page-header{align-items:flex-start}.admin-refresh-button{margin-left:auto}}
+
   /* header + ticker */
   header{margin-bottom:20px;}
   h1{font-size:22px; margin:0 0 2px; letter-spacing:.2px;}
@@ -1235,3 +1243,10 @@ body[data-admin="true"] .admin-nav-group.open .admin-nav-group-toggle > span:las
 .people-workspace .people-role-control{display:flex;align-items:center;gap:7px;margin:0;color:var(--text-dim);font-size:11px;}
 .people-workspace .people-role-control select{min-width:132px;max-width:160px;}
 @media(max-width:640px){.sbl-admin-dialog{padding:19px}.sbl-admin-dialog-actions{flex-direction:column-reverse}.sbl-admin-dialog-actions button{width:100%}.people-workspace .people-role-control{width:100%;justify-content:space-between}.people-workspace .people-role-control select{flex:1;max-width:none}}
+
+/* CP4.63: team colour assignment */
+.team-colour-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;margin-top:12px}
+.team-colour-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--panel-alt,rgba(127,127,127,.1))}
+.team-colour-row.none input[type=color]{opacity:.4}
+.team-colour-name{flex:1;font-weight:600;overflow-wrap:anywhere}
+.team-colour-row input[type=color]{width:44px;height:30px;padding:0;border:1px solid var(--border);border-radius:6px;background:none;cursor:pointer}
