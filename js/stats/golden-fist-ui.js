@@ -4,6 +4,7 @@
   window.SBLStatsUI = window.SBLStatsUI || {};
   window.SBLStatsUI.renderGoldenFist = function(d){
     const {globalPokemonStats,weekSelectorHtml,spriteImg,escapeHtml,auditDataAttr}=d;
+    const tintForSpecies=d.tintForSpecies||(()=>'');
     const contentEl = document.getElementById('content');
 
     contentEl.innerHTML = `
@@ -25,7 +26,7 @@
       if(stats.length === 0){ el.innerHTML = `<div class="empty-state">No data for this scope yet.</div>`; return; }
       const medals = ['🥇','🥈','🥉'];
       el.innerHTML = `<div class="gf-list">${stats.map((s,i)=>`
-        <div class="gf-row ${i<3?'top'+(i+1):''}">
+        <div class="gf-row ${i<3?'top'+(i+1):''}"${tintForSpecies(s.species)}>
           <div class="gf-rank">${medals[i] || (i+1)}</div>
           ${spriteImg(s.species,'gf-sprite')}
           <div class="gf-info">
