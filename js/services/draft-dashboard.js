@@ -32,9 +32,72 @@
     return b.left - reserve;
   }
 
+  /* ---- Mega selection rule -------------------------------------------------
+   * A franchise may draft ordinary Pokemon at any point, including its first
+   * pick. It must take at least one Mega by its final roster slot and may take
+   * no more than two. The budget helper preserves enough points for a Mega
+   * while one is still required; the pick guard only becomes mandatory on the
+   * final remaining slot. If the pool has no Mega left, fail explicitly rather
+   * than silently allowing the draft to finish non-compliant. */
+  const MEGA_MIN = 1, MEGA_MAX = 2;
+  function isMegaMon(m){ return !!(m && (m.isMega || window.SBL?.pokemon?.isMega?.(m.name))); }
+  function megaInfo(d, team){
+    const pool = d.pool || [];
+    const count = (d.picks || []).filter(p => key(p.team) === key(team)).filter(p => {
+      const m = pool.find(x => String(x.id) === String(p.poolId));
+      return isMegaMon(m || { name: p.name });
+    }).length;
+    return { count, min: MEGA_MIN, max: MEGA_MAX, need: Math.max(0, MEGA_MIN - count), room: Math.max(0, MEGA_MAX - count) };
+  }
+  /* Picks this team can still make: its remaining slots in an ordered draft
+   * (including the current pick), or its remaining roster room otherwise. */
+  function turnsLeft(d, team){
+    const room = budgetInfo(d, team).room;
+    if (d.mode !== 'ordered') return room;
+    let n = 0;
+    for (let i = Number(d.currentPick) || 0; i < (d.order || []).length; i++) if (key(d.order[i]) === key(team)) n++;
+    return Math.min(n, room);
+  }
+  function availableMegas(d, exceptId){
+    return (d.pool || []).filter(m => !m.drafted && isMegaMon(m) && String(m.id) !== String(exceptId));
+  }
+  /* null when the pick satisfies the Mega rule, otherwise {code,message}. */
+  function megaBlock(d, team, mon){
+    if (!mon) return null;
+    const mi = megaInfo(d, team);
+    if (isMegaMon(mon)) {
+      return mi.count >= MEGA_MAX ? { code: 'mega-max', message: `Each team can select at most ${MEGA_MAX} Mega Pokémon.` } : null;
+    }
+    if (mi.need > 0 && turnsLeft(d, team) - 1 < mi.need) {
+      if (!availableMegas(d).length) {
+        return { code: 'mega-unavailable', message: 'This franchise still needs a Mega, but no undrafted Mega Pokémon remain in the pool. The draft cannot be completed compliantly; a commissioner must resolve the pool before the final pick.' };
+      }
+      return { code: 'mega-min', message: `This is your final roster slot. You must select a Mega Pokémon to meet the minimum of ${MEGA_MIN}.` };
+    }
+    return null;
+  }
+  /* Spend limit for one specific pick: like spendLimit(), but when the team
+   * still needs a Mega and this pick is not one, keep enough points back for
+   * the cheapest Mega that is still available. */
+  function spendLimitFor(d, team, mon){
+    const b = budgetInfo(d, team);
+    const after = Math.max(0, b.need - 1);
+    let reserve = after * minPoolCost(d);
+    if (!isMegaMon(mon) && megaInfo(d, team).need > 0) {
+      const megas = availableMegas(d, mon && mon.id);
+      if (megas.length) {
+        const cheapest = Math.min(...megas.map(m => Number(m.points) || 0));
+        reserve = cheapest + (Math.max(after, 1) - 1) * minPoolCost(d);
+      }
+    }
+    return b.left - reserve;
+  }
+
   function canAfford(d, team, mon){
     const b = budgetInfo(d, team);
-    return b.room > 0 && (Number(mon.points) || 0) <= spendLimit(d, team);
+    if (!(b.room > 0)) return false;
+    if (megaBlock(d, team, mon)) return false;
+    return (Number(mon.points) || 0) <= spendLimitFor(d, team, mon);
   }
 
   const STAT_ALIASES = {
@@ -43,7 +106,15 @@
     spd: ['spd','specialdefense','spdef','spdefense'],
     spe: ['spe','speed']
   };
+  const SIX_STATS = ['hp','atk','def','spa','spd','spe'];
   function statValue(mon, stat){
+    // BST = base stat total. Only defined when all six stats are known, so a
+    // partially-loaded Pokemon is never ranked on an under-counted total.
+    if(String(stat||'').toLowerCase() === 'bst'){
+      let sum = 0;
+      for(const k of SIX_STATS){ const v = statValue(mon, k); if(v == null) return null; sum += v; }
+      return sum;
+    }
     const sources = [mon?.baseStats, mon?.stats].filter(x=>x&&typeof x==='object');
     if(!sources.length) return null;
     const aliases = STAT_ALIASES[stat] || [String(stat||'').toLowerCase().replace(/[^a-z]/g,'')];
@@ -117,5 +188,5 @@
     return null;
   }
 
-  window.SBL.draftDash = { budgetInfo, minPoolCost, spendLimit, canAfford, allTypes, statValue, applyFilters, sortPool, picksUntil };
+  window.SBL.draftDash = { MEGA_MIN, MEGA_MAX, isMegaMon, megaInfo, megaBlock, spendLimitFor, turnsLeft, budgetInfo, minPoolCost, spendLimit, canAfford, allTypes, statValue, applyFilters, sortPool, picksUntil };
 })();

@@ -127,7 +127,7 @@
     const {data:row,error}=await D.from('leagues').select('id,name,description,join_code,created_by,status,created_at,updated_at,state').eq('id',id).maybeSingle();
     if(error) throw error;
     if(!row) return null;
-    const {data:members,error:me}=await D.from('league_members').select('id,league_id,user_id,role,status,member_type,requested_franchise_id,requested_at,approved_at,created_at,updated_at').eq('league_id',id).order('created_at',{ascending:true});
+    const {data:members,error:me}=await D.from('league_members').select('id,league_id,user_id,role,status,member_type,requested_franchise_id,requested_at,approved_at,created_at,updated_at').eq('league_id',id).eq('member_type','player').order('created_at',{ascending:true});
     if(me) throw me;
     const ms=(members||[]).map(m=>Object.assign({},m,{userId:m.user_id}));
     return toLegacyLeague(row,ms);
@@ -185,7 +185,10 @@
     if(routeId){
       const r=await D.from('league_seasons').select(fields).eq('league_id',id).eq('id',routeId).maybeSingle();
       if(r.error) throw r.error;
-      if(r.data) return r.data;
+      // A season ID in the URL is an explicit page target. Never silently
+      // substitute the active season when that target is invalid or belongs
+      // to another league.
+      return r.data||null;
     }
     const routeKey=routeSeasonKey();
     if(routeKey){
@@ -196,7 +199,9 @@
         r=await D.from('league_seasons').select(fields).eq('league_id',id).ilike('name',routeKey).maybeSingle();
         if(r.error) throw r.error;
       }
-      if(r.data) return r.data;
+      // As with an explicit ID, an unresolved route key is an error state,
+      // not permission to fall back to a different season.
+      return r.data||null;
     }
 
     // Browser selection is a preference, not authority. A stale ID from a
@@ -258,45 +263,79 @@
     const clean={teamMap:clone(state?.teamMap||{}),settings:clone(state?.settings||{})};
     delete clean.settings.leagues;
     clean.settings.activeLeagueId=leagueId;
+
+    // Resolve and validate the target season BEFORE writing the league mirror.
+    // Ordinary state saves must never create a guessed Season 1 or activate an
+    // archived season as a side effect.
+    const requestedId=String(options.seasonId||'').trim();
+    const season=requestedId
+      ? await getSeasonContext(leagueId,client,{seasonId:requestedId})
+      : await getSeasonContext(leagueId,client);
+    if(!season) throw new Error('The target season could not be resolved for this league. No shared state was saved.');
+    clean.settings.activeSeason=season.name;
+
     const {data,error}=await db(client).from('leagues').update({state:clean,updated_at:new Date().toISOString()}).eq('id',leagueId).select('id,name,description,join_code,state').maybeSingle();
     if(error) throw error;
     if(!data) throw new Error('League could not be saved.');
     const framework=clean.settings.framework && typeof clean.settings.framework==='object' ? clean.settings.framework : {};
     const r=await db(client).from('league_settings').upsert({league_id:leagueId,framework,updated_at:new Date().toISOString()},{onConflict:'league_id'});
     if(r.error) throw r.error;
-    // Keep the selected season as the canonical season-scoped copy. The league
-    // row remains a compatibility mirror until every page has migrated. When
-    // the active season name changes, materialize/activate the corresponding
-    // league_seasons row instead of silently continuing to write the old one.
-    const targetName=String(clean.settings.activeSeason||'Season 1').trim()||'Season 1';
-    const targetKey=targetName.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'season-1';
-    let season=options.seasonId
-      ? await getSeasonContext(leagueId,client,{seasonId:options.seasonId})
-      : await getSeasonContext(leagueId,client,{seasonKey:targetKey});
-    if(!season){
-      // Archive every currently-active row rather than trusting browser
-      // selection to identify the active season. This also repairs legacy
-      // databases that accidentally contain more than one active season.
-      const archived=await db(client).from('league_seasons')
-        .update({status:'archived',updated_at:new Date().toISOString()})
-        .eq('league_id',leagueId).eq('status','active');
-      if(archived.error) throw archived.error;
-      const created=await db(client).from('league_seasons').upsert({league_id:leagueId,season_key:targetKey,name:targetName,status:'active',data:{teamMap:clean.teamMap,settings:clean.settings}}, {onConflict:'league_id,season_key'}).select('id,league_id,season_key,name,status,data,created_at,updated_at').single();
-      if(created.error) throw created.error;
-      season=created.data;
-    } else {
-      // The target may be archived already. Archive all other active seasons
-      // by database state, not by stale localStorage ID, then activate target.
-      const archived=await db(client).from('league_seasons')
-        .update({status:'archived',updated_at:new Date().toISOString()})
-        .eq('league_id',leagueId).eq('status','active').neq('id',season.id);
-      if(archived.error) throw archived.error;
-      const activated=await db(client).from('league_seasons').update({status:'active',updated_at:new Date().toISOString()}).eq('id',season.id).eq('league_id',leagueId);
-      if(activated.error) throw activated.error;
-      season=await saveSeasonState(leagueId,season.id,{teamMap:clean.teamMap,settings:clean.settings},client);
-    }
-    setSelectedSeasonId(season.id,leagueId); setSelectedSeasonKey(season.season_key,leagueId);
+    await saveSeasonState(leagueId,season.id,{teamMap:clean.teamMap,settings:clean.settings},client);
     return data;
+  }
+
+  async function createSeason(leagueId,name,payload,client){
+    const cleanName=String(name||'').trim();
+    if(!leagueId||!cleanName) throw new Error('League and season name are required.');
+    const key=cleanName.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'season';
+    const D=db(client);
+    const existing=await D.from('league_seasons').select('id,name,season_key,status').eq('league_id',leagueId).eq('season_key',key).maybeSingle();
+    if(existing.error) throw existing.error;
+    if(existing.data) throw new Error(`A season named "${existing.data.name||cleanName}" already exists.`);
+    const body=clone(payload||{});
+    body.teamMap=body.teamMap||{}; body.settings=body.settings||{}; body.settings.activeSeason=cleanName;
+    const inserted=await D.from('league_seasons').insert({league_id:leagueId,season_key:key,name:cleanName,status:'planned',data:body}).select('id,league_id,season_key,name,status,data,created_at,updated_at').single();
+    if(inserted.error) throw inserted.error;
+    const created=inserted.data;
+    const active=await D.from('league_seasons').select('id').eq('league_id',leagueId).eq('status','active');
+    if(active.error){ await D.from('league_seasons').delete().eq('id',created.id).eq('league_id',leagueId); throw active.error; }
+    const previousIds=(active.data||[]).map(x=>x.id).filter(Boolean);
+    if(previousIds.length){
+      const archived=await D.from('league_seasons').update({status:'archived',updated_at:new Date().toISOString()}).eq('league_id',leagueId).eq('status','active');
+      if(archived.error){ await D.from('league_seasons').delete().eq('id',created.id).eq('league_id',leagueId); throw archived.error; }
+    }
+    const activated=await D.from('league_seasons').update({status:'active',updated_at:new Date().toISOString()}).eq('id',created.id).eq('league_id',leagueId).select('id,league_id,season_key,name,status,data,created_at,updated_at').single();
+    if(activated.error){
+      if(previousIds.length) await D.from('league_seasons').update({status:'active',updated_at:new Date().toISOString()}).eq('league_id',leagueId).in('id',previousIds);
+      await D.from('league_seasons').delete().eq('id',created.id).eq('league_id',leagueId);
+      throw activated.error;
+    }
+    setSelectedSeasonId(created.id,leagueId); setSelectedSeasonKey(key,leagueId);
+    return activated.data;
+  }
+
+  async function activateSeason(leagueId,seasonId,payload,client){
+    if(!leagueId||!seasonId) throw new Error('League and season are required.');
+    const D=db(client);
+    const target=await D.from('league_seasons').select('id,league_id,season_key,name,status,data,created_at,updated_at').eq('league_id',leagueId).eq('id',seasonId).maybeSingle();
+    if(target.error) throw target.error;
+    if(!target.data) throw new Error('The requested season does not belong to this league.');
+    const active=await D.from('league_seasons').select('id').eq('league_id',leagueId).eq('status','active');
+    if(active.error) throw active.error;
+    const previousIds=(active.data||[]).map(x=>x.id).filter(id=>id!==seasonId);
+    if(previousIds.length){
+      const archived=await D.from('league_seasons').update({status:'archived',updated_at:new Date().toISOString()}).eq('league_id',leagueId).eq('status','active').neq('id',seasonId);
+      if(archived.error) throw archived.error;
+    }
+    const patch={status:'active',updated_at:new Date().toISOString()};
+    if(payload!==undefined) patch.data=clone(payload||{});
+    const result=await D.from('league_seasons').update(patch).eq('league_id',leagueId).eq('id',seasonId).select('id,league_id,season_key,name,status,data,created_at,updated_at').single();
+    if(result.error){
+      if(previousIds.length) await D.from('league_seasons').update({status:'active',updated_at:new Date().toISOString()}).eq('league_id',leagueId).in('id',previousIds);
+      throw result.error;
+    }
+    setSelectedSeasonId(result.data.id,leagueId); setSelectedSeasonKey(result.data.season_key,leagueId);
+    return result.data;
   }
 
 
@@ -330,13 +369,18 @@
     return data;
   }
 
-  async function deleteLeague(leagueId,client){
+  async function deleteLeague(leagueId,client,confirmation){
     if(!leagueId) throw new Error('League id is required.');
-    const {error}=await db(client).from('leagues').delete().eq('id',leagueId);
+    if(typeof confirmation!=='string' || !confirmation.trim()) throw new Error('Type the exact league name to confirm deletion.');
+    const {data,error}=await db(client).rpc('sbl_delete_league',{
+      p_league_id:leagueId,
+      p_confirmation:confirmation.trim()
+    });
     if(error) throw error;
+    if(!data || String(data.deleted_league_id||'')!==String(leagueId)) throw new Error('The database did not confirm deletion of the selected league.');
     if(selectedLeagueId()===leagueId) setSelectedLeagueId('');
     setSelectedSeasonId('',leagueId); setSelectedSeasonKey('',leagueId);
-    return true;
+    return data;
   }
 
   async function createLeague(payload,client){
@@ -491,5 +535,5 @@
     if(error) throw error; return data||[];
   }
 
-  SBL.leagueDb={selectedLeagueId,setSelectedLeagueId,selectedSeasonId,setSelectedSeasonId,selectedSeasonKey,setSelectedSeasonKey,getSeasonContext,listSeasons,saveSeasonState,renameSeason,updateLeague,deleteLeague,isUuid,isAvailable,listAll,listForUser,getLeague,getMembership,getSnapshot,saveState,createLeague,listFranchises,createFranchise,updateFranchiseDefinition,findByJoinCode,requestJoin,setMembership,upsertFranchises,loadReplays,upsertReplays,deleteReplays,clearAvailability:()=>{availability=null;availabilityPromise=null;}};
+  SBL.leagueDb={selectedLeagueId,setSelectedLeagueId,selectedSeasonId,setSelectedSeasonId,selectedSeasonKey,setSelectedSeasonKey,getSeasonContext,listSeasons,saveSeasonState,createSeason,activateSeason,renameSeason,updateLeague,deleteLeague,isUuid,isAvailable,listAll,listForUser,getLeague,getMembership,getSnapshot,saveState,createLeague,listFranchises,createFranchise,updateFranchiseDefinition,findByJoinCode,requestJoin,setMembership,upsertFranchises,loadReplays,upsertReplays,deleteReplays,clearAvailability:()=>{availability=null;availabilityPromise=null;}};
 })();

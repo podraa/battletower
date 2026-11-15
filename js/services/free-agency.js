@@ -83,8 +83,14 @@
     const settings = selected?.settings || {};
     let rosters = normalizeRosters(settings.rosters || {});
 
-    if (!Object.keys(rosters).length && leagueId) {
-      const { data: row } = await db.from('league_replays').select('replay_id,replay_data').eq('league_id',leagueId).eq('replay_id','__rosters__').maybeSingle();
+    // A resolved normalized season is authoritative even when its roster is
+    // intentionally empty (for example, before the draft). Never resurrect a
+    // league-wide legacy __rosters__ row into that season. The compatibility
+    // row remains available only for genuinely legacy, non-normalized leagues.
+    const hasNormalizedSeason = Boolean(selected?.seasonId);
+    if (!Object.keys(rosters).length && leagueId && !hasNormalizedSeason) {
+      const { data: row, error } = await db.from('league_replays').select('replay_id,replay_data').eq('league_id',leagueId).eq('replay_id','__rosters__').maybeSingle();
+      if (error) throw error;
       rosters = normalizeRosters(row?.replay_data?.rosters || {});
     }
 

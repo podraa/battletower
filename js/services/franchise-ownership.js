@@ -323,6 +323,21 @@
     }, client);
   }
 
+  async function commissionerApproveFranchiseRequest(requestId, client) {
+    return rpc('sbl_approve_franchise_request', {
+      p_request_id: requireId(requestId, 'requestId')
+    }, client);
+  }
+
+  async function commissionerRejectFranchiseRequest(requestId, rejectionReason, client) {
+    const reason = String(rejectionReason || '').trim();
+    if (!reason) throw new Error('A rejection reason is required.');
+    return rpc('sbl_reject_franchise_request', {
+      p_request_id: requireId(requestId, 'requestId'),
+      p_rejection_reason: reason
+    }, client);
+  }
+
   async function vacateFranchise(leagueId, franchiseId, userId, client, lock = false) {
     return rpc('sbl_vacate_franchise', {
       p_league_id: requireId(leagueId, 'leagueId'),
@@ -412,6 +427,8 @@
     removeLeagueMember,
     approveMembershipAndAssign,
     commissionerAssignFranchise,
+    commissionerApproveFranchiseRequest,
+    commissionerRejectFranchiseRequest,
     rejectLeagueMembership,
     vacateFranchise,
     reassignFranchise,

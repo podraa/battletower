@@ -269,6 +269,14 @@
     const c=await ensureCtx();
     const current=base || await read();
     const canonicalTeam=canonicalDraftTeam(current?.settings?.draft,team);
+    // Mega rule (max 2 per team; the minimum of 1 is enforced on a team's last turn).
+    // A commissioner override bypasses it, like the other pick rules.
+    if(!opts.override && SBL.draftDash?.megaBlock){
+      const dd=current?.settings?.draft;
+      const target=(dd?.pool||[]).find(m=>String(m.id)===String(poolId));
+      const block=SBL.draftDash.megaBlock(dd,canonicalTeam,target);
+      if(block) throw new Error(block.message);
+    }
     if(c){
       const {data,error}=await db().rpc('sbl_draft_pick',{p_league_id:c.leagueId,p_season_id:c.seasonId,
         p_pool_id:String(poolId),p_team:canonicalTeam,p_override:!!opts.override});
