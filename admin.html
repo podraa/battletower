@@ -17,10 +17,10 @@
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link href="css/sbl-site.css" rel="stylesheet"/>
-<link href="css/sbl-components.css" rel="stylesheet"/>
+<link href="css/sbl-components.css?v=cp463" rel="stylesheet"/>
 <link href="css/sbl-sprites-layout.css?v=cp454-contained-sprites" rel="stylesheet"/>
-<link href="css/sbl-ui.css?v=cp419-viewport-reflow" rel="stylesheet"/>
-<link href="css/pages/admin.css" rel="stylesheet"/>
+<link href="css/sbl-ui.css?v=cp463-gutters" rel="stylesheet"/>
+<link href="css/pages/admin.css?v=cp463" rel="stylesheet"/>
 
 
 
@@ -28,8 +28,11 @@
 </head>
 <body data-admin="true">
 <div id="app" style="display:none">
-<header>
-<h1> League Admin <span class="badge" id="seasonBadge" style="vertical-align:middle;"></span></h1>
+<header class="admin-page-header">
+  <h1>League Admin <span class="badge" id="seasonBadge" style="vertical-align:middle;"></span></h1>
+  <button type="button" class="ghost small admin-refresh-button" id="adminRefreshButton" title="Refresh the current admin workspace" aria-label="Refresh admin workspace">
+    <span aria-hidden="true">↻</span> Refresh
+  </button>
 </header>
 <nav class="tabs admin-nav" id="tabs" aria-label="Admin navigation">
   <button type="button" class="admin-sidebar-toggle" id="adminSidebarToggle" aria-label="Collapse sidebar" title="Collapse sidebar"><span class="admin-sidebar-toggle-icon">‹</span><span class="admin-sidebar-toggle-label">Collapse</span></button>
@@ -82,14 +85,14 @@
 <script defer="" src="js/sbl-site.js?v=cp447-season-roster-authority"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
 <script src="js/pokemon-dex-ids.js" defer></script>
-<script src="js/services/pokemon.js?v=cp455-home-gen5-hd-draft" defer></script><script src="js/services/pokemon-types.js?v=cp424-mega-typing" defer></script>
+<script src="js/services/pokemon.js?v=cp455-home-gen5-hd-draft" defer></script><script src="js/services/team-colors.js?v=cp463" defer></script><script src="js/services/pokemon-types.js?v=cp424-mega-typing" defer></script>
 <script src="js/services/replays.js?v=cp451" defer></script>
 <script src="js/services/legacy-archive.js" defer></script>
 <script src="js/sbl-supabase.js" defer></script>
-<script src="js/services/league-db.js?v=cp451" defer></script>
-<script src="js/services/franchise-ownership.js?v=cp422-active-members" defer></script>
+<script src="js/services/league-db.js?v=cp462-archive-safe-delete" defer></script>
+<script src="js/services/franchise-ownership.js?v=cp461-request-approval" defer></script>
 <script src="js/services/admin.js" defer></script>
-<script src="js/services/draft.js?v=cp428-stat-metadata-merge" defer></script>
+<script src="js/services/draft.js?v=cp463" defer></script>
 <script src="js/services/draft-lottery.js" defer></script>
 <script src="js/auth.js" defer></script>
 <script src="js/services/rosters.js?v=cp447-season-roster-authority" defer></script>
@@ -101,7 +104,7 @@
 <script src="js/services/data.js" defer></script>
 <script src="js/services/finals.js" defer></script>
 <script src="js/services/fixture-workflow.js?v=cp451" defer></script>
-<script src="js/pages/admin.js?v=cp454-pick-confirm-contained-sprites" defer></script>
+<script src="js/pages/admin.js?v=cp463-fixture-9-games-per-week" defer></script>
 
 
 <script src="js/app.js" defer></script>
