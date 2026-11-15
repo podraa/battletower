@@ -688,3 +688,10 @@ body{min-width:0;width:100%;}
 #app{width:100%!important;max-width:100%!important;min-width:0!important;margin-inline:0!important;}
 #content{width:100%;max-width:100%;min-width:0;}
 #content :where(.panel,.card,.workspace,.section,.admin-focused-workspace){width:auto;max-width:100%;min-width:0;}
+
+
+/* CP4.63: side gutters. The unconditional #app width/margin reset above made every
+   page run edge to edge. Every page except "My Team" gets breathing room. */
+body:not(.page-my-team) #app{box-sizing:border-box;padding-inline:clamp(16px,3.5vw,56px)!important}
+body:not(.page-my-team) #app>header,body:not(.page-my-team) #app>#content{box-sizing:border-box}
+@media(max-width:560px){body:not(.page-my-team) #app{padding-inline:14px!important}}

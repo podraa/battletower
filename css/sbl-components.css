@@ -117,3 +117,29 @@
 .theme-swatch-preview i{position:absolute;left:5px;right:5px;top:5px;height:4px;border-radius:4px;display:block;}
 .theme-swatch-preview b{position:absolute;left:7px;right:7px;bottom:5px;height:9px;border-radius:4px;display:block;}
 @media(max-width:700px){.account-theme-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.account-preferences-head{flex-direction:column;}.account-theme-swatch{font-size:11px;}}
+
+/* ---- CP4.63: team colours, team links and roster pop-out ---- */
+.team-link{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+.team-link:hover,.team-link:focus-visible{text-decoration-style:solid;color:var(--amber,#ffb454)}
+.owner-tag{font-size:.78em;font-weight:600;opacity:.75;margin-left:6px;white-space:nowrap}
+[style*="--team-color"].team-tinted{border-left:4px solid var(--team-color);background-image:linear-gradient(color-mix(in srgb,var(--team-color) 9%,transparent),color-mix(in srgb,var(--team-color) 9%,transparent))}
+.gf-row[style*="--team-color"]{background:color-mix(in srgb,var(--team-color) 14%,var(--panel,transparent));box-shadow:inset 4px 0 0 var(--team-color)}
+table tbody tr[style*="--team-color"] td{background:color-mix(in srgb,var(--team-color) 12%,transparent)}
+table tbody tr[style*="--team-color"] td:first-child{box-shadow:inset 4px 0 0 var(--team-color)}
+.franchise-card[style*="--team-color"]{border-top:4px solid var(--team-color);background-image:linear-gradient(color-mix(in srgb,var(--team-color) 7%,transparent),color-mix(in srgb,var(--team-color) 7%,transparent))}
+.team-popup-open{overflow:hidden}
+.team-popup-backdrop{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(0,0,0,.6)}
+.team-popup{width:min(720px,100%);max-height:88vh;overflow:auto;border-radius:16px;border:1px solid var(--border,#333);background:var(--panel,#161c26);color:var(--text,#eee);box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.team-popup.team-tinted{border-left:none;border-top:6px solid var(--team-color);background-image:linear-gradient(color-mix(in srgb,var(--team-color) 10%,transparent),color-mix(in srgb,var(--team-color) 4%,transparent))}
+.tp-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:16px 18px 6px}
+.tp-head h2{margin:0;font-size:22px}
+.tp-owner{margin-top:3px;font-size:13px;opacity:.8}
+.tp-close{border:0;background:transparent;color:inherit;font-size:20px;cursor:pointer;padding:4px 8px;border-radius:8px}
+.tp-close:hover,.tp-close:focus-visible{background:rgba(127,127,127,.25)}
+.tp-meta{display:flex;gap:14px;padding:0 18px 12px;font-size:12px;opacity:.8}
+.tp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;padding:0 18px 18px}
+.tp-mon{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:12px;background:color-mix(in srgb,var(--team-color,#888) 13%,var(--panel-alt,rgba(127,127,127,.12)));border:1px solid color-mix(in srgb,var(--team-color,#888) 35%,transparent)}
+.tp-mon .tp-sprite{width:44px;height:44px;object-fit:contain}
+.tp-mon strong{display:block;font-size:13px}
+.tp-mon span{font-size:11px;opacity:.75}
+.tp-empty{grid-column:1/-1;padding:18px;text-align:center;opacity:.7}
