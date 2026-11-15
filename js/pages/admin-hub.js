@@ -3,11 +3,13 @@
   const SBL=window.SBL=window.SBL||{};
   const esc=(v)=>SBL.pokemon?.escapeHtml ? SBL.pokemon.escapeHtml(String(v ?? '')) : String(v ?? '').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   const $=(s)=>document.querySelector(s);
+  function setLeagueStatus(message){const el=$('#leagueDeleteStatus');if(el)el.textContent=message||'';}
 
   let currentUser=null;
   let healthData=null;
   let users=[];
   let leagues=[];
+  let testAccounts=[];
   let changeLogEntries=[];
   let superAdmin=false;
 
@@ -57,7 +59,28 @@
     const wrap=$('#leagueTable');
     if(!wrap) return;
     if(!leagues.length){ wrap.innerHTML='<div class="site-admin-empty">No leagues found.</div>'; return; }
-    wrap.innerHTML=`<table><thead><tr><th>League</th><th>Status</th><th>Members</th><th>Franchises</th><th>Created</th><th>ID</th></tr></thead><tbody>${leagues.map(l=>`<tr><td><strong>${esc(l.name)}</strong><span class="cell-sub">${esc(l.description||'')}</span></td><td><span class="status-chip ${statusClass(l.status)}">${esc(l.status)}</span></td><td class="num">${esc(l.member_count)}</td><td class="num">${esc(l.franchise_count)}</td><td>${esc(formatTime(l.created_at))}</td><td><code>${esc(l.id)}</code></td></tr>`).join('')}</tbody></table>`;
+    wrap.innerHTML=`<table><thead><tr><th>League</th><th>Status</th><th>Members</th><th>Franchises</th><th>Created</th><th>ID</th><th>Action</th></tr></thead><tbody>${leagues.map(l=>`<tr><td><strong>${esc(l.name)}</strong><span class="cell-sub">${esc(l.description||'')}</span></td><td><span class="status-chip ${statusClass(l.status)}">${esc(l.status)}</span></td><td class="num">${esc(l.member_count)}</td><td class="num">${esc(l.franchise_count)}</td><td>${esc(formatTime(l.created_at))}</td><td><code>${esc(l.id)}</code></td><td><button type="button" class="table-action danger-btn" data-delete-league="${esc(l.id)}">Delete league</button></td></tr>`).join('')}</tbody></table>`;
+    wrap.querySelectorAll('[data-delete-league]').forEach(button=>button.addEventListener('click',async()=>{
+      const league=leagues.find(item=>String(item.id)===String(button.dataset.deleteLeague));
+      if(!league)return;
+      const name=String(league.name||'').trim();
+      const warning=`Permanently delete "${name}"?\n\nThis removes the league and its operational records, including memberships, franchise definitions/assignments, seasons, draft, fixtures, trades and league-scoped replay data.\n\nImported sbl_legacy_* archive seasons, results, replays, mappings and audit records will be detached and preserved. Registered accounts, profiles and other leagues are not deleted.\n\nThis cannot be undone.`;
+      if(!window.confirm(warning))return;
+      const typed=window.prompt(`Type the exact league name to confirm deletion:\n${name}`);
+      if(typed===null)return;
+      if(typed.trim()!==name){setLeagueStatus('League name did not match. Nothing was deleted.');return;}
+      button.disabled=true;
+      try{
+        setError('');setLeagueStatus('Deleting league and preserving imported archives…');
+        const result=await SBL.siteAdmin.deleteLeague(league.id,typed);
+        const preserved=result?.preserved_archive_rows||{};
+        const snapshots=result?.preserved_historical_snapshots||{};
+        const archiveTotal=Object.values(preserved).reduce((sum,value)=>sum+Number(value||0),0);
+        const snapshotTotal=Object.values(snapshots).reduce((sum,value)=>sum+Number(value||0),0);
+        await load();
+        setLeagueStatus(`Deleted ${name}. Preserved ${archiveTotal} imported archive rows and ${snapshotTotal} historical season/replay snapshots.`);
+      }catch(error){setLeagueStatus(error?.message||'Could not delete the league.');button.disabled=false;}
+    }));
   }
 
   function renderChangeLog(){
@@ -102,6 +125,57 @@
     }));
   }
 
+
+  function renderTestAccounts(){
+    const table=$('#testAccountTable');
+    const userSelect=$('#testAccountUserSelect');
+    const leagueSelect=$('#testAccountLeagueSelect');
+    if(userSelect){
+      const selected=userSelect.value;
+      userSelect.innerHTML='<option value="">Choose an account…</option>'+users.map(u=>`<option value="${esc(u.id)}">${esc(String(u.username||u.email||'Unknown user'))} · ${esc(u.email||u.id)}</option>`).join('');
+      if(selected) userSelect.value=selected;
+    }
+    if(leagueSelect){
+      const selected=leagueSelect.value;
+      leagueSelect.innerHTML='<option value="">Choose a league…</option>'+leagues.map(l=>`<option value="${esc(l.id)}">${esc(l.name||'Unnamed league')}</option>`).join('');
+      if(selected) leagueSelect.value=selected;
+    }
+    if(!table)return;
+    if(!testAccounts.length){
+      table.innerHTML='<div class="site-admin-empty">No league-scoped test accounts are currently marked.</div>';
+      return;
+    }
+    table.innerHTML=`<table><thead><tr><th>Account</th><th>League</th><th>Membership</th><th>League role</th><th>Marked</th><th>Action</th></tr></thead><tbody>${testAccounts.map(row=>`<tr><td><strong>${esc(row.username||'Unknown user')}</strong><span class="cell-sub">${esc(row.email||row.user_id)}</span></td><td><strong>${esc(row.league_name||'Unknown league')}</strong><span class="cell-sub"><code>${esc(row.league_id)}</code></span></td><td>${esc(row.membership_status||'—')}</td><td>${esc(row.role||'player')}</td><td>${esc(formatTime(row.created_at))}</td><td><button type="button" class="table-action" data-test-account-player data-league="${esc(row.league_id)}" data-user="${esc(row.user_id)}">Convert to player</button></td></tr>`).join('')}</tbody></table>`;
+  }
+
+  function wireTestAccounts(){
+    const add=$('#markTestAccount');
+    const status=$('#testAccountStatus');
+    add?.addEventListener('click',async()=>{
+      const userId=$('#testAccountUserSelect')?.value||'';
+      const leagueId=$('#testAccountLeagueSelect')?.value||'';
+      if(!userId||!leagueId){if(status)status.textContent='Choose both an account and a league.';return;}
+      add.disabled=true;
+      try{
+        if(status)status.textContent='Updating league-scoped test-account classification…';
+        await SBL.siteAdmin.setTestAccount(leagueId,userId,'test_account');
+        if(status)status.textContent='Account marked as a test account for that league.';
+        await load();
+      }catch(error){if(status)status.textContent=error?.message||'Could not mark this account as a test account.';}
+      finally{add.disabled=false;}
+    });
+    $('#testAccountTable')?.addEventListener('click',async event=>{
+      const button=event.target.closest('[data-test-account-player]');
+      if(!button)return;
+      button.disabled=true;
+      try{
+        await SBL.siteAdmin.setTestAccount(button.dataset.league,button.dataset.user,'player');
+        if(status)status.textContent='Account returned to the normal player category for that league.';
+        await load();
+      }catch(error){if(status)status.textContent=error?.message||'Could not update test-account classification.';button.disabled=false;}
+    });
+  }
+
   function renderAdmins(){
     const wrap=$('#adminTable');
     if(!wrap) return;
@@ -119,12 +193,12 @@
   async function load(){
     $('#refreshHealth').disabled=true;
     try{
-      const base=[SBL.siteAdmin.health(),SBL.siteAdmin.leagues(),SBL.siteAdmin.users()];
+      const base=[SBL.siteAdmin.health(),SBL.siteAdmin.leagues(),SBL.siteAdmin.users(),SBL.siteAdmin.testAccounts()];
       if(superAdmin) base.push(SBL.siteAdmin.changeLog());
       const results=await Promise.all(base);
-      [healthData,leagues,users]=results;
-      if(superAdmin) changeLogEntries=results[3]||[];
-      renderHealth(); renderLeagues(); renderRegisteredAccounts(); renderAdmins();
+      [healthData,leagues,users,testAccounts]=results;
+      if(superAdmin) changeLogEntries=results[4]||[];
+      renderHealth(); renderLeagues(); renderRegisteredAccounts(); renderTestAccounts(); renderAdmins();
       if(superAdmin) renderChangeLog();
     }catch(e){setError(e.message||'Could not load site administration data.');}
     finally{$('#refreshHealth').disabled=false;}
@@ -143,6 +217,7 @@
       $('#app').style.display='';
       $('#refreshHealth').addEventListener('click',load);
       if(superAdmin) wireChangeLog();
+      wireTestAccounts();
       await load();
     }catch(e){
       setError(e.message||'You are not authorized to access the Admin Hub.');

@@ -48,6 +48,9 @@
       return SBL.pokemon.spriteMarkup(name, 'sprite');
     }
 
+  // CP4.63: team colours, owner usernames and the roster pop-out.
+  let TEAM_SETTINGS = {}, TEAM_MAP = {}, TEAM_ROSTERS = {};
+  function ownerTag(team){ const o = SBL.teamColors?.ownerLabel(TEAM_MAP, team); return o ? `<span class="owner-tag">@${esc(o)}</span>` : ''; }
   const FALLBACK_BUDGET = 115;
   let DRAFT_BUDGETS = {defaultBudget: FALLBACK_BUDGET, budgets: {}};
   function teamBudget(team){
@@ -71,7 +74,26 @@
     const points = mon?.points == null || mon?.points === '' ? '' : `<div class="mon-points">${esc(mon.points)} pts</div>`;
     return `<div class="mon">${sprite(name)}<div class="mon-info"><div class="mon-name">${esc(name)}</div><div class="mon-team">${esc(team)}</div>${points}</div></div>`;
   }
-  function showError(message){ content.innerHTML = `<div class="empty">${esc(message)}</div>`; }
+  function showError(message){
+    const app=document.getElementById('app');
+    if(app) app.style.display='';
+    if(toolbar) toolbar.style.display='none';
+    content.innerHTML = `<div class="empty">${esc(message)}</div>`;
+  }
+
+  function emptyRosterMessage(snapshot, settings){
+    const draftStatus=String(settings?.draft?.status||'').trim().toLowerCase();
+    const seasonName=String(snapshot?.name||settings?.activeSeason||'this season');
+    if(['setup','lobby','live'].includes(draftStatus)){
+      return `<section class="roster-empty-state" role="status" aria-live="polite">
+        <div class="roster-empty-kicker">SEASON IN PROGRESS</div>
+        <div class="roster-empty-icon" aria-hidden="true">⌛</div>
+        <h2>Rosters will be finalised after the draft</h2>
+        <p>The ${esc(seasonName)} draft has not been completed yet. Franchise rosters will appear here once the draft is finished and the results have been published.</p>
+      </section>`;
+    }
+    return `<div class="empty">No published rosters are available for ${esc(seasonName)} yet.</div>`;
+  }
 
   async function withTimeout(promise, ms, label){
     let timer;
@@ -89,10 +111,19 @@
       if(!session){ location.replace('index.html'); return; }
       const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
       if(!leagueId){ location.replace('index.html'); return; }
-      const currentFranchise = SBL.franchiseOwnership?.getUserFranchise
-        ? await SBL.franchiseOwnership.getUserFranchise(leagueId, session.user.id, supabase)
-        : null;
-      if(!currentFranchise?.franchiseId){ location.replace('index.html'); return; }
+
+      // Rosters are a league-wide read-only view, not a page that requires
+      // the visitor to own a franchise. This matters at season start, when
+      // active members may not yet have an assignment.
+      const membership = await SBL.leagueDb?.getMembership?.(leagueId, session.user.id, supabase);
+      if(!membership || String(membership.status||'').toLowerCase()!=='active'){
+        location.replace('index.html');
+        return;
+      }
+
+      // Reveal the page before loading data so an intentionally empty
+      // pre-draft season can show an explanatory state instead of a blank page.
+      document.getElementById('app').style.display = '';
 
       const result = await withTimeout(SBL.freeAgency.load(supabase), 10000, 'Loading the roster data');
       let rosters = result?.rosters || {};
@@ -105,20 +136,29 @@
         };
       }
 
+      TEAM_SETTINGS = settings; TEAM_MAP = result?.state?.teamMap || {}; TEAM_ROSTERS = rosters;
+      SBL.teamPopup?.bind(document, () => ({settings: TEAM_SETTINGS, teamMap: TEAM_MAP, rosters: TEAM_ROSTERS}));
       const teams = Object.keys(rosters).sort((a,b)=>a.localeCompare(b));
-      if(!teams.length){ content.innerHTML = '<div class="empty">No rosters have been uploaded yet.</div>'; return; }
+      const hasPublishedPokemon = teams.some(team => Array.isArray(rosters[team]) && rosters[team].length>0);
+      const draftStatus=String(settings?.draft?.status||'').trim().toLowerCase();
+      if(!hasPublishedPokemon){
+        content.innerHTML = emptyRosterMessage(result?.snapshot, settings);
+        return;
+      }
 
-      document.getElementById('app').style.display = '';
       toolbar.style.display = '';
       rosterSelect.innerHTML = ['<option value="__all__">All rosters</option>', ...teams.map(team => `<option value="${esc(team)}">${esc(team)}</option>`)].join('');
 
+      const draftNotice = ['setup','lobby','live'].includes(draftStatus)
+        ? `<div class="roster-draft-notice" role="status"><strong>Draft ${draftStatus==='live'?'in progress':'not yet complete'}:</strong> These rosters may change. Final rosters will be available after the draft.</div>`
+        : '';
       function renderSelection(team){
         const selectedTeams = team === '__all__' ? teams : [team];
         const totalMons = selectedTeams.reduce((sum, name) => sum + (rosters[name]?.length || 0), 0);
         rosterSummary.textContent = team === '__all__' ? `${teams.length} franchises · ${totalMons} Pokémon` : `${rosters[team]?.length || 0} Pokémon · ${rosterPoints(rosters[team])} pts spent`;
-        content.innerHTML = `<div class="grid${team === '__all__' ? '' : ' single'}">${selectedTeams.map(name => `
-          <section class="card">
-            <div class="head"><div><h2>${esc(name)}</h2><span class="count">${rosters[name].length} Pokémon</span></div>${budgetMarkup(name, rosters[name])}</div>
+        content.innerHTML = `${draftNotice}<div class="grid${team === '__all__' ? '' : ' single'}">${selectedTeams.map(name => `
+          <section class="card${SBL.teamColors.get(settings,name)?' team-tinted':''}"${SBL.teamColors.styleAttr(settings,name)}>
+            <div class="head"><div><h2><span class="team-link" role="button" tabindex="0" data-team-popup="${esc(name)}" title="Open ${esc(name)} roster">${esc(name)}</span>${ownerTag(name)}</h2><span class="count">${rosters[name].length} Pokémon</span></div>${budgetMarkup(name, rosters[name])}</div>
             <div class="mons">${rosters[name].map(mon => renderPokemon(name, mon)).join('')}</div>
           </section>`).join('')}</div>`;
       }

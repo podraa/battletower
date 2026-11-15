@@ -51,7 +51,11 @@ const key=s=>String(s||''). trim().toLowerCase()
 // --- filter state ---
 let filterName='';
 let filterTypes=new Set();
-let filterPoints='';
+let filterPtsMin=1;
+let filterPtsMax=20; // slider: 1 and 20 are the ends of the range (no limit at that end)
+const PTS_MIN=1,PTS_MAX=20;
+const ptsFilterActive=()=>filterPtsMin>PTS_MIN||filterPtsMax<PTS_MAX;
+const draftIsOpen=()=>['lobby','live'].includes(String((settings&&settings.draft&&settings.draft.status)||'').trim().toLowerCase());
 let filterMega='all';
 let filterAvail='all';
 let filterMove='';
@@ -60,7 +64,7 @@ let filterStat='';
 let filterStatMin='';
 let filterStatMax='';
 let filterSort=''; // '' | 'desc' | 'asc' (orders each points tier by the selected base stat)
-const STAT_LABELS={hp:'HP',atk:'Atk',def:'Def',spa:'SpA',spd:'SpD',spe:'Spe'};
+const STAT_LABELS={bst:'BST',hp:'HP',atk:'Atk',def:'Def',spa:'SpA',spd:'SpD',spe:'Spe'};
 let dexData={pokedex:{},learnsets:{},dexLoaded:false,learnsetsLoaded:false,loading:false,error:''};
 const statResolver=SBL.freeAgencyStats.createResolver({pokemon:SBL.pokemon,draftDash:SBL.draftDash,pool:draftPoolIndex,dex:dexData});
 let filterRenderTimer=null;
@@ -341,7 +345,7 @@ function applyFilters(mons){
     // name
     if(filterName && !String(m.name).toLowerCase().includes(filterName)) return false;
     // points
-    if(filterPoints!=='' && String(Number(m.points))!==filterPoints) return false;
+    {const pv=Number(m.points); if(filterPtsMin>PTS_MIN && !(pv>=filterPtsMin)) return false; if(filterPtsMax<PTS_MAX && !(pv<=filterPtsMax)) return false;}
     // Mega classification
     const mega=!!m.isMega || !!SBL?.pokemon?.isMega?.(m.name);
     if(filterMega==='mega'&&!mega) return false;
@@ -376,7 +380,7 @@ function renderResults(){
   const results=$('results');
   if(!results) return;
 
-  const activeFilters=(filterName?1:0)+(filterTypes.size>0?1:0)+(filterPoints!==''?1:0)+(filterMega!=='all'?1:0)+(filterAvail!=='all'?1:0)+(filterMove?1:0)+(filterAbility?1:0)+(filterStat?1:0)+(filterSort?1:0)+(filterStatMin!==''?1:0)+(filterStatMax!==''?1:0);
+  const activeFilters=(filterName?1:0)+(filterTypes.size>0?1:0)+(ptsFilterActive()?1:0)+(filterMega!=='all'?1:0)+(filterAvail!=='all'?1:0)+(filterMove?1:0)+(filterAbility?1:0)+(filterStat?1:0)+(filterSort?1:0)+(filterStatMin!==''?1:0)+(filterStatMax!==''?1:0);
 
   results.innerHTML=`
     <div class="summary">
@@ -385,7 +389,7 @@ function renderResults(){
       <div class="stat"><div class="note">Taken</div><b>${taken}</b></div>
       <div class="stat"><div class="note">Total pool</div><b>${allMons.length}</b></div>
       ${activeFilters?`<button class="clear-filters" id="clearFilters">Clear filters (${activeFilters})</button>`:''}
-      <div class="queue-summary"><strong>${draftQueue.length}</strong> in your draft queue <span id="queueStatus" role="status">${esc(queueSaveState|| (queueReady?'Saved':'Loading queue…'))}</span></div>
+      ${draftIsOpen()?`<div class="queue-summary"><strong>${draftQueue.length}</strong> in your draft queue <span id="queueStatus" role="status">${esc(queueSaveState|| (queueReady?'Saved':'Loading queue…'))}</span></div>`:''}
     </div>
     ${dexData.error ? `<div class="note danger" role="status">Some Pokémon move/ability fallback data could not be loaded (${esc(dexData.error)}). Persisted draft stats remain available for stat filters. <button type="button" class="ghost small" id="retryDexData">Retry data load</button></div>` : ''}
     ${tiers.length ? tiers.map(p=>{
@@ -400,7 +404,7 @@ function renderResults(){
             <div class="mon-points">${m.points??'—'} pts${m.isMega?' · MEGA · COST TBD':''}</div>
             <div class="mon-types">${types.map(typeBadge).join('')}</div>
             ${filterStat?`<div class="note mon-stat-value">${STAT_LABELS[filterStat]||filterStat} ${esc(String(statResolver.statValue(m.name,filterStat)??'—'))}</div>`:''}
-            <button class="queue-toggle ${queueContains(m)?'queued':''}" type="button" data-queue="${esc(m.id||m.name)}" aria-pressed="${queueContains(m)}">${queueContains(m)?'★ In draft queue':'☆ Add to draft queue'}</button>
+            ${draftIsOpen()?`<button class="queue-toggle ${queueContains(m)?'queued':''}" type="button" data-queue="${esc(m.id||m.name)}" aria-pressed="${queueContains(m)}">${queueContains(m)?'★ In draft queue':'☆ Add to draft queue'}</button>`:''}
             <div class="mon-status ${o?'taken-status':'available'}">${o?'Drafted by '+esc(o):'Available'}</div>
           </article>`;
         }).join('')}</div>
@@ -411,7 +415,7 @@ function renderResults(){
   if(retryDex) retryDex.onclick=()=>loadDexData();
   const clearBtn=$('clearFilters');
   if(clearBtn) clearBtn.onclick=()=>{
-    filterName='';filterTypes.clear();filterPoints='';filterMega='all';filterAvail='all';filterMove='';filterAbility='';filterStat='';filterStatMin='';filterStatMax='';filterSort='';
+    filterName='';filterTypes.clear();filterPtsMin=PTS_MIN;filterPtsMax=PTS_MAX;filterMega='all';filterAvail='all';filterMove='';filterAbility='';filterStat='';filterStatMin='';filterStatMax='';filterSort='';
     syncFilterControls();
     renderResults();
   };
@@ -433,15 +437,10 @@ function syncFilterControls(){
   Object.entries(vals).forEach(([id,val])=>{
     const el=$(id); if(el && document.activeElement!==el && el.value!==val) el.value=val;
   });
-  const points=$('filterPoints');
-  if(points){
-    const allMons=Array.isArray(settings.freeAgency?.mons)?settings.freeAgency.mons:[];
-    const pointValues=[...new Set(allMons.map(m=>Number(m.points)).filter(Number.isFinite))].sort((a,b)=>b-a);
-    const wanted=filterPoints;
-    points.innerHTML='<option value="">All point values</option>'+pointValues.map(p=>`<option value="${p}">${p} pts</option>`).join('');
-    points.value=pointValues.some(p=>String(p)===wanted)?wanted:'';
-    if(points.value!==wanted) filterPoints='';
-  }
+  const pMin=$('filterPtsMin'),pMax=$('filterPtsMax');
+  if(pMin&&document.activeElement!==pMin) pMin.value=String(filterPtsMin);
+  if(pMax&&document.activeElement!==pMax) pMax.value=String(filterPtsMax);
+  const pLabel=$('ptsRangeLabel'); if(pLabel) pLabel.textContent=ptsRangeText();
   const mega=$('filterMega'); if(mega && mega.value!==filterMega) mega.value=filterMega;
   const stat=$('filterStat'); if(stat && stat.value!==filterStat) stat.value=filterStat;
   const sortSel=$('filterSort'); if(sortSel && sortSel.value!==filterSort) sortSel.value=filterSort;
@@ -449,6 +448,11 @@ function syncFilterControls(){
   document.querySelectorAll('[data-type]').forEach(chip=>{const active=filterTypes.has(chip.dataset.type);chip.classList.toggle('active',active);chip.setAttribute('aria-pressed',String(active));});
   const typeCount=$('typeFilterCount'); if(typeCount) typeCount.textContent=filterTypes.size?`${filterTypes.size} selected`:'All types';
   const typePanel=$('typeFilterPanel'); if(typePanel && filterTypes.size) typePanel.open=true;
+}
+
+function ptsRangeText(){
+  if(!ptsFilterActive()) return 'All points (1\u201320)';
+  return filterPtsMin===filterPtsMax?`${filterPtsMin} pts`:`${filterPtsMin}\u2013${filterPtsMax} pts`;
 }
 
 function render(){
@@ -465,14 +469,15 @@ function render(){
     <div class="toolbar">
       <div class="toolbar-wide"><label>Search by name</label><input type="text" id="searchName" value="${esc(filterName)}" placeholder="e.g. Landorus, Cinderace…" autocomplete="off"></div>
       <div><label for="filterMega">Pokémon form</label><select class="filter-select" id="filterMega"><option value="all" ${filterMega==='all'?'selected':''}>All Pokémon</option><option value="mega" ${filterMega==='mega'?'selected':''}>Mega only</option><option value="standard" ${filterMega==='standard'?'selected':''}>Non-Mega only</option></select></div>
-      <div class="points-filter"><label for="filterPoints">Points</label><select class="filter-select" id="filterPoints"><option value="">All point values</option>${pointValues.map(p=>`<option value="${p}" ${filterPoints===String(p)?'selected':''}>${p} pts</option>`).join('')}</select></div>
+      <div class="points-filter points-range-select"><label>Points range <span class="pts-range-label" id="ptsRangeLabel">${esc(ptsRangeText())}</span></label><div class="points-select-pair"><label for="filterPtsMin"><span>Min</span><select id="filterPtsMin" aria-label="Minimum points">${Array.from({length:PTS_MAX-PTS_MIN+1},(_,i)=>i+PTS_MIN).map(v=>`<option value="${v}" ${filterPtsMin===v?'selected':''}>${v===PTS_MIN?'Any':v}</option>`).join('')}</select></label><span class="points-range-dash" aria-hidden="true">–</span><label for="filterPtsMax"><span>Max</span><select id="filterPtsMax" aria-label="Maximum points">${Array.from({length:PTS_MAX-PTS_MIN+1},(_,i)=>i+PTS_MIN).map(v=>`<option value="${v}" ${filterPtsMax===v?'selected':''}>${v===PTS_MAX?'Any':v}</option>`).join('')}</select></label></div></div>
       <div><label>Availability</label><div class="avail-toggle"><button class="avail-btn ${filterAvail==='all'?'active':''}" data-avail="all">All</button><button class="avail-btn ${filterAvail==='available'?'active':''}" data-avail="available">Available</button><button class="avail-btn ${filterAvail==='taken'?'active':''}" data-avail="taken">Taken</button></div></div>
       <div class="toolbar-wide"><label>Move</label><input type="text" id="filterMove" value="${esc(filterMove)}" placeholder="e.g. Earthquake, Knock Off…" autocomplete="off"></div>
       <div class="toolbar-wide"><label>Ability</label><input type="text" id="filterAbility" value="${esc(filterAbility)}" placeholder="e.g. Intimidate, Levitate…" autocomplete="off"></div>
-      <div><label>Base stat</label><select class="filter-select" id="filterStat"><option value=""> </option>${[['hp','HP'],['atk','Attack'],['def','Defense'],['spa','Sp. Atk'],['spd','Sp. Def'],['spe','Speed']].map(([v,n])=>`<option value="${v}" ${filterStat===v?'selected':''}>${n}</option>`).join('')}</select></div>
+      <div><label for="filterStat">Stat to filter / sort by</label><select class="filter-select" id="filterStat"><option value="">No stat selected</option>${[['bst','BST (total of all 6 stats)'],['hp','HP'],['atk','Attack'],['def','Defense'],['spa','Sp. Atk'],['spd','Sp. Def'],['spe','Speed']].map(([v,n])=>`<option value="${v}" ${filterStat===v?'selected':''}>${n}</option>`).join('')}</select></div>
       <div><label for="filterSort">Sort by base stat</label><select class="filter-select" id="filterSort"><option value="">Default order</option><option value="desc" ${filterSort==='desc'?'selected':''}>Highest first</option><option value="asc" ${filterSort==='asc'?'selected':''}>Lowest first</option></select></div>
-      <div><label>Minimum stat</label><input type="number" id="filterStatMin" min="0" max="255" value="${esc(filterStatMin)}" placeholder="No minimum"></div>
-      <div><label>Maximum stat</label><input type="number" id="filterStatMax" min="0" max="255" value="${esc(filterStatMax)}" placeholder="No maximum"></div>
+      <div><label for="filterStatMin">Min value of that stat</label><input type="number" id="filterStatMin" min="0" max="1200" value="${esc(filterStatMin)}" placeholder="No minimum"></div>
+      <div><label for="filterStatMax">Max value of that stat</label><input type="number" id="filterStatMax" min="0" max="1200" value="${esc(filterStatMax)}" placeholder="No maximum"></div>
+      <div class="toolbar-wide stat-help note" id="statHelp">Pick a stat, then set a minimum and/or maximum value for it (a single stat tops out around 255). <strong>BST</strong> is the base stat total: HP + Atk + Def + SpA + SpD + Spe (usually 300\u2013780).</div>
     </div>
     <details class="type-filter-wrap" id="typeFilterPanel" ${filterTypes.size?'open':''}>
       <summary><span class="type-filter-title">Filter by type</span><span class="type-filter-count" id="typeFilterCount">${filterTypes.size?`${filterTypes.size} selected`:'All types'}</span></summary>
@@ -486,7 +491,8 @@ function render(){
   $('filterAbility').oninput=e=>{filterAbility=e.target.value;schedule();};
   $('filterStatMin').oninput=e=>{filterStatMin=e.target.value;if(e.target.value&&!filterStat){filterStat='atk';$('filterStat').value='atk';}schedule();};
   $('filterStatMax').oninput=e=>{filterStatMax=e.target.value;if(e.target.value&&!filterStat){filterStat='atk';$('filterStat').value='atk';}schedule();};
-  $('filterPoints').onchange=e=>{filterPoints=e.target.value;renderResults();syncFilterControls();};
+  $('filterPtsMin').onchange=e=>{filterPtsMin=Number(e.target.value);if(filterPtsMin>filterPtsMax)filterPtsMax=filterPtsMin;renderResults();syncFilterControls();};
+  $('filterPtsMax').onchange=e=>{filterPtsMax=Number(e.target.value);if(filterPtsMax<filterPtsMin)filterPtsMin=filterPtsMax;renderResults();syncFilterControls();};
   $('filterMega').onchange=e=>{filterMega=e.target.value;renderResults();syncFilterControls();};
   $('filterStat').onchange=e=>{filterStat=e.target.value;if(!filterStat)filterSort='';renderResults();syncFilterControls();};
   $('filterSort').onchange=e=>{filterSort=e.target.value;if(filterSort&&!filterStat){filterStat='atk';$('filterStat').value='atk';}renderResults();syncFilterControls();};

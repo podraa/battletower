@@ -163,6 +163,7 @@ function applyMockPick(team,mon){
   if(!franchise)throw new Error('Choose a franchise included in this mock draft.');
   if(d.mode==='ordered'&&!sameTeam(franchise,onClock()))throw new Error(`It is ${onClock()||'no franchise'}'s turn in the configured draft order.`);
   if(pickCount(d,franchise)>=d.maxPicks)throw new Error(`${franchise} has reached the configured maximum roster size.`);
+  {const dd=typeof DD==='function'?DD():null;const block=dd&&dd.megaBlock&&dd.megaBlock(d,franchise,target);if(block)throw new Error(block.message)} // same Mega rule as the real draft
   const total=budget(franchise),used=spent(franchise),cost=Number(target.points)||0;
   if(used+cost>total)throw new Error(`${franchise} cannot afford ${target.name}. ${total-used} points remain.`);
   const pickNumber=d.picks.length+1;
@@ -430,12 +431,12 @@ function lotteryView(d){
 function boardView(d){
   if(MOCK_DRAFT_MODE&&d.mode==='manual'){
     const picks=(d.picks||[]).slice().sort((a,b)=>Number(a.pickNumber||0)-Number(b.pickNumber||0));
-    return '<div class="panel"><h2>Simulation draft board <span class="badge">'+picks.length+' picks</span></h2><div class="note">Manual mode records the actual franchise chosen for each pick in chronological order.</div>'+(picks.length?'<div class="bd-scroll"><div class="bd-row">'+picks.map(p=>'<div class="bd-cell"><span class="pn">#'+esc(p.pickNumber||'—')+'</span>'+sprite(p.name)+'<span class="mn">'+esc(p.name)+'</span><span class="pts">'+(Number(p.points)||0)+' pts</span><span class="tm">'+esc(p.team)+'</span></div>').join('')+'</div></div>':'<div class="empty">No simulated picks yet.</div>')+'</div>';
+    return '<div class="panel"><h2>Simulation draft board <span class="badge">'+picks.length+' picks</span></h2><div class="note">Manual mode records the actual franchise chosen for each pick in chronological order.</div>'+(picks.length?boardSliderHtml()+'<div class="bd-scroll"><div class="bd-row">'+picks.map(p=>'<div class="bd-cell"><span class="pn">#'+esc(p.pickNumber||'—')+'</span>'+sprite(p.name)+'<span class="mn">'+esc(p.name)+'</span><span class="pts">'+(Number(p.points)||0)+' pts</span><span class="tm">'+esc(p.team)+'</span></div>').join('')+'</div></div>':'<div class="empty">No simulated picks yet.</div>')+'</div>';
   }
   const pr=perRound(d);
   if(!d.order.length||!pr)return '<div class="panel"><h2>Draft board</h2><div class="empty">The draft order has not been set yet.</div></div>';
   const rows=LT().boardRows(d.order,d.picks,pr),me=teamKey(myTeam()),clock=(d.status==='live'&&d.mode==='ordered')?d.currentPick+1:0;
-  return '<div class="panel"><h2>Draft board <span class="badge">'+d.picks.length+'/'+d.order.length+' picks</span></h2><div class="bd-scroll">'+
+  return '<div class="panel"><h2>Draft board <span class="badge">'+d.picks.length+'/'+d.order.length+' picks</span></h2>'+boardSliderHtml()+'<div class="bd-scroll">'+
     rows.map((r,ri)=>'<div class="bd-round"><h3>Round '+(ri+1)+'</h3><div class="bd-row">'+r.map(c=>{
       const k=teamKey(c.team)===me?' mine':'',cl=c.pickNumber===clock?' clock':'';
       return c.pick?'<div class="bd-cell'+k+cl+'"><span class="pn">#'+c.pickNumber+'</span>'+sprite(c.pick.name)+'<span class="mn">'+esc(c.pick.name)+'</span><span class="pts">'+(Number(c.pick.points)||0)+' pts</span><span class="tm">'+esc(c.team)+'</span></div>'
@@ -448,10 +449,10 @@ function dashboardBoardView(d){
   const next=clock?d.order[d.currentPick]:null;
   const progress=d.order.length?Math.min(100,d.picks.length/d.order.length*100):0;
   return `<section class="user-board-wrap"><div class="user-board-overview"><div><span class="dash-kicker">LIVE DRAFT</span><h2>Draft board</h2><p>${d.picks.length} of ${d.order.length} picks completed · ${rows.length} rounds</p></div><div class="user-board-progress"><strong>${Math.round(progress)}%</strong><span>complete</span></div><div class="user-board-progressbar"><i style="width:${progress}%"></i></div>${next?`<div class="user-board-clock"><span>ON THE CLOCK</span><strong>${esc(next)}</strong><small>Pick #${clock}</small></div>`:''}</div>`+
-    rows.map((r,ri)=>`<section class="user-board-round"><header><h3>Round ${ri+1}</h3><span>${r.filter(c=>c.pick).length} / ${r.length} picks</span></header><div class="user-board-grid">${r.map(c=>{
+    boardSliderHtml()+'<div class="board-hscroll">'+rows.map((r,ri)=>`<section class="user-board-round"><header><h3>Round ${ri+1}</h3><span>${r.filter(c=>c.pick).length} / ${r.length} picks</span></header><div class="user-board-grid">${r.map(c=>{
       const mine=teamKey(c.team)===me,active=c.pickNumber===clock,done=!!c.pick;
       return `<article class="user-board-pick${mine?' mine':''}${active?' clock':''}${done?' complete':' pending'}"><div class="user-board-pick-top"><b>#${c.pickNumber}</b><span>${active?'ON THE CLOCK':done?'PICKED':'UPCOMING'}</span></div><div class="user-board-franchise">${esc(c.team)}</div>${done?`<div class="user-board-mon">${sprite(c.pick.name)}<strong>${esc(c.pick.name)}</strong><span>${Number(c.pick.points)||0} pts</span></div>`:'<div class="user-board-wait">Waiting for pick</div>'}</article>`;
-    }).join('')}</div></section>`).join('')+'</section>';
+    }).join('')}</div></section>`).join('')+'</div></section>';
 }
 
 function cmdTeam(d,ts){
@@ -542,7 +543,70 @@ function renderCommissioner(d,ts){
 const DASHVIEW=new URLSearchParams(location.search).get('view')==='dashboard';
 const dash={tab:'pool',f:{q:'',types:[],ability:'',stat:'',statMin:'',statMax:'',minPts:'',maxPts:'',mega:'all',affordable:true,showDrafted:false,queuedOnly:false},sort:'pts-desc',groupBy:'points',limit:60,queue:[],queueLoaded:false,saveMsg:''};
 let dashSaveT=null,dashSearchT=null;
+dash.queueReady=false;dash.pruneNote='';dash.dragId=null;dash.dropBefore=null;dash.redrawQueue=false;
+dash.sheet={view:'grid',q:'',hideDrafted:false,sort:'row',dir:'asc'};
 const DD=()=>SBL.draftDash;
+/* ---- Board slider + queue helpers (CP4.63) ---- */
+let boardScrollX=0;
+function boardSliderHtml(){return '<div class="board-slider-row"><span aria-hidden="true">\u25C0</span><input type="range" class="board-slider" min="0" max="1000" value="0" step="1" aria-label="Scroll the draft board horizontally"><span aria-hidden="true">\u25B6</span></div>'}
+const boardWrap=el=>el&&el.closest&&el.closest('.panel,.user-board-wrap');
+const boardScroller=slider=>boardWrap(slider)?.querySelector('.board-hscroll,.bd-scroll');
+const boardSliderFor=sc=>boardWrap(sc)?.querySelector('.board-slider');
+function syncBoardSliders(){
+  requestAnimationFrame(()=>{document.querySelectorAll('.board-hscroll,.bd-scroll').forEach(sc=>{
+    const s=boardSliderFor(sc),max=Math.max(0,sc.scrollWidth-sc.clientWidth);
+    const row=s&&s.closest('.board-slider-row');if(row)row.style.display=max>2?'':'none';
+    sc.scrollLeft=Math.min(boardScrollX,max);if(s)s.value=max>0?Math.round(sc.scrollLeft/max*1000):0;
+  })});
+}
+document.addEventListener('input',e=>{
+  const s=e.target&&e.target.classList&&e.target.classList.contains('board-slider')?e.target:null;if(!s)return;
+  const sc=boardScroller(s);if(!sc)return;
+  sc.scrollLeft=Number(s.value)/1000*Math.max(0,sc.scrollWidth-sc.clientWidth);boardScrollX=sc.scrollLeft;
+});
+document.addEventListener('scroll',e=>{
+  const sc=e.target;if(!sc||!sc.classList||!(sc.classList.contains('board-hscroll')||sc.classList.contains('bd-scroll')))return;
+  boardScrollX=sc.scrollLeft;const s=boardSliderFor(sc),max=sc.scrollWidth-sc.clientWidth;if(s)s.value=max>0?Math.round(sc.scrollLeft/max*1000):0;
+},true);
+{let pending=false;new MutationObserver(()=>{if(pending||!document.querySelector('.board-slider'))return;pending=true;requestAnimationFrame(()=>{pending=false;syncBoardSliders()})}).observe(document.body,{childList:true,subtree:true});}
+function showDashToast(msg){
+  let t=document.getElementById('dashToast');
+  if(!t){t=document.createElement('div');t.id='dashToast';t.setAttribute('role','status');t.setAttribute('aria-live','polite');document.body.appendChild(t)}
+  t.textContent=msg;t.classList.add('show');clearTimeout(showDashToast.t);showDashToast.t=setTimeout(()=>t.classList.remove('show'),9000);
+}
+function dashBlockLabel(d,t,m){const b=DD().megaBlock?.(d,t,m);return b?(b.code==='mega-max'?'Mega limit reached':'Must pick a Mega'):'Over your limit'}
+/* Taken Pokemon (by anyone, including the user's own picks) leave the queue automatically. */
+function pruneTakenQueue(d){
+  if(!dash.queueReady||!dash.queue.length)return false;
+  const gone=[];
+  dash.queue=dash.queue.filter(id=>{const m=dashMon(id);if(m&&m.drafted){gone.push(m);return false}return true});
+  if(!gone.length)return false;
+  const me=myTeam();
+  const msg='Removed from your queue: '+gone.map(m=>m.name+(m.draftedBy?(sameTeam(m.draftedBy,me)?' (you drafted)':' (taken by '+m.draftedBy+')'):' (taken)')).join(', ');
+  dash.pruneNote=msg;showDashToast(msg);dashQueueChanged();return true;
+}
+function moveQueueItem(id,beforeId){
+  const q=dash.queue.filter(x=>x!==String(id)),at=beforeId==null?q.length:q.indexOf(String(beforeId));
+  q.splice(at<0?q.length:at,0,String(id));dash.queue=q;dashQueueChanged();dash.redrawQueue=true;
+}
+function bindQueueDrag(){
+  const root=$('dashRoot');if(!root)return;
+  root.addEventListener('dragstart',e=>{const c=e.target.closest&&e.target.closest('.dash-qcard');if(!c)return;dash.dragId=c.dataset.qid;c.classList.add('dragging');e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',dash.dragId)}catch(_){}});
+  root.addEventListener('dragover',e=>{
+    if(!dash.dragId)return;const list=e.target.closest('.dash-list');if(!list)return;
+    e.preventDefault();e.dataTransfer.dropEffect='move';
+    const cards=[...list.querySelectorAll('.dash-qcard:not(.dragging)')];let before=null;
+    for(const c of cards){const r=c.getBoundingClientRect();if(e.clientY<r.top+r.height/2){before=c;break}}
+    cards.forEach(c=>c.classList.remove('drop-before','drop-after'));
+    if(before)before.classList.add('drop-before');else if(cards.length)cards[cards.length-1].classList.add('drop-after');
+    dash.dropBefore=before?before.dataset.qid:null;
+  });
+  root.addEventListener('drop',e=>{if(!dash.dragId)return;e.preventDefault();moveQueueItem(dash.dragId,dash.dropBefore)});
+  root.addEventListener('dragend',()=>{
+    dash.dragId=null;dash.dropBefore=null;root.querySelectorAll('.dash-qcard').forEach(c=>c.classList.remove('dragging','drop-before','drop-after'));
+    if(dash.redrawQueue){dash.redrawQueue=false;drawDashBody(state.settings.draft,true)}
+  });
+}
 function dashStyles(){if(document.getElementById('dashStyle'))return;const st=document.createElement('style');st.id='dashStyle';st.textContent=`
 .dash{max-width:none;width:100%;margin:0;padding:10px;display:grid;gap:10px}
 .dash-head{border:1px solid rgba(127,127,127,.35);border-radius:14px;padding:12px 14px;background:rgba(127,127,127,.1)}
@@ -668,7 +732,7 @@ body.draft-user-dashboard .dash-card-actions .dash-star{position:static;width:36
 `;document.head.appendChild(st)}
 function dashMon(id){return state.settings.draft.pool.find(m=>String(m.id)===String(id))}
 function dashSprite(name){try{return SBL.pokemon.spriteMarkup(name,'dash-sprite','hd').replace('<img ','<img loading="lazy" ')}catch{return ''}}
-function dashTypes(m){return (m.types||[]).map(t=>`<span class="dash-ty">${esc(t)}</span>`).join('')}
+function dashTypes(m){return (m.types||[]).map(t=>`<span class="dash-ty type-${esc(String(t).toLowerCase())}">${esc(t)}</span>`).join('')}
 function drawDashHead(d){
   const t=myTeam(),el=$('dashHead');if(!el)return;
   if(!t){el.innerHTML='<div class="dash-head"><div class="dash-team">No franchise linked</div><div class="dash-meta">You can browse the pool, but your budget needs a franchise. Ask the commissioner to link your account.</div></div>';return}
@@ -680,10 +744,10 @@ function drawDashHead(d){
   else if(d.mode!=='ordered')clock='Picks are made live by the commissioner.';
   else if(oc===t){clock="You're on the clock!";me=true}
   else clock=`On the clock: ${esc(oc||'—')}`+(until!=null?` · you pick in ${until} pick${until===1?'':'s'}`:'');
-  el.innerHTML=`<div class="dash-head"><div class="dash-team">${esc(t)}</div><div class="dash-pts"><span class="big">${b.left}</span> / ${b.total} pts left</div><div class="dash-bar"><i style="width:${pct}%"></i></div><div class="dash-meta">Picks ${b.picks}/${b.maxPicks} · Most you can spend on one pick: <b>${lim}</b> pts${b.need>1?' (keeps enough for your remaining roster)':''}</div><div class="dash-clock${me?' me':''}">${clock}</div></div>`;
+  el.innerHTML=`<div class="dash-head"><div class="dash-team">${esc(t)}</div><div class="dash-pts"><span class="big">${b.left}</span> / ${b.total} pts left</div><div class="dash-bar"><i style="width:${pct}%"></i></div><div class="dash-meta">Picks ${b.picks}/${b.maxPicks} · Megas ${DD().megaInfo(d,t).count}/${DD().MEGA_MAX}${DD().megaInfo(d,t).need?' (need '+DD().megaInfo(d,t).need+' more)':''} · Most you can spend on one pick: <b>${lim}</b> pts${b.need>1?' (keeps enough for your remaining roster)':''}</div><div class="dash-clock${me?' me':''}">${clock}</div></div>`;
 }
 function drawDashTabs(){
-  const el=$('dashTabs');if(!el)return;const dd=state.settings.draft,t=[['pool','Free Agency'],['queue','Queue ('+dash.queue.length+')'],['roster','My roster'],['board','Board']].concat(dd.lottery&&dd.lottery.proposed&&dd.lottery.proposed.length>1?[['lottery','Lottery']]:[]);
+  const el=$('dashTabs');if(!el)return;const dd=state.settings.draft,t=[['pool','Free Agency'],['sheet','Spreadsheet'],['queue','Queue ('+dash.queue.length+')'],['roster','My roster'],['board','Board']].concat(dd.lottery&&dd.lottery.proposed&&dd.lottery.proposed.length>1?[['lottery','Lottery']]:[]);
   el.innerHTML=t.map(([k,l])=>`<button data-act="tab" data-tab="${k}" class="${dash.tab===k?'on':''}">${l}</button>`).join('');
 }
 function dashQueueChanged(){
@@ -695,11 +759,11 @@ function dashQueueChanged(){
 }
 function dashCard(d,t,m,opts={}){
   const aff=DD().canAfford(d,t,m),q=dash.queue.includes(String(m.id));
-  const status=m.drafted?`<span>Taken${m.draftedBy?' by '+esc(m.draftedBy):''}</span>`:(!aff&&t?'<span>Over your limit</span>':'');
+  const status=m.drafted?`<span>Taken${m.draftedBy?' by '+esc(m.draftedBy):''}</span>`:(!aff&&t?'<span>'+dashBlockLabel(d,t,m)+'</span>':'');
   const right=opts.queueTab
-    ?`<div class="dash-acts"><button class="dash-mini" data-act="up" data-id="${esc(m.id)}">↑</button><button class="dash-mini" data-act="down" data-id="${esc(m.id)}">↓</button><button class="dash-mini" data-act="rm" data-id="${esc(m.id)}">✕</button></div>`
+    ?(m.drafted?'':`<div class="dash-acts"><button class="dash-mini" data-act="up" data-id="${esc(m.id)}" aria-label="Move up">▲</button><button class="dash-mini" data-act="down" data-id="${esc(m.id)}" aria-label="Move down">▼</button><button class="dash-mini" data-act="rm" data-id="${esc(m.id)}" aria-label="Remove from queue">✕</button></div>`)
     :`<button class="dash-star${q?' on':''}" data-act="q" data-id="${esc(m.id)}" aria-label="${q?'Remove from queue':'Add to queue'}">★</button>`;
-  return `<div class="dash-card${m.drafted?' dr':(!aff&&t?' na':'')}${opts.next?' next':''}">${dashSprite(m.name)}<div><div class="dash-name">${esc(m.name)}${opts.next?' · next target':''}</div><div class="dash-sub">${dashTypes(m)}<span>${Number(m.points)||0} pts</span>${status}</div></div>${right}</div>`;
+  return `<div class="dash-card${m.drafted?' dr':(!aff&&t?' na':'')}${opts.next?' next':''}${opts.queueTab?' dash-qcard':''}"${opts.queueTab?` draggable="true" data-qid="${esc(m.id)}"`:''}>${opts.queueTab?'<span class="dash-grip" aria-hidden="true" title="Drag to reorder">⋮⋮</span>':''}${dashSprite(m.name)}<div><div class="dash-name">${esc(m.name)}${opts.next?' · next target':''}</div><div class="dash-sub">${dashTypes(m)}<span>${Number(m.points)||0} pts</span>${status}</div></div>${right}</div>`;
 }
 function drawDashList(d){
   const t=myTeam(),list=$('dashList');if(!list)return;
@@ -728,7 +792,7 @@ function dashBoardCard(d,t,m){
   const aff=DD().canAfford(d,t,m),q=dash.queue.includes(String(m.id));
   const types=(Array.isArray(m.types)?m.types:[]).map(x=>String(x).toLowerCase()).filter(Boolean);
   const stats=Object.fromEntries(['hp','atk','def','spa','spd','spe'].map(k=>[k,DD().statValue(m,k)]).filter(([,v])=>v!=null));
-  const status=m.drafted?`<div class="dash-status taken">Drafted${m.draftedBy?' by '+esc(m.draftedBy):''}</div>`:(!aff&&t?'<div class="dash-status over">Over your limit</div>':'<div class="dash-status available">Available</div>');
+  const status=m.drafted?`<div class="dash-status taken">Drafted${m.draftedBy?' by '+esc(m.draftedBy):''}</div>`:(!aff&&t?'<div class="dash-status over">'+dashBlockLabel(d,t,m)+'</div>':'<div class="dash-status available">Available</div>');
   return `<article class="dash-mon-card${m.drafted?' dr':''}${!aff&&t&&!m.drafted?' na':''}">
     <div class="dash-mon-art">${dashSprite(m.name)}</div>
     <div class="dash-mon-name">${esc(SBL.pokemon.displayNameWithForm?.(m.name)||m.name)}</div>
@@ -747,10 +811,13 @@ function buildDashPool(d){
 function drawDashBody(d,rebuild){
   const body=$('dashBody');if(!body)return;const t=myTeam();
   if(dash.tab==='pool'){if(rebuild||!$('dashList'))buildDashPool(d);else drawDashList(d);return}
+  if(dash.tab==='sheet'){drawSheet(d);return}
   if(dash.tab==='queue'){
-    const items=dash.queue.map(dashMon).filter(Boolean);
-    const nextId=(items.find(m=>!m.drafted&&DD().canAfford(d,t,m))||{}).id;
-    body.innerHTML=`<div class="dash-save" id="dashSave">${esc(dash.saveMsg)}</div>`+(items.length?`<div class="dash-list">${items.map(m=>dashCard(d,t,m,{queueTab:true,next:String(m.id)===String(nextId)})).join('')}</div><button class="dash-more" data-act="clearTaken" style="margin-top:8px">Remove taken Pokémon</button>`:'<div class="note">Your queue is empty. Tap ★ on a Pokémon in Free Agency to plan. Taken Pokémon are skipped automatically.</div>');return}
+    if(dash.dragId){dash.redrawQueue=true;return}
+    const items=dash.queue.map(dashMon).filter(m=>m&&!m.drafted);
+    const nextId=(items.find(m=>DD().canAfford(d,t,m))||{}).id;
+    const note=dash.pruneNote?`<div class="dash-prune-note" role="status"><span>${esc(dash.pruneNote)}</span><button type="button" class="dash-mini" data-act="dismissPrune" aria-label="Dismiss">✕</button></div>`:'';
+    body.innerHTML=`<div class="dash-save" id="dashSave">${esc(dash.saveMsg)}</div>${note}`+(items.length?`<div class="dash-queue-hint">Drag a Pokémon (or use ▲ ▼) to change its priority. Taken Pokémon are removed automatically.</div><div class="dash-list" id="dashQueueList">${items.map(m=>dashCard(d,t,m,{queueTab:true,next:String(m.id)===String(nextId)})).join('')}</div>`:'<div class="note">Your queue is empty. Tap ☆ on a Pokémon in Free Agency to plan. Taken Pokémon are removed from your queue automatically.</div>');return}
   if(dash.tab==='roster'){
     const r=Array.isArray(state.settings.rosters?.[t])?state.settings.rosters[t]:[];const tot=r.reduce((n,e)=>n+(Number(e?.points)||0),0);
     body.innerHTML=r.length?`<div class="dash-list">${r.map(e=>{const nm=typeof e==='string'?e:e.name,pt=typeof e==='string'?0:Number(e.points)||0;return `<div class="dash-card">${dashSprite(nm)}<div><div class="dash-name">${esc(nm)}</div></div><div>${pt} pts</div></div>`}).join('')}</div><div class="note" style="margin-top:8px">${r.length} Pokémon · ${tot} pts</div>`:'<div class="note">Your roster is empty.</div>';return}
@@ -766,14 +833,17 @@ function bindDash(){
     else if(a==='type'){const i=dash.f.types.indexOf(b.dataset.type);if(i<0)dash.f.types.push(b.dataset.type);else dash.f.types.splice(i,1);dash.limit=60;drawDashList(d)}
     else if(a==='more'){dash.limit+=60;drawDashList(d)}
     else if(a==='resetFilters'){dash.f={...dash.f,q:'',types:[],ability:'',stat:'',statMin:'',statMax:'',minPts:'',maxPts:'',mega:'all',affordable:true,showDrafted:false,queuedOnly:false};dash.sort='pts-desc';dash.groupBy='points';dash.limit=60;buildDashPool(d)}
-    else if(a==='q'){const i=dash.queue.indexOf(String(id));if(i<0)dash.queue.push(String(id));else dash.queue.splice(i,1);b.classList.toggle('on',i<0);dashQueueChanged();if(dash.f.queuedOnly)drawDashList(d)}
+    else if(a==='q'){const i=dash.queue.indexOf(String(id));if(i<0)dash.queue.push(String(id));else dash.queue.splice(i,1);b.classList.toggle('on',i<0);dashQueueChanged();if(dash.f.queuedOnly)drawDashList(d);if(dash.tab==='sheet')drawSheet(d)}
     else if(a==='up'||a==='down'){const i=dash.queue.indexOf(String(id)),j=a==='up'?i-1:i+1;if(i>=0&&j>=0&&j<dash.queue.length){[dash.queue[i],dash.queue[j]]=[dash.queue[j],dash.queue[i]];dashQueueChanged();drawDashBody(d,true)}}
     else if(a==='rm'){dash.queue=dash.queue.filter(x=>x!==String(id));dashQueueChanged();drawDashBody(d,true)}
-    else if(a==='clearTaken'){dash.queue=dash.queue.filter(x=>{const m=dashMon(x);return m&&!m.drafted});dashQueueChanged();drawDashBody(d,true)}
+    else if(a==='dismissPrune'){dash.pruneNote='';drawDashBody(d,true)}
+    else if(a==='sheetView'){dash.sheet.view=b.dataset.view;drawSheet(d)}
+    else if(a==='sheetSort'){const c=b.dataset.col;if(dash.sheet.sort===c)dash.sheet.dir=dash.sheet.dir==='asc'?'desc':'asc';else{dash.sheet.sort=c;dash.sheet.dir=(c==='name'||c==='row'||c==='type')?'asc':'desc'}drawSheet(d)}
   });
   root.addEventListener('input',e=>{
     const id=e.target.id,d=state.settings.draft;
-    if(id==='dashQ'){clearTimeout(dashSearchT);dashSearchT=setTimeout(()=>{dash.f.q=e.target.value;dash.limit=60;drawDashList(d)},150)}
+    if(id==='sheetQ'){clearTimeout(dashSearchT);dashSearchT=setTimeout(()=>{dash.sheet.q=e.target.value;drawSheet(d,true)},120)}
+    else if(id==='dashQ'){clearTimeout(dashSearchT);dashSearchT=setTimeout(()=>{dash.f.q=e.target.value;dash.limit=60;drawDashList(d)},150)}
     else if(id==='dashMin'||id==='dashMax'){dash.f[id==='dashMin'?'minPts':'maxPts']=e.target.value;dash.limit=60;drawDashList(d)}
     else if(id==='dashStatMin'||id==='dashStatMax'){dash.f[id==='dashStatMin'?'statMin':'statMax']=e.target.value;if(e.target.value&&!dash.f.stat){dash.f.stat='atk';const stat=$('dashStat');if(stat)stat.value='atk'}dash.limit=60;drawDashList(d)}
     else if(id==='dashAbility'){dash.f.ability=e.target.value;dash.limit=60;drawDashList(d)}
@@ -787,16 +857,68 @@ function bindDash(){
     else if(id==='dashAff'){dash.f.affordable=e.target.checked;dash.limit=60;drawDashList(d)}
     else if(id==='dashDr'){dash.f.showDrafted=e.target.checked;dash.limit=60;drawDashList(d)}
     else if(id==='dashQo'){dash.f.queuedOnly=e.target.checked;dash.limit=60;drawDashList(d)}
+    else if(id==='sheetHide'){dash.sheet.hideDrafted=e.target.checked;drawSheet(d)}
   });
+  bindQueueDrag();
+}
+/* ---- Spreadsheet mode (CP4.63): the uploaded Free Agency workbook as a grid, or a sortable stats table ---- */
+const teamTint=team=>{try{return (team&&SBL.teamColors?.styleAttr?.(state.settings,team))||''}catch(_){return ''}};
+function sheetMatch(m,q){return !q||String(m.name).toLowerCase().includes(q)||(m.types||[]).some(x=>String(x).toLowerCase().includes(q))}
+function sheetDisplay(m){return SBL.pokemon.displayNameWithForm?.(m.name)||m.name}
+function sheetGrid(d,q){
+  const sh=dash.sheet,pool=(d.pool||[]).filter(m=>!(sh.hideDrafted&&m.drafted));
+  const isM=m=>DD().isMegaMon(m),all=d.pool||[];
+  const cols=[...new Set(pool.filter(m=>!isM(m)).map(m=>Number(m.points)||0))].sort((a,b)=>b-a).map(p=>({label:p+(p===1?' POINT':' POINTS'),list:pool.filter(m=>!isM(m)&&(Number(m.points)||0)===p),total:all.filter(m=>!isM(m)&&(Number(m.points)||0)===p)}));
+  const megas=pool.filter(isM);if(megas.length)cols.push({label:'MEGAS',list:megas,total:all.filter(isM),mega:true});
+  if(!cols.length)return '<div class="note dash-empty">Nothing to show.</div>';
+  const rows=Math.max(...cols.map(c=>c.list.length));
+  const cell=(m,mega)=>{
+    if(!m)return '<td class="sheet-cell empty"></td>';
+    const dr=!!m.drafted,qd=dash.queue.includes(String(m.id)),bst=DD().statValue(m,'bst');
+    const types=(m.types||[]).map(x=>`<i class="sheet-ty type-${esc(String(x).toLowerCase())}" title="${esc(x)}"></i>`).join('');
+    const title=`${m.name} \u00b7 ${Number(m.points)||0} pts${bst!=null?' \u00b7 BST '+bst:''}${dr?' \u00b7 Drafted'+(m.draftedBy?' by '+m.draftedBy:''):''}`;
+    return `<td class="sheet-cell${dr?' dr':''}${qd?' q':''}${sheetMatch(m,q)?'':' dim'}"${dr?'':` data-act="q" data-id="${esc(m.id)}"`}${dr?teamTint(m.draftedBy):''} title="${esc(title)}"><span class="sheet-name">${esc(sheetDisplay(m))}</span>${mega?`<em>${Number(m.points)||0}</em>`:''}<span class="sheet-types">${types}</span>${dr&&m.draftedBy?`<small>${esc(m.draftedBy)}</small>`:''}${qd?'<b class="sheet-star" aria-label="In your queue">\u2605</b>':''}</td>`;
+  };
+  let body='';for(let r=0;r<rows;r++)body+=`<tr><th class="sheet-rn" scope="row">${r+1}</th>${cols.map(c=>cell(c.list[r],c.mega)).join('')}</tr>`;
+  return `<div class="sheet-scroll"><table class="sheet-grid"><thead><tr><th class="sheet-corner"></th>${cols.map(c=>`<th scope="col">${esc(c.label)}<small>${c.total.filter(m=>!m.drafted).length} of ${c.total.length} left</small></th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function sheetTable(d,q){
+  const sh=dash.sheet,t=myTeam();
+  const pool=(d.pool||[]).map((m,i)=>({m,i})).filter(({m})=>!(sh.hideDrafted&&m.drafted)&&sheetMatch(m,q));
+  const sv=(m,k)=>DD().statValue(m,k);
+  const keyFn={row:x=>x.i,pts:x=>Number(x.m.points)||0,name:x=>String(x.m.name).toLowerCase(),type:x=>String((x.m.types||[])[0]||'~').toLowerCase(),hp:x=>sv(x.m,'hp')??-1,atk:x=>sv(x.m,'atk')??-1,def:x=>sv(x.m,'def')??-1,spa:x=>sv(x.m,'spa')??-1,spd:x=>sv(x.m,'spd')??-1,spe:x=>sv(x.m,'spe')??-1,bst:x=>sv(x.m,'bst')??-1,status:x=>x.m.drafted?1:0}[sh.sort]||(x=>x.i);
+  const dir=sh.dir==='desc'?-1:1;
+  pool.sort((a,b)=>{const A=keyFn(a),B=keyFn(b);return (A>B?1:A<B?-1:0)*dir||a.i-b.i});
+  const head=[['row','#'],['pts','Pts'],['name','Pok\u00e9mon'],['type','Type'],['hp','HP'],['atk','Atk'],['def','Def'],['spa','SpA'],['spd','SpD'],['spe','Spe'],['bst','BST'],['status','Status']];
+  const th=head.map(([k,l])=>`<th scope="col" class="${sh.sort===k?'sorted':''}"><button type="button" data-act="sheetSort" data-col="${k}">${l}${sh.sort===k?(sh.dir==='asc'?' \u25B2':' \u25BC'):''}</button></th>`).join('')+'<th scope="col">Abilities</th>';
+  const rows=pool.map(({m,i})=>{
+    const dr=!!m.drafted,qd=dash.queue.includes(String(m.id)),aff=!dr&&t?DD().canAfford(d,t,m):true;
+    const nums=['hp','atk','def','spa','spd','spe','bst'].map(k=>`<td class="num${k==='bst'?' bst':''}">${sv(m,k)??'\u2014'}</td>`).join('');
+    const status=dr?`Drafted${m.draftedBy?' \u00b7 '+esc(m.draftedBy):''}`:(!aff?esc(dashBlockLabel(d,t,m)):'Available');
+    return `<tr class="${dr?'dr':''}${!dr&&!aff?' na':''}${qd?' q':''}"${dr?teamTint(m.draftedBy):''}><td class="num rn">${i+1}</td><td class="num">${Number(m.points)||0}</td><td class="nm">${dr?'':`<button type="button" class="sheet-q${qd?' on':''}" data-act="q" data-id="${esc(m.id)}" aria-label="${qd?'Remove from queue':'Add to queue'}">${qd?'\u2605':'\u2606'}</button>`}${dashSprite(m.name)}<span>${esc(sheetDisplay(m))}</span>${DD().isMegaMon(m)?'<em class="sheet-mega">Mega</em>':''}</td><td>${dashTypes(m)}</td>${nums}<td>${status}</td><td class="ab">${(m.abilities||[]).map(esc).join(', ')}</td></tr>`;
+  }).join('');
+  return `<div class="sheet-scroll"><table class="sheet-table"><thead><tr>${th}</tr></thead><tbody>${rows||'<tr><td colspan="13" class="note">Nothing matches.</td></tr>'}</tbody></table></div>`;
+}
+function drawSheet(d){
+  const body=$('dashBody');if(!body)return;const sh=dash.sheet;
+  if(!$('sheetRoot'))body.innerHTML=`<div id="sheetRoot" class="sheet-wrap"><div class="sheet-bar"><div class="sheet-views" role="group" aria-label="Spreadsheet view"><button type="button" data-act="sheetView" data-view="grid">Workbook grid</button><button type="button" data-act="sheetView" data-view="table">Stats table</button></div><input type="search" id="sheetQ" placeholder="Search name or type\u2026" autocomplete="off" aria-label="Search the spreadsheet"><label class="sheet-check"><input type="checkbox" id="sheetHide"> Hide drafted</label><span class="sheet-legend"><i class="lg avail"></i>Available <i class="lg queued"></i>Queued <i class="lg taken"></i>Drafted</span></div><div id="sheetBody"></div></div>`;
+  const qIn=$('sheetQ');if(qIn&&document.activeElement!==qIn)qIn.value=sh.q;
+  const hide=$('sheetHide');if(hide)hide.checked=!!sh.hideDrafted;
+  document.querySelectorAll('[data-act="sheetView"]').forEach(b=>b.classList.toggle('on',b.dataset.view===sh.view));
+  const host=$('sheetBody'),prev=host.querySelector('.sheet-scroll'),sx=prev?prev.scrollLeft:0,sy=prev?prev.scrollTop:0;
+  const q=String(sh.q||'').trim().toLowerCase();
+  host.innerHTML=sh.view==='table'?sheetTable(d,q):sheetGrid(d,q);
+  const now=host.querySelector('.sheet-scroll');if(now){now.scrollLeft=sx;now.scrollTop=sy}
 }
 function renderDashboard(d){
   document.body.classList.add('draft-user-dashboard');
   dashStyles();
   if(!dash.tabChosen&&d.lottery&&d.lottery.status==='drawn'&&d.lottery.result&&d.lottery.result.length)dash.tab='lottery';
   const host=$('cmdBody')||content;
-  if(!dash.queueLoaded){dash.queueLoaded=true;SBL.draft.queue.load().then(q=>{dash.queue=q;if($('dashRoot')){drawDashTabs();if(dash.tab!=='pool')drawDashBody(state.settings.draft,true);else drawDashList(state.settings.draft)}}).catch(()=>{})}
+  if(!dash.queueLoaded){dash.queueLoaded=true;SBL.draft.queue.load().then(q=>{dash.queue=q;dash.queueReady=true;pruneTakenQueue(state.settings.draft);if($('dashRoot')){drawDashTabs();if(dash.tab!=='pool')drawDashBody(state.settings.draft,true);else drawDashList(state.settings.draft)}}).catch(()=>{})}
   if(!$('dashRoot')){host.innerHTML='<div id="dashRoot" class="dash"><div id="dashHead"></div><div class="dash-tabs" id="dashTabs"></div><div id="dashBody"></div></div>';bindDash();drawDashHead(d);drawDashTabs();drawDashBody(d,true);return}
   /* Live update: refresh numbers and lists in place so typing/scrolling is never lost. */
+  pruneTakenQueue(d);
   drawDashHead(d);drawDashTabs();
   if(dash.tab==='pool')drawDashList(d);else drawDashBody(d,true);
 }

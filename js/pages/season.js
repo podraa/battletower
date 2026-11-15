@@ -2,6 +2,7 @@
   const SHARED = true; // league data shared with anyone viewing this dashboard (cloud mode only)
   let STATE = { replays:{}, teamMap:{}, settings:{ caseInsensitiveNames:true, teamLogos:{}, bannerMode:'top', bannerTeam:'', rosters:{}, conferences:{} } };
   let PUBLISHED_ROSTERS = {};
+  let SEASON_OWNER_MAP = {};
   let loaded = false;
 
   // ---------- shared Supabase storage ----------
@@ -80,6 +81,8 @@
       }
       STATE.settings.rosters = PUBLISHED_ROSTERS;
       STATE.settings.teamLogos = STATE.settings.teamLogos || {};
+      await loadSeasonOwnerMap();
+      if(seq !== loadSeq) return;
       const bp=JSON.parse(localStorage.getItem('sbl-banner-preferences')||'null'); if(bp){ STATE.settings.bannerMode=bp.bannerMode||STATE.settings.bannerMode; STATE.settings.bannerTeam=bp.bannerTeam||STATE.settings.bannerTeam; }
       loaded = true;
     }catch(e){
@@ -232,6 +235,45 @@
     const key = (username||'').trim().toLowerCase();
     return STATE.teamMap[key] || (username||'').trim() || 'Unknown';
   }
+
+  // ---- CP4.63: team colours, owner usernames and the roster pop-out ----
+  let _stSrc=null,_stMap=null;
+  function speciesKeyOf(n){ let v=String(n||''); try{ v=SBL.pokemon.displayNameWithForm?.(v)||v; }catch(_){} return v.trim().toLowerCase(); }
+  function speciesTeamMap(){
+    const r=(STATE.settings&&STATE.settings.rosters)||{};
+    if(_stSrc===r&&_stMap) return _stMap;
+    const m=new Map();
+    for(const [team,list] of Object.entries(r)) for(const e of (Array.isArray(list)?list:[])){ const n=typeof e==='string'?e:(e&&e.name); if(n) m.set(speciesKeyOf(n),team); }
+    _stSrc=r; _stMap=m; return m;
+  }
+  // Pokemon stats/Golden Fist rows take the colour of the team that rosters the Pokemon.
+  function teamTintForSpecies(species){ const t=speciesTeamMap().get(speciesKeyOf(species)); return t?SBL.teamColors.styleAttr(STATE.settings,t):''; }
+  function teamTintForTeam(team){ return SBL.teamColors.styleAttr(STATE.settings,team); }
+  // Fixtures show the owner's username (falling back to the franchise name) and open the roster pop-out.
+  function seasonOwnerLabel(team){
+    const k=String(team||'').trim().toLowerCase();
+    const names=Object.entries(SEASON_OWNER_MAP||{}).filter(([,franchise])=>String(franchise||'').trim().toLowerCase()===k).map(([username])=>username).sort((a,b)=>a.localeCompare(b));
+    return names.join(' / ') || SBL.teamColors.ownerLabel(STATE.teamMap,team) || '';
+  }
+  async function loadSeasonOwnerMap(){
+    const leagueId=SBL.leagueDb?.selectedLeagueId?.();
+    if(!leagueId||!SBL.franchiseOwnership?.listActiveMemberFranchises||!SBL.profiles?.list) return;
+    try{
+      const assignments=await SBL.franchiseOwnership.listActiveMemberFranchises(leagueId,supabase);
+      const ids=[...new Set((assignments||[]).map(row=>String(row.userId||'')).filter(Boolean))];
+      const profiles=await SBL.profiles.list({userIds:ids,fields:'id,username'},supabase);
+      const usernames=new Map((profiles||[]).map(profile=>[String(profile.id),String(profile.username||'').trim()]));
+      const next={};
+      (assignments||[]).forEach(row=>{const username=usernames.get(String(row.userId||''));if(username&&row.franchise?.name)next[username]=row.franchise.name;});
+      SEASON_OWNER_MAP=next;
+    }catch(error){console.warn('Could not load authoritative Season owner usernames:',error);}
+  }
+  function fixtureTeamText(team){ return seasonOwnerLabel(team) || String(team||''); }
+  function fixtureTeam(team){
+    const esc=SBL.pokemon.escapeHtml, owner=seasonOwnerLabel(team);
+    return `<span class="team-link" role="button" tabindex="0" data-team-popup="${esc(team)}" title="${esc(owner?('Franchise: '+team+' \u2014 click for roster'):'Click for roster')}">${esc(owner||team)}</span>`;
+  }
+  SBL.teamPopup.bind(document,()=>({settings:STATE.settings,teamMap:STATE.teamMap,rosters:STATE.settings.rosters||{}}));
   // groups values that only differ by case/whitespace under one canonical label
   // (the first-seen casing) when "case-insensitive names" is on in Settings —
   // this is what keeps e.g. "Team Fire" and "team fire" from splitting into
@@ -1379,7 +1421,7 @@
       const stats = globalPokemonStats(sel.value).slice().sort((a,b)=>(Number(b[key])||0)-(Number(a[key])||0)||Number(b.kills||0)-Number(a.kills||0));
       document.getElementById('globalTable').innerHTML = stats.length===0 ? `<div class="empty-state">No data for this scope yet.</div>` :
         `<table><thead><tr><th class="rank">#</th><th>Pokémon</th><th class="num">${label}</th><th class="num">Total</th><th class="num">Direct</th><th class="num">Indirect</th><th class="num">Kills</th><th class="num">Deaths</th><th class="num">Games</th></tr></thead><tbody>
-        ${stats.map((s,i)=>`<tr><td class="rank">${i+1}</td><td class="pname"><div class="pname-cell">${pokemonName(s.species,true,'sprite-xl')}</div></td><td class="num dealt"><strong>${(Number(s[key])||0).toFixed(1)}</strong></td><td class="num">${(Number(s.dealt)||0).toFixed(1)}</td><td class="num">${(Number(s.directDamage)||0).toFixed(1)}</td><td class="num">${(Number(s.indirectDamage)||0).toFixed(1)}</td><td ${auditAttr(s.species,'kills',s.killLog)}>${s.kills}</td><td ${auditAttr(s.species,'deaths',s.deathLog)}>${s.deaths}</td><td class="num">${s.games}</td></tr>`).join('')}</tbody></table>`;
+        ${stats.map((s,i)=>`<tr${teamTintForSpecies(s.species)}><td class="rank">${i+1}</td><td class="pname"><div class="pname-cell">${pokemonName(s.species,true,'sprite-xl')}</div></td><td class="num dealt"><strong>${(Number(s[key])||0).toFixed(1)}</strong></td><td class="num">${(Number(s.dealt)||0).toFixed(1)}</td><td class="num">${(Number(s.directDamage)||0).toFixed(1)}</td><td class="num">${(Number(s.indirectDamage)||0).toFixed(1)}</td><td ${auditAttr(s.species,'kills',s.killLog)}>${s.kills}</td><td ${auditAttr(s.species,'deaths',s.deathLog)}>${s.deaths}</td><td class="num">${s.games}</td></tr>`).join('')}</tbody></table>`;
     }
     sel.addEventListener('change', drawGlobal);
     damageType.addEventListener('change', drawGlobal);
@@ -1943,6 +1985,7 @@
       const ca = conferenceOf(m.home), cb = conferenceOf(m.away);
       return !(ca && cb && ca !== cb);
     });
+    const orderedMatches = [...regularMatches, ...interMatches];
     const matchCount = rounds.reduce((sum,r)=>sum+(r.matches?r.matches.length:0),0);
     return `<div class="panel">
       ${readContextNote}
@@ -1956,37 +1999,22 @@
       <div class="fixture-weeks">
         <div class="fixture-week">
           <div class="fixture-week-title">${SBL.pokemon.escapeHtml(activeRound.week||'')}</div>
-          <div class="fixture-matches">
-            ${regularMatches.length ? regularMatches.map(m=>{
+          <div class="fixture-matches${orderedMatches.length % 2 ? ' fixture-matches-odd' : ''}">
+            ${orderedMatches.length ? orderedMatches.map(m=>{
+              const isInter=interMatches.includes(m);
               const res = findFixtureResult(activeRound.week, m.home, m.away);
               const homeWin = res.played && res.winner && groupKey(res.winner)===groupKey(m.home);
               const awayWin = res.played && res.winner && groupKey(res.winner)===groupKey(m.away);
               const scoreline = res.played ? (res.winner ? `${res.winnerScore}\u2013${res.loserScore}` : `${res.homeScore}\u2013${res.awayScore}`) : '';
-              const statusText = res.played ? (res.winner ? `${SBL.pokemon.escapeHtml(res.winner)} won ${scoreline}` : `Played ${scoreline}`) : 'Not played yet';
-              return `<div class="fixture-match ${res.played?'fixture-played':''}">
-                <div class="fixture-team ${homeWin?'fixture-winner':''}">${SBL.pokemon.escapeHtml(m.home)}</div>
+              const statusText = res.played ? (res.winner ? `${SBL.pokemon.escapeHtml(fixtureTeamText(res.winner))} won ${scoreline}` : `Played ${scoreline}`) : 'Not played yet';
+              return `<div class="fixture-match ${isInter?'fixture-inter':''} ${res.played?'fixture-played':''}">
+                <div class="fixture-team ${homeWin?'fixture-winner':''}"${teamTintForTeam(m.home)}>${fixtureTeam(m.home)}</div>
                 <div class="fixture-vs"${res.played?` data-score="${SBL.pokemon.escapeHtml(res.winner ? `${res.winnerScore}–${res.loserScore}` : `${res.homeScore}–${res.awayScore}`)}"`:''}>${res.played?'':'VS'}</div>
-                <div class="fixture-team ${awayWin?'fixture-winner':''}">${SBL.pokemon.escapeHtml(m.away)}</div>
-                <div class="fixture-status">${statusText}</div>
+                <div class="fixture-team ${awayWin?'fixture-winner':''}"${teamTintForTeam(m.away)}>${fixtureTeam(m.away)}</div>
+                <div class="fixture-status">${isInter?'<span class="fixture-inter-tag">INTER-CONFERENCE</span>':''}${statusText}</div>
               </div>`;
-            }).join('') : '<div class="conference-empty">No conference matches this week.</div>'}
+            }).join('') : '<div class="conference-empty">No games scheduled this week.</div>'}
           </div>
-          ${interMatches.length ? `<div class="fixture-inter-section">
-            <div class="fixture-inter-label">INTER-CONFERENCE</div>
-            ${interMatches.map(m=>{
-              const res = findFixtureResult(activeRound.week, m.home, m.away);
-              const homeWin = res.played && res.winner && groupKey(res.winner)===groupKey(m.home);
-              const awayWin = res.played && res.winner && groupKey(res.winner)===groupKey(m.away);
-              const scoreline = res.played ? (res.winner ? `${res.winnerScore}\u2013${res.loserScore}` : `${res.homeScore}\u2013${res.awayScore}`) : '';
-              const statusText = res.played ? (res.winner ? `${SBL.pokemon.escapeHtml(res.winner)} won ${scoreline}` : `Played ${scoreline}`) : 'Not played yet';
-              return `<div class="fixture-match fixture-inter ${res.played?'fixture-played':''}">
-                <div class="fixture-team ${homeWin?'fixture-winner':''}">${SBL.pokemon.escapeHtml(m.home)}</div>
-                <div class="fixture-vs"${res.played?` data-score="${SBL.pokemon.escapeHtml(res.winner ? `${res.winnerScore}–${res.loserScore}` : `${res.homeScore}–${res.awayScore}`)}"`:''}>${res.played?'':'VS'}</div>
-                <div class="fixture-team ${awayWin?'fixture-winner':''}">${SBL.pokemon.escapeHtml(m.away)}</div>
-                <div class="fixture-status">${statusText}</div>
-              </div>`;
-            }).join('')}
-          </div>` : ''}
         </div>
       </div>
     </div>`;
@@ -2011,16 +2039,18 @@
         </div>
         ${list.length ? `<div class="standings-ladder">${list.map((x,i)=>{
           const pct=x.games ? (100*x.wins/x.games).toFixed(1)+'%' : '—';
+          const ownerLabel=seasonOwnerLabel(x.team) || x.team;
+          const teamStyle=teamTintForTeam(x.team);
           const diff=Number(x.diff||0);
           const finalsBound = isConference && i<6;
           const form = teamRecentForm(x.team,4);
           const formHtml = form.length ? `<div class="standings-form">${form.map(f=>`<span class="form-pip ${f.win?'win':'loss'}">${f.win?'W':'L'}</span>`).join('')}</div>` : '';
           const status = isConference ? qualificationStatus(x.team) : null;
           const statusChip = status ? `<span class="status-chip ${status.cls}">${SBL.pokemon.escapeHtml(status.label)}</span>` : '';
-          return `<div class="standings-row standings-clickable ${i===0?'top1':i===1?'top2':''} ${finalsBound?'finals-bound':''}" data-standings-team="${SBL.pokemon.escapeHtml(x.team)}" role="button" tabindex="0" title="View ${SBL.pokemon.escapeHtml(x.team)}'s route to qualification">
+          return `<div class="standings-row standings-clickable ${teamStyle?'has-team-color':''} ${i===0?'top1':i===1?'top2':''} ${finalsBound?'finals-bound':''}"${teamStyle} data-standings-team="${SBL.pokemon.escapeHtml(x.team)}" role="button" tabindex="0" title="View ${SBL.pokemon.escapeHtml(x.team)}'s route to qualification">
             <div class="standings-rank">${i+1}</div>
             <div class="standings-team">
-              <div class="standings-team-name">${SBL.pokemon.escapeHtml(x.team)}${finalsBound?'<span class="finals-chip">Finals</span>':''}${statusChip}</div>
+              <div class="standings-team-name">${SBL.pokemon.escapeHtml(ownerLabel)}${finalsBound?'<span class="finals-chip">Finals</span>':''}${statusChip}</div>
               <div class="standings-record">${x.wins}-${x.losses} record · ${x.games} game${x.games===1?'':'s'}</div>
               ${formHtml}
             </div>
@@ -2169,7 +2199,7 @@
       if(stats.length === 0){ el.innerHTML = `<div class="empty-state">No data for this scope yet.</div>`; return; }
       const medals = ['🥇','🥈','🥉'];
       el.innerHTML = `<div class="gf-list">${stats.map((s,i)=>`
-        <div class="gf-row ${i<3?'top'+(i+1):''}">
+        <div class="gf-row ${i<3?'top'+(i+1):''}"${teamTintForSpecies(s.species)}>
           <div class="gf-rank">${medals[i] || (i+1)}</div>
           ${SBL.pokemon.spriteMarkup(s.species,'gf-sprite')}
           <div class="gf-info">
@@ -2247,7 +2277,7 @@
           <td class="num">${s.appearances}</td>
         </tr>`).join('');
       cards.innerHTML=`
-        <section class="franchise-card panel">
+        <section class="franchise-card panel"${teamTintForTeam(info.name)}>
           <div class="franchise-card-head">
             <div>
               <div class="franchise-title">${SBL.pokemon.escapeHtml(info.name)}</div>

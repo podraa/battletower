@@ -2,6 +2,10 @@
   const SHARED = true; // league data shared with anyone viewing this dashboard (cloud mode only)
   let STATE = { replays:{}, teamMap:{}, settings:{ caseInsensitiveNames:true } };
   let loaded = false;
+  // Exact league/season captured from the normalized snapshot loaded by this
+  // Admin page. Persistence uses this snapshot as a guarded fallback if the
+  // browser's selection key is temporarily unavailable during workbook import.
+  let ADMIN_PERSISTENCE_CONTEXT = null;
 
   // ---------- shared Supabase storage ----------
   // Admin and public dashboard use the same shared Supabase database.
@@ -129,7 +133,11 @@
      try{
        const {data, error} = await SBL.replays.load(supabase);
        if(error) throw error;
-       const {sharedState, replays} = SBL.replays.partition(data);
+       const {sharedState, replays, normalizedSeason} = SBL.replays.partition(data);
+       const loadedLeagueId=String(SBL.leagueDb?.selectedLeagueId?.() || '').trim();
+       ADMIN_PERSISTENCE_CONTEXT=(loadedLeagueId&&normalizedSeason?.id)
+         ? {leagueId:loadedLeagueId,seasonId:String(normalizedSeason.id)}
+         : null;
        STATE.replays = replays || {};
        STATE.teamMap = sharedState?.teamMap || {};
        STATE.settings = Object.assign(
@@ -181,16 +189,39 @@
      await SBL.replays.deleteIds([id], supabase);
    }
 
+  async function resolveAdminPersistenceContext(options={}){
+    const routeLeague=(()=>{try{return new URLSearchParams(location.search).get('league')||'';}catch(_){return '';}})();
+    const selectedLeague=String(SBL.leagueDb?.selectedLeagueId?.()||'').trim();
+    const cachedLeague=String(ADMIN_PERSISTENCE_CONTEXT?.leagueId||'').trim();
+    const leagueId=String(options.leagueId||routeLeague||selectedLeague||
+      ((!routeLeague&&!selectedLeague)?cachedLeague:'')||'').trim();
+    if(!leagueId||!SBL.leagueDb?.isUuid?.(leagueId)){
+      throw new Error('No valid league context is available. Return to the league selector, choose the league, and reopen Admin.');
+    }
+    let season=null;
+    const routeSeasonId=(()=>{try{return new URLSearchParams(location.search).get('season_id')||'';}catch(_){return '';}})();
+    const explicitSeasonId=String(options.seasonId||routeSeasonId||'').trim();
+    if(explicitSeasonId){
+      // An explicit route/operation target must resolve exactly. Never hide a
+      // stale or cross-league season URL by falling back to the last snapshot.
+      season=await SBL.leagueDb.getSeasonContext(leagueId,supabase,{seasonId:explicitSeasonId});
+    }else{
+      season=await SBL.leagueDb.getSeasonContext(leagueId,supabase);
+      if(!season&&cachedLeague===leagueId&&ADMIN_PERSISTENCE_CONTEXT?.seasonId){
+        season=await SBL.leagueDb.getSeasonContext(leagueId,supabase,{seasonId:ADMIN_PERSISTENCE_CONTEXT.seasonId});
+      }
+    }
+    if(!season?.id) throw new Error('No valid season context is available for this league. Reload Admin and confirm the selected season before publishing.');
+    const context={leagueId,seasonId:String(season.id)};
+    ADMIN_PERSISTENCE_CONTEXT=context;
+    return context;
+  }
+
   async function saveSharedState(options={}){
      requireAdmin();
-     const context={
-       leagueId:String(options.leagueId || SBL.leagueDb?.selectedLeagueId?.() || '').trim(),
-       seasonId:String(options.seasonId || SBL.leagueDb?.selectedSeasonId?.(options.leagueId) || '').trim()
-     };
-     if(!context.leagueId) throw new Error('Select a league before saving shared state.');
-     if(!context.seasonId) throw new Error('Select a season before saving shared state.');
+     const context=await resolveAdminPersistenceContext(options);
      try{
-       await SBL.replays.saveSharedState({teamMap:STATE.teamMap, settings:STATE.settings}, supabase, context);
+       await SBL.replays.saveSharedState({teamMap:STATE.teamMap, settings:STATE.settings}, supabase, {...context,...options});
      }catch(err){
        showAdminError('Could not save changes: ' + (err?.message || err));
        throw err;
@@ -201,7 +232,7 @@
   // roster publishing cannot overwrite replay/team/settings data.
   async function savePublishedRosters(rosters,options={}){
      requireAdmin();
-     const context={leagueId:String(options.leagueId || SBL.leagueDb?.selectedLeagueId?.() || '').trim(),seasonId:String(options.seasonId || SBL.leagueDb?.selectedSeasonId?.(options.leagueId) || '').trim()};
+     const context=await resolveAdminPersistenceContext(options);
      await SBL.replays.savePublishedRosters(rosters, supabase, context);
    }
   async function saveTeamMap(){ await saveSharedState(); }
@@ -359,6 +390,7 @@ Choose Cancel to keep draft status unchanged.`);
       conferenceNames: STATE.settings.conferenceNames || {a:'Conference A',b:'Conference B'},
       franchiseDefinitions: JSON.parse(JSON.stringify(STATE.settings.franchiseDefinitions || {})),
       franchises: JSON.parse(JSON.stringify(STATE.settings.franchises || {})),
+      teamColors: JSON.parse(JSON.stringify(STATE.settings.teamColors || {})),
       rosters: {},
       draft: defaultDraftState(),
       freeAgency: {mons:[]},
@@ -369,12 +401,11 @@ Choose Cancel to keep draft status unchanged.`);
       activeLeagueId: STATE.settings.activeLeagueId || 'main'
     };
 
-    // IMPORTANT: saveSharedState() resolves/activates the season named in
-    // STATE.settings.activeSeason and updates selectedSeasonId. Replay writes
-    // use selectedSeasonId, so this must happen BEFORE saveReplays(). Otherwise
-    // the empty new-season replay set can be written against the previous
-    // season ID, and subsequent pages load the wrong season's rows.
-    await saveSharedState();
+    // Create and activate a distinct normalized season row before any replay
+    // writes. Ordinary saveSharedState() calls are deliberately non-activating.
+    const newSeason=await SBL.leagueDb.createSeason(rolloverLeagueId,newName,{teamMap:STATE.teamMap,settings:STATE.settings,replays:{}},supabase);
+    ADMIN_PERSISTENCE_CONTEXT={leagueId:rolloverLeagueId,seasonId:newSeason.id};
+    await saveSharedState({leagueId:rolloverLeagueId,seasonId:newSeason.id});
     await deleteAllRemote();          // clear only stale replay rows in the newly activated season
     await saveReplays();              // persist the new season's empty live replay set
     await savePublishedRosters({});   // clear the new season's published-roster compatibility row
@@ -418,12 +449,17 @@ Choose Cancel to keep draft status unchanged.`);
     STATE.settings.activeLeagueId = activeLeagueSnapshot;
     STATE.settings.franchiseDefinitions = STATE.settings.franchiseDefinitions || {};
 
-    // Activate the target season first. saveReplays()/upsertRows() assigns
-    // rows using leagueDb.selectedSeasonId(); in the old order, the replay
-    // rows were written while the PREVIOUS season was still selected, and
-    // only the later saveSharedState() switched selectedSeasonId. That left
-    // the restored season with no visible replay rows.
-    await saveSharedState();                       // activates target season and updates selectedSeasonId
+    // Restore the existing normalized season row when present. If this is a
+    // legacy archive without a row, materialise it as a new season. Activation
+    // is explicit; ordinary saves never switch the active season.
+    const restoredName=archive.name||key;
+    const normalizedSeasons=await SBL.leagueDb.listSeasons(rolloverLeagueId,supabase);
+    let restoredSeason=normalizedSeasons.find(row=>String(row.season_key)===seasonKey(restoredName));
+    const restoredPayload={teamMap:STATE.teamMap,settings:STATE.settings,replays:STATE.replays};
+    if(restoredSeason) restoredSeason=await SBL.leagueDb.activateSeason(rolloverLeagueId,restoredSeason.id,restoredPayload,supabase);
+    else restoredSeason=await SBL.leagueDb.createSeason(rolloverLeagueId,restoredName,restoredPayload,supabase);
+    ADMIN_PERSISTENCE_CONTEXT={leagueId:rolloverLeagueId,seasonId:restoredSeason.id};
+    await saveSharedState({leagueId:rolloverLeagueId,seasonId:restoredSeason.id});
     await deleteAllRemote();                       // clear stale rows in the target season only
     await saveReplays();                           // write restored replay rows under the target season ID
     await savePublishedRosters(STATE.settings.rosters||{}); // keep restored season's roster copy in sync
@@ -1071,7 +1107,25 @@ Choose Cancel to keep draft status unchanged.`);
   const tabsEl = document.getElementById('tabs');
   const appEl = document.getElementById('app');
   const sidebarToggle = document.getElementById('adminSidebarToggle');
-  let activeTab = 'overview';
+  const ADMIN_LAST_TAB_KEY = 'sbl_admin_last_tab';
+  let activeTab = (() => {
+    try {
+      const saved = sessionStorage.getItem(ADMIN_LAST_TAB_KEY) || '';
+      return saved && tabsEl?.querySelector(`.admin-nav-item[data-tab="${saved}"]`) ? saved : 'overview';
+    } catch (_) { return 'overview'; }
+  })();
+  tabsEl?.querySelectorAll('.admin-nav-item').forEach(button => {
+    button.classList.toggle('active', button.dataset.tab === activeTab);
+  });
+  document.getElementById('adminRefreshButton')?.addEventListener('click', event => {
+    const button = event.currentTarget;
+    try { sessionStorage.setItem(ADMIN_LAST_TAB_KEY, activeTab); } catch (_) {}
+    button.disabled = true;
+    button.innerHTML = '<span aria-hidden="true">↻</span> Refreshing…';
+    // A full reload deliberately re-fetches the selected league/season and
+    // the active workspace. Query parameters are preserved by the browser.
+    window.location.reload();
+  });
 
   // Sidebar collapse is a local UI preference; it never touches league data.
   const SIDEBAR_KEY = 'sbl_admin_sidebar_collapsed';
@@ -1128,6 +1182,7 @@ Choose Cancel to keep draft status unchanged.`);
     const item = e.target.closest('.admin-nav-item');
     if(!item) return;
     activeTab = item.dataset.tab;
+    try { sessionStorage.setItem(ADMIN_LAST_TAB_KEY, activeTab); } catch (_) {}
     tabsEl.querySelectorAll('.admin-nav-item').forEach(b=>b.classList.toggle('active', b.dataset.tab===activeTab));
     const group = item.closest('.admin-nav-group');
     openNavGroup = group?.dataset.navGroup || openNavGroup;
@@ -2017,9 +2072,9 @@ Choose Cancel to keep draft status unchanged.`);
   }
 
   async function publishRosters(rosters){
-    const context={leagueId:String(SBL.leagueDb?.selectedLeagueId?.()||'').trim(),seasonId:String(SBL.leagueDb?.selectedSeasonId?.()||'').trim()};
-    if(!context.leagueId) throw new Error('No league is selected. Return to the league selector, choose the league, then reopen roster publishing.');
-    if(!context.seasonId) throw new Error('No season is selected for this league. Reload the admin page and confirm the active season before publishing.');
+    // Capture and validate the target once. Both writes use these exact IDs,
+    // even if browser selection state changes while the workbook preview is open.
+    const context=await resolveAdminPersistenceContext();
     const normalized = normalizeStoredRosters(rosters);
     if(!Object.keys(normalized).length) throw new Error('No rosters to publish.');
 
@@ -2056,7 +2111,7 @@ Choose Cancel to keep draft status unchanged.`);
     // Lottery/draft eligibility is exactly the current active player membership
     // + franchise assignment set. Never use stale saved lottery names or maps.
     if(!ACTIVE_MEMBER_FRANCHISES_LOADED) return [];
-    return [...new Set(ACTIVE_MEMBER_FRANCHISES.map(f=>String(f.name||'').trim()).filter(Boolean))]
+    return [...new Set(ACTIVE_MEMBER_FRANCHISES.filter(f=>!ACTIVE_SEASON_SITOUT_USERS.has(String(f.userId||''))).map(f=>String(f.name||'').trim()).filter(Boolean))]
       .sort((a,b)=>a.localeCompare(b, undefined, {sensitivity:'base'}));
   }
 
@@ -2767,6 +2822,14 @@ function renderDraft(){ return drawDraft(); }
     let d = STATE.settings.draft = normalizeDraftState(STATE.settings.draft);
     const franchises = draftFranchises();
     const editable = d.status === 'setup';
+    if(editable){
+      const eligible=new Set(franchises.map(x=>String(x).trim().toLowerCase()));
+      d.order=(d.order||[]).filter(team=>eligible.has(String(team||'').trim().toLowerCase()));
+      if(d.lottery && typeof d.lottery==='object'){
+        ['proposed','result'].forEach(key=>{if(Array.isArray(d.lottery[key]))d.lottery[key]=d.lottery[key].filter(team=>eligible.has(String(team||'').trim().toLowerCase()));});
+      }
+      DRAFT_ROUND_BUILDER=(DRAFT_ROUND_BUILDER||[]).filter(team=>eligible.has(String(team||'').trim().toLowerCase()));
+    }
     const draftedCount = d.pool.filter(m => m.drafted).length;
 
     contentEl.innerHTML = `
@@ -3556,7 +3619,7 @@ function renderDraft(){ return drawDraft(); }
       contentEl.innerHTML = `
         <div class="panel">
           <div class="section-head-row">
-            <div><h2>Franchise Requests</h2><div class="note">Pending requests for the selected league. Multiple users may request the same franchise; approve one specific request or reject one with a required reason.</div></div>
+            <div><h2>Franchise Requests</h2><div class="note">Pending requests for the selected league. Approving assigns the requested franchise to that member. If they need a different franchise, use People &amp; Franchises to assign it directly. Multiple users may request the same franchise; approve one specific request or reject one with a required reason.</div></div>
             <div class="foot-actions"><button class="ghost" type="button" id="refreshFranchiseRequests">Refresh</button></div>
           </div>
         </div>
@@ -3579,9 +3642,9 @@ function renderDraft(){ return drawDraft(); }
         btn.disabled = true;
         if(statusEl) statusEl.textContent = '';
         try{
-          const {data,error} = await supabase.rpc('sbl_approve_franchise_request',{p_request_id:requestId});
-          if(error) throw error;
-          if(statusEl) statusEl.textContent = `Approved ${requestId}. Refreshing…`;
+          const result = await SBL.franchiseOwnership.commissionerApproveFranchiseRequest(requestId,supabase);
+          if(result?.ok === false) throw new Error(result.message || 'The approval RPC did not confirm success.');
+          if(statusEl) statusEl.textContent = `Approved and assigned the requested franchise. Refreshing…`;
           await renderFranchiseRequests();
         }catch(e){
           if(statusEl){ statusEl.className='note danger'; statusEl.textContent=`Could not approve request: ${e?.message||e}`; }
@@ -3598,9 +3661,9 @@ function renderDraft(){ return drawDraft(); }
         btn.disabled = true;
         if(statusEl){ statusEl.className='note'; statusEl.textContent=''; }
         try{
-          const {data,error} = await supabase.rpc('sbl_reject_franchise_request',{p_request_id:requestId,p_rejection_reason:trimmed});
-          if(error) throw error;
-          if(statusEl) statusEl.textContent = `Rejected ${requestId}. Refreshing…`;
+          const result = await SBL.franchiseOwnership.commissionerRejectFranchiseRequest(requestId,trimmed,supabase);
+          if(result?.ok === false) throw new Error(result.message || 'The rejection RPC did not confirm success.');
+          if(statusEl) statusEl.textContent = `Franchise request rejected. Refreshing…`;
           await renderFranchiseRequests();
         }catch(e){
           if(statusEl){ statusEl.className='note danger'; statusEl.textContent=`Could not reject request: ${e?.message||e}`; }
@@ -4357,7 +4420,7 @@ function renderDraft(){ return drawDraft(); }
       ? 'Edit any autogenerated seed below, then use Regenerate Finals to rebuild the bracket with the new order. You do not need to re-enter all 12 teams.'
       : 'Seeds are autogenerated from the top 6 in each conference using the Finals seeding rules. You can edit any seed before generating the bracket.';
 
-    return `<div class="panel"><h2>Finals Mode</h2><div class="note">${seedNote} Seeds 1–4 receive quarterfinal byes. Seeds 5–12 play the single-round play-in: 5v12, 6v11, 7v10, 8v9. After all four play-ins are decided, the lowest-seeded winner plays #1, the next-lowest plays #2, then #3 and #4. Every round runs Monday–Sunday.</div><div class="row finals-admin-start-row"><div><label>Finals start Monday</label><input type="date" id="finalsStartMonday" value="${monday}"></div><button class="primary" id="generateFinalsBtn">${isGenerated?'Regenerate Finals':'Generate Finals'}</button>${isGenerated?`<button class="ghost danger-btn" id="clearFinalsBtn">Clear Finals</button>`:''}</div><div id="finalsAdminStatus" class="note"></div><div class="finals-seed-editor"><div class="finals-seed-editor-head"><div><h3 class="finals-admin-round-head">Finals Seeds</h3><div class="note">${currentSeedCount}/12 seeds selected. Pick each team once.</div></div><span class="badge">${isGenerated?'Editable bracket seeds':'Auto-generated seeds'}</span></div>${seedEditor}</div>${isGenerated?`<div class="finals-admin-results-head"><div><h3 class="finals-admin-round-head">Finals Results</h3><div class="note finals-admin-results-note">Enter scores in the matchup popup or choose the winner directly here. Winner selection is admin-only; saving resolves the bracket immediately.</div></div><button class="primary" id="saveFinalsResultsBtn">Save Results</button></div><div id="finalsResultsStatus" class="note"></div>${matchRows}${finals.champion?`<div class="panel finals-admin-champion"><strong>Champion:</strong> ${SBL.pokemon.escapeHtml(finals.champion)}</div>`:''}`:''}</div>`;
+    return `<div class="panel" id="finalsAdminPanel"><h2>Finals Mode</h2><div class="note">${seedNote} Seeds 1–4 receive quarterfinal byes. Seeds 5–12 play the single-round play-in: 5v12, 6v11, 7v10, 8v9. After all four play-ins are decided, the lowest-seeded winner plays #1, the next-lowest plays #2, then #3 and #4. Every round runs Monday–Sunday.</div><div class="row finals-admin-start-row"><div><label>Finals start Monday</label><input type="date" id="finalsStartMonday" value="${monday}"></div><button class="primary" id="generateFinalsBtn">${isGenerated?'Regenerate Finals':'Generate Finals'}</button>${isGenerated?`<button class="ghost danger-btn" id="clearFinalsBtn">Clear Finals</button>`:''}</div><div id="finalsAdminStatus" class="note"></div><div class="finals-seed-editor"><div class="finals-seed-editor-head"><div><h3 class="finals-admin-round-head">Finals Seeds</h3><div class="note">${currentSeedCount}/12 seeds selected. Pick each team once.</div></div><span class="badge">${isGenerated?'Editable bracket seeds':'Auto-generated seeds'}</span></div>${seedEditor}</div>${isGenerated?`<div class="finals-admin-results-head"><div><h3 class="finals-admin-round-head">Finals Results</h3><div class="note finals-admin-results-note">Enter scores in the matchup popup or choose the winner directly here. Winner selection is admin-only; saving resolves the bracket immediately.</div></div><button class="primary" id="saveFinalsResultsBtn">Save Results</button></div><div id="finalsResultsStatus" class="note"></div>${matchRows}${finals.champion?`<div class="panel finals-admin-champion"><strong>Champion:</strong> ${SBL.pokemon.escapeHtml(finals.champion)}</div>`:''}`:''}</div>`;
   }
 
   // Active franchise choices are derived from active league members and their
@@ -4450,9 +4513,17 @@ function renderDraft(){ return drawDraft(); }
 
   function fixtureRules(){
     const r = STATE.settings.fixtureRules || {};
+    const storedGames = Number(r.gamesPerWeek);
+    // CP4.63 originally defaulted this setting to 8. Upgrade that legacy
+    // default once to 9; version 2 preserves an administrator's explicit choice.
+    const gamesPerWeek = Number(r.version || 1) < 2 && storedGames === 8
+      ? 9
+      : Math.max(1, Math.min(30, Number.isFinite(storedGames) && storedGames > 0 ? storedGames : 9));
     return {
+      version: 2,
       interConferencePerWeek: Math.max(0, Math.min(10, Number.isFinite(Number(r.interConferencePerWeek)) ? Number(r.interConferencePerWeek) : 1)),
-      maxGamesPerTeamPerWeek: Math.max(1, Math.min(2, Number.isFinite(Number(r.maxGamesPerTeamPerWeek)) ? Number(r.maxGamesPerTeamPerWeek) : 1))
+      maxGamesPerTeamPerWeek: Math.max(1, Math.min(2, Number.isFinite(Number(r.maxGamesPerTeamPerWeek)) ? Number(r.maxGamesPerTeamPerWeek) : 1)),
+      gamesPerWeek
     };
   }
 
@@ -4484,11 +4555,16 @@ function renderDraft(){ return drawDraft(); }
     return out;
   }
 
-  function chooseInterMatches(confA, confB, pairCounts, alreadyPlayed, quota, seed){
+  // alreadyPlayed is week-local. previouslyPlayedInterconference is fixture-wide:
+  // a team that has played one inter-conference game anywhere in the fixture is
+  // ineligible for every later inter-conference game.
+  function chooseInterMatches(confA, confB, pairCounts, alreadyPlayed, quota, seed, previouslyPlayedInterconference){
+    const interPlayed=previouslyPlayedInterconference||new Set();
     const candidates=[];
     for(const a of confA) for(const b of confB){
       const key=pairKey(a,b);
       if(alreadyPlayed.has(a)||alreadyPlayed.has(b)) continue;
+      if(interPlayed.has(a)||interPlayed.has(b)) continue;
       candidates.push({a,b,count:pairCounts[key]||0});
     }
     candidates.sort((x,y)=>x.count-y.count || ((seededOrder([x.a],seed)[0]||'').localeCompare(seededOrder([y.a],seed)[0]||'')) || String(x.b).localeCompare(String(y.b)));
@@ -4515,12 +4591,15 @@ function renderDraft(){ return drawDraft(); }
     const rounds=[];
     const maxGames=rules.maxGamesPerTeamPerWeek;
     const crossQuota=rules.interConferencePerWeek;
+    // Fixture-wide (declared outside the weekly loop and never reset): teams that
+    // have already played their one inter-conference game of this fixture.
+    const previouslyPlayedInterconference=new Set();
 
     for(let w=0; w<weeks; w++){
       const played=new Set();
       const matches=[];
-      const cross=chooseInterMatches(confA,confB,pairCounts,played,crossQuota,w+1);
-      for(const m of cross){ matches.push(m); played.add(m.home); played.add(m.away); pairCounts[pairKey(m.home,m.away)]=(pairCounts[pairKey(m.home,m.away)]||0)+1; }
+      const cross=chooseInterMatches(confA,confB,pairCounts,played,crossQuota,w+1,previouslyPlayedInterconference);
+      for(const m of cross){ matches.push(m); played.add(m.home); played.add(m.away); previouslyPlayedInterconference.add(m.home); previouslyPlayedInterconference.add(m.away); pairCounts[pairKey(m.home,m.away)]=(pairCounts[pairKey(m.home,m.away)]||0)+1; }
 
       // Fill each conference with the maximum number of legal pairings among
       // teams still available. With maxGamesPerTeamPerWeek=1 this guarantees
@@ -4541,6 +4620,19 @@ function renderDraft(){ return drawDraft(); }
           const extra=maximumMatching(group.filter(t=>!played.has(t)),pairCounts,3000+w*19);
           for(const m of extra){ matches.push(m); played.add(m.home); played.add(m.away); pairCounts[pairKey(m.home,m.away)]=(pairCounts[pairKey(m.home,m.away)]||0)+1; }
         }
+      }
+      // Keep the fixture's weekly match count exact. Cross-conference games
+      // are retained; if the week exceeds its configured target, only intra-
+      // conference games are removed. Never silently publish an over/underfull week.
+      const targetGames=Math.max(1,Number(rules.gamesPerWeek)||9);
+      if(matches.length>targetGames){
+        for(let i=matches.length-1;i>=0 && matches.length>targetGames;i--){
+          const m=matches[i];
+          if(conferenceOf(conferenceMap,m.home)===conferenceOf(conferenceMap,m.away)) matches.splice(i,1);
+        }
+      }
+      if(matches.length!==targetGames){
+        throw new Error(`Week ${w+1} can schedule ${matches.length} legal games, but the target is ${targetGames}. Check the conference split and inter-conference limit; the generator will not create an incorrect match total.`);
       }
       rounds.push({week:`Week ${w+1}`,matches});
     }
@@ -4570,6 +4662,8 @@ function renderDraft(){ return drawDraft(); }
     const rounds=fixture?.rounds||[];
     const issues=[];
     const known=new Set(Object.keys(conferenceMap||{}).map(k=>String(k).trim().toLowerCase()));
+    // Fixture-wide: a team may play at most one inter-conference game in total.
+    const interConferenceTeams=new Set();
     rounds.forEach(r=>{
       const used=new Set();
       let cross=0;
@@ -4584,6 +4678,12 @@ function renderDraft(){ return drawDraft(); }
         if(!ca||!cb) issues.push(`${r.week}: ${home} vs ${away} has an unassigned conference.`);
         else if(ca!==cb) cross++;
         if(ca!==cb && cross>rules.interConferencePerWeek) issues.push(`${r.week}: more than ${rules.interConferencePerWeek} inter-conference game${rules.interConferencePerWeek===1?'':'s'}.`);
+        if(ca&&cb&&ca!==cb){
+          for(const [team,key] of [[home,hk],[away,ak]]){
+            if(interConferenceTeams.has(key)) issues.push(`${r.week}: ${team} has already played an inter-conference game earlier in this fixture and cannot play another.`);
+            interConferenceTeams.add(key);
+          }
+        }
         if(!known.has(hk)||!known.has(ak)) issues.push(`${r.week}: ${home} vs ${away} contains a team not in the current franchise mapping.`);
       }
     });
@@ -4936,7 +5036,7 @@ function renderDraft(){ return drawDraft(); }
     const seasonArchives = STATE.settings.seasonArchives || {};
     const archiveEntries = Object.entries(seasonArchives).sort((a,b)=> (b[1].archivedAt||'').localeCompare(a[1].archivedAt||''));
     contentEl.innerHTML = `
-      <div class="panel">
+      <div class="panel" id="seasonOverviewPanel">
         <h2>Season</h2>
         <div class="note">Current season: <strong>${SBL.pokemon.escapeHtml(STATE.settings.activeSeason || DEFAULT_SEASON)}</strong> — ${Object.keys(STATE.replays||{}).length} replay${Object.keys(STATE.replays||{}).length===1?'':'s'} processed.</div>
         <div class="row" style="align-items:end;gap:10px;flex-wrap:wrap;margin-top:12px;"><div style="min-width:220px;flex:1;"><label for="renameSeasonInput">Season display name</label><input id="renameSeasonInput" value="${SBL.pokemon.escapeHtml(STATE.settings.activeSeason || DEFAULT_SEASON)}" maxlength="80"></div><button class="ghost" id="renameSeasonBtn">Save season name</button></div>
@@ -4958,7 +5058,7 @@ function renderDraft(){ return drawDraft(); }
         </div>
       </div>
 
-      <div class="panel">
+      <div class="panel" id="rosterManagementPanel">
         <h2>Roster Management</h2>
         <div class="note">
           Upload the season's rosters from Excel or CSV. The existing roster importer supports the league's
@@ -4979,7 +5079,7 @@ function renderDraft(){ return drawDraft(); }
         <div id="rosterUploadStatus"></div>
         <div id="rosterPreview" style="margin-top:14px;"></div>
       </div>
-      <div class="panel manual-diff-panel">
+      <div class="panel manual-diff-panel" id="standingsPanel">
         <h2>Manual Ladder Differentials</h2>
         <div class="manual-diff-help">Set a franchise's differential at the current played week when the automatic result is wrong. Future fixture results continue from this baseline. Leave blank to use the automatic calculation.</div>
         <div id="manualDifferentialRows" class="manual-diff-grid"></div>
@@ -4990,7 +5090,7 @@ function renderDraft(){ return drawDraft(); }
         </div>
       </div>
 
-      <div class="panel">
+      <div class="panel" id="conferenceSetupPanel">
         <h2>Franchise Conferences</h2>
         <div class="note">Every franchise from the published roster is listed below. Click its conference dropdown to assign it. This setting is stored in Admin only and does not change the roster data.</div>
         <div class="row" style="margin-top:12px; gap:12px; align-items:end;">
@@ -5010,7 +5110,19 @@ function renderDraft(){ return drawDraft(); }
             </div>`).join('') : '<div class="empty-state">No franchise names found in Player → Team name mapping yet. Add mappings below, and each unique team name will appear here.</div>'}
         </div>
       </div>
-      <div class="panel">
+      <div class="panel" id="teamColourPanel">
+        <h2>Team Colours</h2>
+        <div class="note">Choose a colour for each team. It appears as a faint highlight behind that team's Pok\u00e9mon on Stats and Golden Fist, as the background of the team's section on Rosters, and in the roster pop-out and the draft spreadsheet. Colours are saved per season. Teams without a colour are left plain.</div>
+        <div class="team-colour-grid" id="teamColourRows">
+          ${franchises.length ? franchises.map(f=>{ const c=SBL.teamColors.get(STATE.settings,f.name); const n=SBL.pokemon.escapeHtml(f.name); return `<div class="team-colour-row${c?'':' none'}"><span class="team-colour-name">${n}</span><input type="color" data-team-colour="${n}" value="${c||'#888888'}" aria-label="Colour for ${n}"><button type="button" class="ghost small" data-team-colour-clear="${n}">None</button></div>`; }).join('') : '<div class="empty-state">No franchises found yet. Add franchises first, then assign colours here.</div>'}
+        </div>
+        <div class="row" style="margin-top:12px;gap:10px;align-items:center;flex-wrap:wrap;">
+          <button class="ghost" id="autoTeamColours" type="button">Auto-assign missing colours</button>
+          <button class="primary" id="saveTeamColours" type="button">Save colours</button>
+          <span id="teamColourStatus" class="note" role="status"></span>
+        </div>
+      </div>
+      <div class="panel" id="qualificationPanel">
         <h2>Playoffs / Qualification</h2>
         <div class="note">Controls the "Qualification" tab in each franchise's summary popup on the Season page — current standing, the path to the top 6 (who needs to win or lose), and remaining fixtures. Leave this off during the regular season and switch it on once the playoff picture is worth showing, typically toward the end of the season.</div>
         <div class="row" style="margin-top:12px; align-items:center;">
@@ -5030,7 +5142,7 @@ function renderDraft(){ return drawDraft(); }
             ? Math.max(roundRobinWeekCount(fxConfA), roundRobinWeekCount(fxConfB), 1)
             : roundRobinWeekCount(fxTeamNames);
         return '';
-      })()}      <div class="panel">
+      })()}      <div class="panel" id="fixtureSchedulePanel">
         <h2>Fixture / Schedule</h2>
         <div class="note">Generate or upload a round-robin schedule as a private draft first. It only appears on the public Season page after you explicitly publish it.</div>
         <div class="note" style="margin-top:6px;">Assign every franchise to a conference above first — the generator will then schedule each team against the other teams in its own conference, plus at most one inter-conference match per week (the league's actual rule). Uploads are checked against the same rule and flagged if a week ends up with more than one cross-conference game.</div>
@@ -5040,6 +5152,10 @@ function renderDraft(){ return drawDraft(); }
           <div>
             <label>Weeks</label>
             <input type="text" inputmode="numeric" id="fixtureWeeks" value="${window.__suggestedFixtureWeeks || ''}" placeholder="e.g. 11" style="width:90px;">
+          </div>
+          <div>
+            <label>Games per week</label>
+            <input type="number" min="1" max="30" step="1" id="fixtureGamesPerWeek" value="${fixtureRules().gamesPerWeek}" style="width:110px;">
           </div>
           <div>
             <label>Inter-conference games / week</label>
@@ -5078,18 +5194,19 @@ function renderDraft(){ return drawDraft(); }
     // closely related controls belong together. Existing panels, IDs,
     // handlers and data operations are deliberately left untouched.
     const seasonPanels = Array.from(contentEl.querySelectorAll(':scope > .panel'));
+    const seasonPanelById = new Map(seasonPanels.map(panel => [panel.id, panel]));
     const seasonPrimary = [
-      {title:'Season', help:'Season lifecycle and archives.', indexes:[0]},
-      {title:'Rosters', help:'Publish the current rosters.', indexes:[1]},
-      {title:'Competition', help:'Standings, conferences and qualification.', indexes:[2,3,4], sub:[
-        {title:'Standings', index:2},
-        {title:'Conferences', index:3},
-        {title:'Qualification', index:4}
+      {title:'Season', help:'Season lifecycle and archives.', panelIds:['seasonOverviewPanel']},
+      {title:'Rosters', help:'Publish the current rosters.', panelIds:['rosterManagementPanel']},
+      {title:'Competition', help:'Standings, conferences and qualification.', panelIds:['standingsPanel','conferenceSetupPanel','qualificationPanel'], sub:[
+        {title:'Standings', panelId:'standingsPanel'},
+        {title:'Conferences', panelId:'conferenceSetupPanel'},
+        {title:'Qualification', panelId:'qualificationPanel'}
       ]},
-      {title:'Finals', help:'Bracket, seeding and results.', indexes:[5]},
-      {title:'Schedule', help:'Fixture generation and matching.', indexes:[6]}
+      {title:'Team Colours', help:'Set each franchise colour.', panelIds:['teamColourPanel']},
+      {title:'Finals', help:'Bracket, seeding and results.', panelIds:['finalsAdminPanel']},
+      {title:'Schedule', help:'Generate, publish and match the fixture.', panelIds:['fixtureSchedulePanel']}
     ];
-
     const workspace=document.createElement('div'); workspace.className='season-admin-workspace';
     const header=document.createElement('div'); header.className='season-admin-workspace-head';
     header.innerHTML=`<div><div class="season-admin-eyebrow">Season Management</div><h2>${SBL.pokemon.escapeHtml(STATE.settings.activeSeason || DEFAULT_SEASON)}</h2></div><div class="season-admin-head-meta">${Object.keys(STATE.replays||{}).length} replay${Object.keys(STATE.replays||{}).length===1?'':'s'} processed</div>`;
@@ -5103,14 +5220,15 @@ function renderDraft(){ return drawDraft(); }
       nav.appendChild(button);
 
       const pane=document.createElement('section'); pane.className=`season-admin-pane ${index===0?'active':''}`; pane.dataset.seasonPrimaryPane=String(index); pane.setAttribute('aria-label',group.title);
-      const panels=group.indexes.map(i=>seasonPanels[i]).filter(Boolean);
+      const panels=group.panelIds.map(id=>seasonPanelById.get(id)).filter(Boolean);
       if(group.sub){
         const subnav=document.createElement('div'); subnav.className='season-admin-subnav';
         const subcontent=document.createElement('div'); subcontent.className='season-admin-subcontent';
         group.sub.forEach((sub,subIndex)=>{
           const sb=document.createElement('button'); sb.type='button'; sb.className=`season-admin-subtab ${subIndex===0?'active':''}`; sb.dataset.seasonSub=String(subIndex); sb.textContent=sub.title; subnav.appendChild(sb);
           const sp=document.createElement('div'); sp.className=`season-admin-subpane ${subIndex===0?'active':''}`; sp.dataset.seasonSubPane=String(subIndex);
-          if(seasonPanels[sub.index]) sp.appendChild(seasonPanels[sub.index]);
+          const subPanel=seasonPanelById.get(sub.panelId);
+          if(subPanel) sp.appendChild(subPanel);
           subcontent.appendChild(sp);
         });
         pane.appendChild(subnav); pane.appendChild(subcontent);
@@ -5450,15 +5568,16 @@ function renderDraft(){ return drawDraft(); }
       const weeksInput=parseInt(document.getElementById('fixtureWeeks').value,10);
       if(!weeksInput||weeksInput<1){alert('Enter how many weeks the season should run.');return;}
       if(STATE.settings.fixtureDraft&&!confirm('Replace the existing unpublished fixture draft?'))return;
+      const gamesPerWeek=Math.max(1,Math.min(30,parseInt(document.getElementById('fixtureGamesPerWeek').value,10)||9));
       const interGames=Math.max(0,Math.min(10,parseInt(document.getElementById('fixtureInterGames').value,10)||0));
       const maxGames=Math.max(1,Math.min(2,parseInt(document.getElementById('fixtureMaxGames').value,10)||1));
       if(interGames>Math.min(10,Math.floor(teamNames.length/2))){alert('Inter-conference games per week cannot exceed half the league size.');return;}
       const btn=document.getElementById('generateFixtureBtn'); btn.disabled=true;
       try{
-        const rules={interConferencePerWeek:interGames,maxGamesPerTeamPerWeek:maxGames};
+        const rules={version:2,gamesPerWeek,interConferencePerWeek:interGames,maxGamesPerTeamPerWeek:maxGames};
         const rounds=generateFixture(teamNames,weeksInput,conferenceMap,rules);
         await saveFixture({rounds},'generated','fixtureDraft',{fixtureRules:rules});
-        await logAdminAction('generate_fixture_draft',`Generated a ${rounds.length}-week fixture draft for ${teamNames.length} franchises.`,{teams:teamNames.length,weeks:rounds.length,interConferencePerWeek:interGames,maxGamesPerTeamPerWeek:maxGames});
+        await logAdminAction('generate_fixture_draft',`Generated a ${rounds.length}-week fixture draft for ${teamNames.length} franchises.`,{teams:teamNames.length,weeks:rounds.length,gamesPerWeek,interConferencePerWeek:interGames,maxGamesPerTeamPerWeek:maxGames});
         renderSeasonSetup();
         alert(`Fixture draft generated: ${rounds.length} weeks / ${fixtureMatchCount({rounds})} matches. It is not published yet.`);
       }catch(err){alert('Could not save fixture draft: '+(err?.message||err));btn.disabled=false;}
@@ -5605,11 +5724,24 @@ function renderDraft(){ return drawDraft(); }
     });
 
     document.getElementById('clearFixtureBtn')?.addEventListener('click', async ()=>{
-      if(!STATE.settings.fixture) return;
-      if(!confirm('Clear the saved fixture? This cannot be undone.')) return;
-      await saveFixture(null, null);
-      await logAdminAction('clear_fixture', 'Cleared the saved fixture.', {});
-      renderSeasonSetup();
+      const published=!!STATE.settings.fixture;
+      const draft=!!STATE.settings.fixtureDraft;
+      if(!published&&!draft){alert('There is no published fixture or unpublished fixture draft to clear.');return;}
+      if(!confirm('Clear the published fixture and any unpublished fixture draft for this season? This cannot be undone.')) return;
+      const btn=document.getElementById('clearFixtureBtn');
+      if(btn) btn.disabled=true;
+      try{
+        // Clear both values in one season-row write. Clearing only `fixture`
+        // left an unpublished draft behind, which made the fixture appear to
+        // survive the Clear fixture action when the panel was rendered again.
+        await saveFixture(null,null,'fixture',{fixtureDraft:null});
+        await logAdminAction('clear_fixture','Cleared the published fixture and unpublished fixture draft.',{clearedPublished:published,clearedDraft:draft});
+        renderSeasonSetup();
+        alert('The published fixture and unpublished fixture draft have been cleared.');
+      }catch(err){
+        alert('Could not clear the fixture: '+(err?.message||err));
+        if(btn) btn.disabled=false;
+      }
     });
 
     document.getElementById('renameSeasonBtn')?.addEventListener('click', async ()=>{
@@ -5670,6 +5802,44 @@ function renderDraft(){ return drawDraft(); }
         }
       });
     });
+
+    // ---- Team colours (CP4.63): edits are held in memory until "Save colours" ----
+    {
+      const status = document.getElementById('teamColourStatus');
+      const mark = text => { if(status) status.textContent = text; };
+      document.querySelectorAll('[data-team-colour]').forEach(input=>{
+        input.addEventListener('input', ()=>{
+          SBL.teamColors.set(STATE.settings, input.dataset.teamColour, input.value);
+          input.closest('.team-colour-row')?.classList.remove('none');
+          mark('Unsaved changes');
+        });
+      });
+      document.querySelectorAll('[data-team-colour-clear]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          SBL.teamColors.set(STATE.settings, btn.dataset.teamColourClear, '');
+          const row = btn.closest('.team-colour-row'); row?.classList.add('none');
+          const input = row?.querySelector('input[type=color]'); if(input) input.value = '#888888';
+          mark('Unsaved changes');
+        });
+      });
+      document.getElementById('autoTeamColours')?.addEventListener('click', ()=>{
+        SBL.teamColors.autoAssign(STATE.settings, franchises.map(f=>f.name));
+        document.querySelectorAll('[data-team-colour]').forEach(input=>{
+          const c = SBL.teamColors.get(STATE.settings, input.dataset.teamColour);
+          if(c){ input.value = c; input.closest('.team-colour-row')?.classList.remove('none'); }
+        });
+        mark('Unsaved changes');
+      });
+      document.getElementById('saveTeamColours')?.addEventListener('click', async ()=>{
+        const btn = document.getElementById('saveTeamColours'); btn.disabled = true; mark('Saving\u2026');
+        try{
+          await saveSettings();
+          await logAdminAction('set_team_colours', 'Updated team colours.', {teamColors: STATE.settings.teamColors || {}});
+          mark('Saved');
+        }catch(err){ mark('Could not save: ' + (err?.message || err)); }
+        finally{ btn.disabled = false; }
+      });
+    }
 
     document.getElementById('saveConferenceNames')?.addEventListener('click', async ()=>{
       const a = document.getElementById('conferenceNameA').value.trim() || 'Conference A';
@@ -5937,6 +6107,7 @@ function renderDraft(){ return drawDraft(); }
     contentEl.innerHTML=`<div class="admin-section league-manager">
       <div class="admin-section-title"><div><div class="admin-dashboard-kicker">League Manager</div><h2>One installation, multiple leagues</h2><div class="note">Each league has its own franchises, rosters, season, replays, trades, draft and Finals.</div></div><button class="primary" id="startLeagueSetup">Set up a league</button></div>
       <div class="league-manager-active panel"><div><span class="league-manager-label">Active league</span><strong>${SBL.pokemon.escapeHtml(active.name || activeId)}</strong><span class="note">${SBL.pokemon.escapeHtml(active.description || 'No description')}</span></div><span class="badge update-badge-league">LIVE</span></div>
+      ${adminIsCommissioner ? `<div class="panel admin-danger-section"><div class="section-head-row"><div><h3>Delete this league</h3><div class="note">Permanently removes this league and operational data. Imported sbl_legacy_* archives are detached and preserved. Accounts, profiles and other leagues remain untouched.</div></div></div><button type="button" class="ghost danger-btn" id="commissionerDeleteLeague">Delete active league</button><div class="note" id="commissionerDeleteLeagueStatus" aria-live="polite"></div></div>` : ''}
       <div class="panel league-manager-quick"><div><h3>Get started</h3><div class="note">New league? Use the guided setup instead of configuring every section separately.</div></div><div class="league-manager-quick-actions"><button class="primary" id="startLeagueSetup2">Set up a new league</button><button class="ghost" id="goCurrentSeason">Open current league settings</button></div></div>
       <div class="panel league-members-panel"><div class="league-manager-panel-head"><div><h3>Invite players</h3><div class="note">Share this code with registered players so they can request access. Manage approvals and assignments in People &amp; Franchises.</div></div></div><div class="league-invite-strip"><div><span class="admin-dashboard-kicker">Invite code</span><strong>${SBL.pokemon.escapeHtml(active.joinCode||'--------')}</strong></div><button class="ghost small" id="regenerateLeagueCode">Regenerate</button><button class="ghost small" type="button" id="openPeopleWorkspace">Manage people</button></div></div>
     </div>`;
@@ -6281,6 +6452,22 @@ function renderDraft(){ return drawDraft(); }
     } // End legacy inline membership/franchise manager (replaced by People workspace).
     document.getElementById('openPeopleWorkspace')?.addEventListener('click',()=>goToTab('people'));
     document.getElementById('regenerateLeagueCode')?.addEventListener('click',async()=>{active.joinCode=makeLeagueJoinCode();await saveSharedState();await logAdminAction('regenerate_league_code',`Regenerated invite code for league "${active.name||activeId}".`,{leagueId:activeId});renderLeagueManager();});
+    document.getElementById('commissionerDeleteLeague')?.addEventListener('click',async event=>{
+      const button=event.currentTarget;
+      const name=String(active.name||'').trim();
+      if(!activeId || !name){const status=document.getElementById('commissionerDeleteLeagueStatus');if(status)status.textContent='The active league could not be identified.';return;}
+      const warning=`Permanently delete "${name}"?\n\nOperational league records, memberships, franchise definitions and season data will be removed. Imported sbl_legacy_* archive seasons, results, replays and audit records will be detached and preserved. User accounts, profiles and other leagues will not be deleted.\n\nThis cannot be undone.`;
+      if(!window.confirm(warning))return;
+      const typed=window.prompt(`Type the exact league name to confirm deletion:\n${name}`);
+      if(typed===null)return;
+      if(typed.trim()!==name){const status=document.getElementById('commissionerDeleteLeagueStatus');if(status)status.textContent='League name did not match. Nothing was deleted.';return;}
+      button.disabled=true;
+      try{
+        await SBL.leagueDb.deleteLeague(activeId,supabase,typed);
+        window.alert(`League "${name}" was deleted. Imported archives were preserved.`);
+        window.location.reload();
+      }catch(error){const status=document.getElementById('commissionerDeleteLeagueStatus');if(status)status.textContent=error?.message||'Could not delete the league.';button.disabled=false;}
+    });
 
     const start=()=>{leagueSetupDraft=blankLeagueSetup();leagueSetupStep=1;renderLeagueManager();};
     document.getElementById('startLeagueSetup')?.addEventListener('click',start);document.getElementById('startLeagueSetup2')?.addEventListener('click',start);
@@ -6294,12 +6481,9 @@ function renderDraft(){ return drawDraft(); }
     contentEl.innerHTML=`<div class="admin-section people-workspace">
       <div class="admin-section-title"><div><div class="admin-dashboard-kicker">League operations</div><h2>People &amp; Franchises</h2><div class="note" id="peopleCurrentSeason">Loading current season…</div></div><button type="button" class="ghost small" id="peopleRefresh">Refresh</button></div>
       <div class="admin-kpi-grid" id="peopleMetrics"><div class="panel"><span>Loading</span></div></div>
-      <div class="panel"><div class="section-head-row"><div><h3>League Members</h3><div class="note">Actual players with a membership record in this league, including current, sitting-out, pending and historical members. Test accounts are listed separately.</div></div></div>
+      <div class="panel"><div class="section-head-row"><div><h3>League Members</h3><div class="note">Players with a membership record in this league, including current, sitting-out, pending and historical members. Platform test accounts are managed separately in the Site Admin Hub.</div></div></div>
         <div id="peopleDirectory"><div class="empty-state">Loading league members…</div></div>
         <div id="peopleAccountStatus" class="note" aria-live="polite"></div>
-      </div>
-      <div class="panel"><div class="section-head-row"><div><h3>Test Accounts</h3><div class="note">Accounts marked for testing are kept separate from the league's actual player list. They remain league-scoped and can still be used to test league features.</div></div></div>
-        <div id="peopleTestAccounts"><div class="empty-state">Loading test accounts…</div></div>
       </div>
       <div class="panel"><div class="section-head-row"><div><h3>Membership requests</h3><div class="note">Approve or reject people who have requested to join. Approval does not require assigning a franchise immediately.</div></div></div><div id="peoplePending"><div class="empty-state">Loading…</div></div></div>
       <div class="panel"><div class="section-head-row"><div><h3>Manage active members &amp; roles</h3><div class="note">Manage each member's league role (including Commissioner) and franchise participation. Assign or change franchises. Changing ownership vacates the member's previous assignment and invalidates pending requests for the selected franchise. A sit-out changes only this season's participation status. Their franchise remains assigned and reserved for when they return.</div></div></div><div id="peopleMembers"><div class="empty-state">Loading…</div></div><div id="peopleActionStatus" class="note" aria-live="polite"></div></div>
@@ -6324,7 +6508,7 @@ function renderDraft(){ return drawDraft(); }
           SBL.leagueDb.listFranchises(leagueId,supabase),
         ]);
         if(results[0].error) throw results[0].error;
-        profiles=results[0].data||[]; league=results[1]; season=results[2]; franchises=results[3]||[];
+        profiles=(results[0].data||[]).filter(row=>String(row.member_type||'player').toLowerCase()!=='test_account'); league=results[1]; season=results[2]; franchises=results[3]||[];
         if(!season?.id) throw new Error('No current season could be resolved for this league.');
         $('peopleCurrentSeason').textContent=`${season.name} · Sit-outs do not remove accounts or league membership.`;
         const [assignmentResult,requestResult,seasonStatusResult]=await Promise.all([
@@ -6337,43 +6521,37 @@ function renderDraft(){ return drawDraft(); }
         if(seasonStatusResult.error) throw seasonStatusResult.error;
         assignments=assignmentResult.data||[]; pendingRequests=requestResult.data||[];
         seasonStatuses=new Map((seasonStatusResult.data||[]).map(row=>[String(row.user_id),row.status]));
-        const allMembers=(league?.members||[]);
+        // Test accounts are platform-admin-managed. Keep them out of every
+        // league commissioner directory, request list, member control and KPI.
+        const allMembers=(league?.members||[]).filter(m=>String(m.member_type||'player').toLowerCase()!=='test_account');
         const members=allMembers.filter(m=>String(m.status||'').toLowerCase()!=='removed');
-        const playerMembers=allMembers.filter(m=>String(m.member_type||'player')!=='test_account');
-        const testMembers=allMembers.filter(m=>String(m.member_type||'player')==='test_account');
         const pending=members.filter(m=>String(m.status||'').toLowerCase()==='pending');
-        const active=members.filter(m=>String(m.status||'').toLowerCase()==='active' && String(m.member_type||'player')!=='test_account');
-        const activeTestAccounts=members.filter(m=>String(m.status||'').toLowerCase()==='active' && String(m.member_type||'player')==='test_account');
+        const active=members.filter(m=>String(m.status||'').toLowerCase()==='active');
         const assignedUsers=new Set(assignments.map(a=>String(a.user_id)));
         const owners=new Map(assignments.map(a=>[String(a.franchise_id),String(a.user_id)]));
         const name=id=>{const p=profiles.find(row=>String(row.id)===String(id));return String(p?.username||'Unknown user');};
-        $('peopleMetrics').innerHTML=[['League players',playerMembers.length],['Test accounts',testMembers.length],['Active players',active.length],['Awaiting approval',pending.length],['Assigned franchises',assignments.length],['Sitting out',active.filter(m=>seasonStatuses.get(String(m.userId||m.user_id))==='sitting_out').length]].map(([label,value])=>`<div class="panel people-metric"><span>${SBL.pokemon.escapeHtml(label)}</span><strong>${value}</strong></div>`).join('');
+        $('peopleMetrics').innerHTML=[['League members',allMembers.length],['Active players',active.length],['Awaiting approval',pending.length],['Assigned franchises',assignments.length],['Sitting out',active.filter(m=>seasonStatuses.get(String(m.userId||m.user_id))==='sitting_out').length]].map(([label,value])=>`<div class="panel people-metric"><span>${SBL.pokemon.escapeHtml(label)}</span><strong>${value}</strong></div>`).join('');
         const memberIds=new Set(allMembers.map(m=>String(m.userId||m.user_id)));
         const membershipLabel=value=>({active:'Current member',pending:'Awaiting approval',removed:'Historical member',rejected:'Membership rejected',cancelled:'Membership cancelled'}[String(value||'').toLowerCase()]||String(value||'Membership recorded'));
-        const renderDirectoryRows=(rows,targetType)=>rows.length?rows.map(m=>{
+        const renderDirectoryRows=rows=>rows.length?rows.map(m=>{
           const uid=String(m.userId||m.user_id); const memberStatus=String(m.status||'').toLowerCase();
           const seasonStatus=seasonStatuses.get(uid)||'participating';
           const seasonLabel=memberStatus==='active'?(seasonStatus==='sitting_out'?' · Sitting out this season':' · Current season') : '';
-          const action=targetType==='test_account'?'Mark as test account':'Mark as player';
-          const nextType=targetType==='test_account'?'player':'test_account';
-          return `<div class="people-row"><div><strong>${SBL.pokemon.escapeHtml(name(uid))}</strong><span class="note">${SBL.pokemon.escapeHtml(membershipLabel(memberStatus))} · ${SBL.pokemon.escapeHtml(m.role||'player')}${SBL.pokemon.escapeHtml(seasonLabel)}</span></div><div class="people-actions"><button type="button" class="ghost small" data-people-member-type="${SBL.pokemon.escapeHtml(uid)}" data-next-member-type="${nextType}">${action}</button></div></div>`;
+          return `<div class="people-row"><div><strong>${SBL.pokemon.escapeHtml(name(uid))}</strong><span class="note">${SBL.pokemon.escapeHtml(membershipLabel(memberStatus))} · ${SBL.pokemon.escapeHtml(m.role||'player')}${SBL.pokemon.escapeHtml(seasonLabel)}</span></div></div>`;
         }).join(''):'<div class="empty-state">None.</div>';
-        $('peopleDirectory').innerHTML=`<div class="people-subsection"><h4>Players (${playerMembers.length})</h4>${renderDirectoryRows(playerMembers,'test_account')}</div>`;
-        $('peopleTestAccounts').innerHTML=`<div class="people-subsection"><h4>Test accounts (${testMembers.length})</h4>${renderDirectoryRows(testMembers,'player')}</div>`;
+        $('peopleDirectory').innerHTML=`<div class="people-subsection"><h4>Players (${allMembers.length})</h4>${renderDirectoryRows(allMembers)}</div>`;
         const renderPendingRows=rows=>rows.length?rows.map(m=>`<div class="people-row"><div><strong>${SBL.pokemon.escapeHtml(name(m.userId||m.user_id))}</strong><span class="note">Membership pending · ${SBL.pokemon.escapeHtml(m.role||'player')}</span></div><div class="people-actions"><button class="primary small" data-people-approve="${SBL.pokemon.escapeHtml(m.userId||m.user_id)}">Approve</button><button class="ghost small danger-btn" data-people-reject="${SBL.pokemon.escapeHtml(m.userId||m.user_id)}">Reject</button></div></div>`).join(''):'<div class="empty-state">None.</div>';
-        $('peoplePending').innerHTML=`<div class="people-subsection"><h4>Player requests (${pending.filter(m=>String(m.member_type||'player')!=='test_account').length})</h4>${renderPendingRows(pending.filter(m=>String(m.member_type||'player')!=='test_account'))}</div><div class="people-subsection"><h4>Test account requests (${pending.filter(m=>String(m.member_type||'player')==='test_account').length})</h4>${renderPendingRows(pending.filter(m=>String(m.member_type||'player')==='test_account'))}</div>`;
+        $('peoplePending').innerHTML=`<div class="people-subsection"><h4>Player requests (${pending.length})</h4>${renderPendingRows(pending)}</div>`;
         const renderManagedRows=rows=>rows.length?rows.map(m=>{
           const uid=String(m.userId||m.user_id); const assignment=assignments.find(a=>String(a.user_id)===uid); const franchise=assignment?franchises.find(f=>String(f.id)===String(assignment.franchise_id)):null;
           const available=franchises.filter(f=>String(f.status||'active')==='active' && String(f.claim_state||'')!=='locked' && !owners.has(String(f.id)));
           const participation=seasonStatuses.get(uid)||'participating';
           const assignmentControl=`<select data-people-assign-select="${SBL.pokemon.escapeHtml(uid)}"><option value="">${franchise?'Change franchise…':'Assign franchise…'}</option>${available.map(f=>`<option value="${SBL.pokemon.escapeHtml(f.id)}">${SBL.pokemon.escapeHtml(f.name)}</option>`).join('')}</select><button type="button" class="ghost small" data-people-assign="${SBL.pokemon.escapeHtml(uid)}">${franchise?'Change':'Assign'}</button>`;
           const role=String(m.role||'player').toLowerCase();
-          const memberType=String(m.member_type||'player').toLowerCase();
-          const roleSelection=memberType==='test_account'?'test_account':role;
-          const roleControl=`<label class="people-role-control"><span>League role</span><select data-people-role="${SBL.pokemon.escapeHtml(uid)}" aria-label="League role for ${SBL.pokemon.escapeHtml(name(uid))}"><option value="player" ${roleSelection==='player'?'selected':''}>Player</option><option value="manager" ${roleSelection==='manager'?'selected':''}>Manager</option><option value="commissioner" ${roleSelection==='commissioner'?'selected':''}>Commissioner</option><option value="test_account" ${roleSelection==='test_account'?'selected':''}>Test account</option></select></label>`;
+          const roleControl=`<label class="people-role-control"><span>League role</span><select data-people-role="${SBL.pokemon.escapeHtml(uid)}" aria-label="League role for ${SBL.pokemon.escapeHtml(name(uid))}"><option value="player" ${role==='player'?'selected':''}>Player</option><option value="manager" ${role==='manager'?'selected':''}>Manager</option><option value="commissioner" ${role==='commissioner'?'selected':''}>Commissioner</option></select></label>`;
           return `<div class="people-row"><div><strong>${SBL.pokemon.escapeHtml(name(uid))}</strong><span class="note">${SBL.pokemon.escapeHtml(m.role||'player')} · ${participation==='sitting_out'?'Sitting out this season':(franchise?`Currently assigned: ${SBL.pokemon.escapeHtml(franchise.name)}`:'Participating · no franchise assigned')}${participation==='sitting_out'&&franchise?` · Franchise remains reserved: ${SBL.pokemon.escapeHtml(franchise.name)}`:''}</span></div><div class="people-actions">${roleControl}${participation==='sitting_out'?`<button type="button" class="ghost small" data-people-return="${SBL.pokemon.escapeHtml(uid)}">Mark returning</button>`:`${assignmentControl}<button type="button" class="ghost small" data-people-sitout="${SBL.pokemon.escapeHtml(uid)}">Mark sit-out</button>`}</div></div>`;
         }).join(''):'<div class="empty-state">None.</div>';
-        $('peopleMembers').innerHTML=`<div class="people-subsection"><h4>Players (${active.length})</h4>${renderManagedRows(active)}</div><div class="people-subsection"><h4>Test accounts (${activeTestAccounts.length})</h4>${renderManagedRows(activeTestAccounts)}</div>`;
+        $('peopleMembers').innerHTML=`<div class="people-subsection"><h4>Players (${active.length})</h4>${renderManagedRows(active)}</div>`;
         // Bind Assign directly to each freshly rendered button. Delegated clicks
         // were intermittently lost when the People workspace was re-rendered.
         $('peopleMembers').querySelectorAll('[data-people-assign]').forEach(button=>{
@@ -6413,7 +6591,7 @@ function renderDraft(){ return drawDraft(); }
         }).join(''):'<div class="empty-state">No franchise definitions yet.</div>';
         if(pendingRequests.length){
           const franchiseById=new Map(franchises.map(f=>[String(f.id),f]));
-          $('peoplePending').insertAdjacentHTML('beforeend',`<div class="people-subsection"><h4>Pending franchise claims</h4>${pendingRequests.map(r=>`<div class="people-row"><div><strong>${SBL.pokemon.escapeHtml(name(r.user_id))}</strong><span class="note">${SBL.pokemon.escapeHtml(franchiseById.get(String(r.franchise_id))?.name||'Unknown franchise')} · requested ${r.created_at?SBL.pokemon.escapeHtml(new Date(r.created_at).toLocaleDateString()):'date unavailable'}</span></div><div class="people-actions"><button class="ghost small danger-btn" data-people-reject-claim="${SBL.pokemon.escapeHtml(r.user_id)}">Cancel claim</button></div></div>`).join('')}</div>`);
+          $('peoplePending').insertAdjacentHTML('beforeend',`<div class="people-subsection"><h4>Pending franchise claims</h4><div class="note">Approving a claim assigns the requested franchise. To give the member a different franchise, use the Assign control under Manage active members.</div>${pendingRequests.map(r=>`<div class="people-row"><div><strong>${SBL.pokemon.escapeHtml(name(r.user_id))}</strong><span class="note">${SBL.pokemon.escapeHtml(franchiseById.get(String(r.franchise_id))?.name||'Unknown franchise')} · requested ${r.created_at?SBL.pokemon.escapeHtml(new Date(r.created_at).toLocaleDateString()):'date unavailable'}</span></div><div class="people-actions"><button class="primary small" data-people-approve-claim="${SBL.pokemon.escapeHtml(r.id)}">Approve &amp; assign</button><button class="ghost small danger-btn" data-people-reject-claim="${SBL.pokemon.escapeHtml(r.id)}">Reject</button></div></div>`).join('')}</div>`);
         }
       }catch(e){
         const message=SBL.pokemon.escapeHtml(e?.message||e);
@@ -6426,22 +6604,6 @@ function renderDraft(){ return drawDraft(); }
     };
     const run=async(button,fn)=>{if(button)button.disabled=true;try{await fn();await refresh();}catch(e){actionStatus.textContent=e?.message||String(e);if(button)button.disabled=false;}};
     $('peopleRefresh').addEventListener('click',refresh);
-    const handleMemberTypeChange=async event=>{
-      const button=event.target.closest('[data-people-member-type]');
-      if(!button)return;
-      const uid=String(button.dataset.peopleMemberType||''),nextType=String(button.dataset.nextMemberType||'');
-      if(!uid||!['player','test_account'].includes(nextType))return;
-      button.disabled=true;
-      try{
-        const {data,error}=await supabase.rpc('sbl_set_league_member_type',{p_league_id:leagueId,p_user_id:uid,p_member_type:nextType});
-        if(error)throw error;
-        await logAdminAction('set_league_member_type',`Changed ${nameForAudit(uid)} to ${nextType==='test_account'?'a test account':'a league player'}.`,{leagueId,userId:uid,memberType:nextType});
-        status.textContent=`${nameForAudit(uid)} is now listed as ${nextType==='test_account'?'a test account':'a league player'}.`;
-        await refresh();
-      }catch(error){button.disabled=false;status.textContent=error?.message||'Could not update account type.';}
-    };
-    $('peopleDirectory').addEventListener('click',handleMemberTypeChange);
-    $('peopleTestAccounts').addEventListener('click',handleMemberTypeChange);
     const nameForAudit=uid=>{const p=profiles.find(row=>String(row.id)===String(uid));return String(p?.username||'Unknown user');};
     $('peopleCreateFranchise').addEventListener('click',async e=>{
       const button=e.currentTarget;
@@ -6477,10 +6639,36 @@ function renderDraft(){ return drawDraft(); }
     });
     $('peopleFranchiseName').addEventListener('keydown',e=>{if(e.key==='Enter')$('peopleCreateFranchise').click();});
     $('peoplePending').addEventListener('click',e=>{
-      const approve=e.target.closest('[data-people-approve]'); const reject=e.target.closest('[data-people-reject]'); const rejectClaim=e.target.closest('[data-people-reject-claim]');
+      const approve=e.target.closest('[data-people-approve]');
+      const reject=e.target.closest('[data-people-reject]');
+      const approveClaim=e.target.closest('[data-people-approve-claim]');
+      const rejectClaim=e.target.closest('[data-people-reject-claim]');
       if(approve) run(approve,async()=>{await SBL.franchiseOwnership.approveMembershipAndAssign(leagueId,approve.dataset.peopleApprove,null,supabase);await logAdminAction('approve_league_membership',`Approved ${nameForAudit(approve.dataset.peopleApprove)}.`,{leagueId,userId:approve.dataset.peopleApprove});});
       if(reject) run(reject,async()=>{if(!confirm(`Reject the membership request from ${nameForAudit(reject.dataset.peopleReject)}?`))return;await SBL.franchiseOwnership.rejectLeagueMembership(leagueId,reject.dataset.peopleReject,supabase);await logAdminAction('reject_league_membership',`Rejected ${nameForAudit(reject.dataset.peopleReject)}.`,{leagueId,userId:reject.dataset.peopleReject});});
-      if(rejectClaim) run(rejectClaim,async()=>{const uid=rejectClaim.dataset.peopleRejectClaim;if(!confirm(`Cancel ${nameForAudit(uid)}'s pending franchise claim? Their membership and account will remain.`))return;await SBL.franchiseOwnership.rejectFranchiseClaim(leagueId,uid,supabase);await logAdminAction('reject_franchise_claim',`Cancelled pending franchise claim for ${nameForAudit(uid)}.`,{leagueId,userId:uid});});
+      if(approveClaim) run(approveClaim,async()=>{
+        const requestId=String(approveClaim.dataset.peopleApproveClaim||'');
+        const request=pendingRequests.find(row=>String(row.id)===requestId);
+        if(!request) throw new Error('That franchise request is no longer in the pending list. Refresh and try again.');
+        const franchise=franchises.find(row=>String(row.id)===String(request.franchise_id));
+        if(!franchise) throw new Error('The requested franchise could not be found in this league.');
+        if(!confirm(`Approve ${nameForAudit(request.user_id)}'s request and assign ${franchise.name}?`))return;
+        const result=await SBL.franchiseOwnership.commissionerApproveFranchiseRequest(requestId,supabase);
+        if(result?.ok===false) throw new Error(result.message||'The approval RPC did not confirm success.');
+        await logAdminAction('approve_franchise_request',`Approved ${nameForAudit(request.user_id)}'s request for ${franchise.name} and assigned the franchise.`,{leagueId,requestId,userId:request.user_id,franchiseId:request.franchise_id,assignmentId:result?.assignment_id||null});
+        actionStatus.textContent=`Approved ${nameForAudit(request.user_id)} and assigned ${franchise.name}.`;
+      });
+      if(rejectClaim) run(rejectClaim,async()=>{
+        const requestId=String(rejectClaim.dataset.peopleRejectClaim||'');
+        const request=pendingRequests.find(row=>String(row.id)===requestId);
+        if(!request) throw new Error('That franchise request is no longer in the pending list. Refresh and try again.');
+        const reason=window.prompt(`Reason for rejecting ${nameForAudit(request.user_id)}'s franchise request:`);
+        if(reason===null)return;
+        const trimmed=String(reason).trim();
+        if(!trimmed) throw new Error('A rejection reason is required.');
+        await SBL.franchiseOwnership.commissionerRejectFranchiseRequest(requestId,trimmed,supabase);
+        await logAdminAction('reject_franchise_request',`Rejected ${nameForAudit(request.user_id)}'s franchise request.`,{leagueId,requestId,userId:request.user_id,franchiseId:request.franchise_id,reason:trimmed});
+        actionStatus.textContent=`Rejected ${nameForAudit(request.user_id)}'s franchise request.`;
+      });
     });
     $('peopleMembers').addEventListener('change',e=>{
       const control=e.target.closest('[data-people-role]');
@@ -6490,31 +6678,17 @@ function renderDraft(){ return drawDraft(); }
       const nextRole=String(control.value||'player').toLowerCase();
       if(!member||!uid){actionStatus.textContent='Could not identify that league member.';return;}
       const previousRole=String(member.role||'player').toLowerCase();
-      const previousType=String(member.member_type||'player').toLowerCase();
-      if(nextRole===previousRole && nextRole!=='test_account' && previousType!=='test_account')return;
+      if(nextRole===previousRole)return;
       control.disabled=true;
       void (async()=>{
         try{
-          if(nextRole==='test_account'){
-            const {error}=await supabase.rpc('sbl_set_league_member_type',{p_league_id:leagueId,p_user_id:uid,p_member_type:'test_account'});
-            if(error)throw error;
-            member.member_type='test_account';
-            await logAdminAction('set_league_member_type',`Changed ${nameForAudit(uid)} to a test account.`,{leagueId,userId:uid,memberType:'test_account'});
-            actionStatus.textContent=`${nameForAudit(uid)} is now classified as a test account in this league.`;
-          }else{
-            if(previousType==='test_account'){
-              const {error:typeError}=await supabase.rpc('sbl_set_league_member_type',{p_league_id:leagueId,p_user_id:uid,p_member_type:'player'});
-              if(typeError)throw typeError;
-              member.member_type='player';
-            }
-            const {data,error}=await supabase.rpc('sbl_set_league_member_role',{target_league:leagueId,target_user:uid,new_role:nextRole});
-            if(error)throw error;
-            member.role=data?.role||nextRole;
-            await logAdminAction('set_league_member_role',`Changed ${nameForAudit(uid)}'s league role to ${member.role}.`,{leagueId,userId:uid,role:member.role});
-            actionStatus.textContent=`${nameForAudit(uid)} is now a ${member.role} in this league.`;
-          }
+          const {data,error}=await supabase.rpc('sbl_set_league_member_role',{target_league:leagueId,target_user:uid,new_role:nextRole});
+          if(error)throw error;
+          member.role=data?.role||nextRole;
+          await logAdminAction('set_league_member_role',`Changed ${nameForAudit(uid)}'s league role to ${member.role}.`,{leagueId,userId:uid,role:member.role});
+          actionStatus.textContent=`${nameForAudit(uid)} is now a ${member.role} in this league.`;
           await refresh();
-        }catch(error){control.value=previousType==='test_account'?'test_account':previousRole;control.disabled=false;actionStatus.textContent=error?.message||'Could not update league role.';}
+        }catch(error){control.value=previousRole;control.disabled=false;actionStatus.textContent=error?.message||'Could not update league role.';}
       })();
     });
     $('peopleMembers').addEventListener('click',e=>{

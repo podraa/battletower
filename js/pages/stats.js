@@ -248,6 +248,27 @@
     const key = (username||'').trim().toLowerCase();
     return STATE.teamMap[key] || (username||'').trim() || 'Unknown';
   }
+
+  // ---- CP4.63: team colours, owner usernames and the roster pop-out ----
+  let _stSrc=null,_stMap=null;
+  function speciesKeyOf(n){ let v=String(n||''); try{ v=SBL.pokemon.displayNameWithForm?.(v)||v; }catch(_){} return v.trim().toLowerCase(); }
+  function speciesTeamMap(){
+    const r=(STATE.settings&&STATE.settings.rosters)||{};
+    if(_stSrc===r&&_stMap) return _stMap;
+    const m=new Map();
+    for(const [team,list] of Object.entries(r)) for(const e of (Array.isArray(list)?list:[])){ const n=typeof e==='string'?e:(e&&e.name); if(n) m.set(speciesKeyOf(n),team); }
+    _stSrc=r; _stMap=m; return m;
+  }
+  // Pokemon stats/Golden Fist rows take the colour of the team that rosters the Pokemon.
+  function teamTintForSpecies(species){ const t=speciesTeamMap().get(speciesKeyOf(species)); return t?SBL.teamColors.styleAttr(STATE.settings,t):''; }
+  function teamTintForTeam(team){ return SBL.teamColors.styleAttr(STATE.settings,team); }
+  // Fixtures show the owner's username (falling back to the franchise name) and open the roster pop-out.
+  function fixtureTeamText(team){ return SBL.teamColors.ownerLabel(STATE.teamMap,team) || String(team||''); }
+  function fixtureTeam(team){
+    const esc=SBL.pokemon.escapeHtml, owner=SBL.teamColors.ownerLabel(STATE.teamMap,team);
+    return `<span class="team-link" role="button" tabindex="0" data-team-popup="${esc(team)}" title="${esc(owner?('Franchise: '+team+' \u2014 click for roster'):'Click for roster')}">${esc(owner||team)}</span>`;
+  }
+  SBL.teamPopup.bind(document,()=>({settings:STATE.settings,teamMap:STATE.teamMap,rosters:STATE.settings.rosters||{}}));
   // groups values that only differ by case/whitespace under one canonical label
   // (the first-seen casing) when "case-insensitive names" is on in Settings —
   // this is what keeps e.g. "Team Fire" and "team fire" from splitting into
@@ -1198,7 +1219,7 @@
     const sel=document.getElementById('assistWeek');
     function draw(){
       const stats=globalPokemonStats(sel.value).sort((a,b)=>(b.assists||0)-(a.assists||0) || b.dealt-a.dealt || a.species.localeCompare(b.species));
-      document.getElementById('assistTable').innerHTML = stats.length ? `<table><thead><tr><th class="rank">#</th><th>Pokémon</th><th class="num">Assists</th><th class="num">Kills</th><th class="num">Damage Dealt</th><th class="num">Damage Taken</th><th class="num">Games</th></tr></thead><tbody>${stats.map((s,i)=>`<tr><td class="rank">${i+1}</td><td class="pname"><div class="pname-cell"><span class="pokemon-click" role="button" tabindex="0" data-assist-pokemon="${SBL.pokemon.escapeHtml(s.species)}" title="View assists for ${SBL.pokemon.escapeHtml(s.species)}">${pokemonName(s.species,true,'sprite-xl')}</span></div></td><td ${auditAttr(s.species,'assists',s.assistLog)}>${s.assists||0}</td><td class="num">${s.kills}</td><td class="num dealt">${s.dealt.toFixed(1)}</td><td class="num taken">${s.taken.toFixed(1)}</td><td class="num">${Number.isFinite(s.games)?s.games:0}</td></tr>`).join('')}</tbody></table>` : `<div class="empty-state">No assists recorded for this scope yet.</div>`;
+      document.getElementById('assistTable').innerHTML = stats.length ? `<table><thead><tr><th class="rank">#</th><th>Pokémon</th><th class="num">Assists</th><th class="num">Kills</th><th class="num">Damage Dealt</th><th class="num">Damage Taken</th><th class="num">Games</th></tr></thead><tbody>${stats.map((s,i)=>`<tr${teamTintForSpecies(s.species)}><td class="rank">${i+1}</td><td class="pname"><div class="pname-cell"><span class="pokemon-click" role="button" tabindex="0" data-assist-pokemon="${SBL.pokemon.escapeHtml(s.species)}" title="View assists for ${SBL.pokemon.escapeHtml(s.species)}">${pokemonName(s.species,true,'sprite-xl')}</span></div></td><td ${auditAttr(s.species,'assists',s.assistLog)}>${s.assists||0}</td><td class="num">${s.kills}</td><td class="num dealt">${s.dealt.toFixed(1)}</td><td class="num taken">${s.taken.toFixed(1)}</td><td class="num">${Number.isFinite(s.games)?s.games:0}</td></tr>`).join('')}</tbody></table>` : `<div class="empty-state">No assists recorded for this scope yet.</div>`;
     }
     sel.addEventListener('change',draw);
     draw();
@@ -1808,10 +1829,10 @@
                 const homeWin = res.played && res.winner && groupKey(res.winner)===groupKey(m.home);
                 const awayWin = res.played && res.winner && groupKey(res.winner)===groupKey(m.away);
                 return `<div class="fixture-match ${res.played?'fixture-played':''}">
-                  <span class="fixture-team ${homeWin?'fixture-winner':''}">${SBL.pokemon.escapeHtml(m.home)}</span>
+                  <span class="fixture-team ${homeWin?'fixture-winner':''}">${fixtureTeam(m.home)}</span>
                   <span class="fixture-vs">vs</span>
-                  <span class="fixture-team ${awayWin?'fixture-winner':''}">${SBL.pokemon.escapeHtml(m.away)}</span>
-                  <span class="fixture-status">${res.played ? (res.winner ? `${SBL.pokemon.escapeHtml(res.winner)} won` : 'Played') : 'Not played yet'}</span>
+                  <span class="fixture-team ${awayWin?'fixture-winner':''}">${fixtureTeam(m.away)}</span>
+                  <span class="fixture-status">${res.played ? (res.winner ? `${SBL.pokemon.escapeHtml(fixtureTeamText(res.winner))} won` : 'Played') : 'Not played yet'}</span>
                 </div>`;
               }).join('') : '<div class="conference-empty">No matches this week.</div>'}
             </div>
@@ -1912,7 +1933,7 @@
   }
 
   function renderGoldenFist(){
-    return window.SBLStatsUI.renderGoldenFist({globalPokemonStats,weekSelectorHtml,spriteImg,escapeHtml,auditDataAttr,download,toCSV});
+    return window.SBLStatsUI.renderGoldenFist({globalPokemonStats,weekSelectorHtml,spriteImg,escapeHtml,auditDataAttr,download,toCSV,tintForSpecies:teamTintForSpecies});
   }
 
   function renderTeams(){
@@ -1974,7 +1995,7 @@
           <td class="num">${s.appearances}</td>
         </tr>`).join('');
       cards.innerHTML=`
-        <section class="franchise-card panel">
+        <section class="franchise-card panel"${teamTintForTeam(info.name)}>
           <div class="franchise-card-head">
             <div>
               <div class="franchise-title">${SBL.pokemon.escapeHtml(info.name)}</div>
