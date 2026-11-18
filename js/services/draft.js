@@ -15,6 +15,7 @@
   function clone(v){ return JSON.parse(JSON.stringify(v ?? {})); }
   function normaliseDraft(d){
     const x=Object.assign({status:'setup',mode:'manual',defaultBudget:120,budgets:{},pool:[],order:[],currentPick:0,picks:[],minPicks:10,maxPicks:10}, d||{});
+    delete x.lottery; // CP4.66: discard legacy lottery state; draft order is admin-entered only.
     x.budgets=x.budgets&&typeof x.budgets==='object'?x.budgets:{};
     x.authorizedPickerIds=Array.isArray(x.authorizedPickerIds)?[...new Set(x.authorizedPickerIds.map(String))]:[];
     x.pool=Array.isArray(x.pool)?x.pool:[];
@@ -271,11 +272,14 @@
     const canonicalTeam=canonicalDraftTeam(current?.settings?.draft,team);
     // Mega rule (max 2 per team; the minimum of 1 is enforced on a team's last turn).
     // A commissioner override bypasses it, like the other pick rules.
-    if(!opts.override && SBL.draftDash?.megaBlock){
+    if(SBL.draftDash){
       const dd=current?.settings?.draft;
       const target=(dd?.pool||[]).find(m=>String(m.id)===String(poolId));
-      const block=SBL.draftDash.megaBlock(dd,canonicalTeam,target);
+      const block=target?SBL.draftDash.megaBlock?.(dd,canonicalTeam,target):null;
       if(block) throw new Error(block.message);
+      if(!opts.override && target && SBL.draftDash.canAfford && !SBL.draftDash.canAfford(dd,canonicalTeam,target)){
+        throw new Error('This pick would leave insufficient points to complete the required roster and reserve an available Mega. Choose a lower-cost Pokémon or resolve the pool/budget with the commissioner.');
+      }
     }
     if(c){
       const {data,error}=await db().rpc('sbl_draft_pick',{p_league_id:c.leagueId,p_season_id:c.seasonId,

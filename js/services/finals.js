@@ -37,42 +37,24 @@
     f.startMonday=f.startMonday?mondayISO(f.startMonday):null;
     return f;
   }
-  // Automatic Finals seeding:
-  // - The top 6 from each conference qualify.
-  // - The conference champion / #1 seed from each conference is guaranteed
-  //   one of the first two overall seeds (one per conference).
-  // - Seeds #3 and #4 are NOT the second-place teams from each conference.
-  //   They are simply the two best records among the remaining ten qualifiers.
-  // - Seeds #5-#12 are then the remaining qualifiers ordered by the normal
-  //   standings tiebreaks.
-  // This is deliberately separate from the manual seed editor: admins can
-  // override every seed manually when generating Finals.
-  function makeSeedList(confA, confB){
-    const a=(confA||[]).slice(0,6).filter(Boolean);
-    const b=(confB||[]).slice(0,6).filter(Boolean);
+  // Automatic Finals seeding: qualify the configured conference cut, then
+  // rank every qualifier together in one overall table. Conference winners
+  // receive no protected seed; wins, differential, damage and team name are
+  // the shared standings tiebreakers.
+  function makeSeedList(confA, confB, qualificationPlaces=6){
+    const places=Math.max(1,Math.min(20,Number(qualificationPlaces)||6));
+    const a=(confA||[]).slice(0,places).filter(Boolean);
+    const b=(confB||[]).slice(0,places).filter(Boolean);
     const qualified=[...a.map((x,i)=>({...x,conference:'a',conferenceSeed:i+1})),
       ...b.map((x,i)=>({...x,conference:'b',conferenceSeed:i+1}))];
-    const byTeam=new Map(qualified.map(x=>[key(x.team),x]));
-    const winners=[];
-    if(a[0]) winners.push(a[0]);
-    if(b[0]) winners.push(b[0]);
-
     const compare=(x,y)=>
       Number(y.wins||0)-Number(x.wins||0) ||
       Number(y.diff||0)-Number(x.diff||0) ||
       Number(y.dealt||0)-Number(x.dealt||0) ||
       String(x.team||'').localeCompare(String(y.team||''),undefined,{sensitivity:'base'});
-
-    const remaining=qualified.filter(x=>!winners.some(w=>key(w.team)===key(x.team))).sort(compare);
-    const firstFour=[...winners.sort((x,y)=>String(x.conference).localeCompare(String(y.conference))),...remaining.slice(0,2)];
-    const used=new Set(firstFour.map(x=>key(x.team)));
-    const rest=qualified.filter(x=>!used.has(key(x.team))).sort(compare);
-    const ordered=[...firstFour,...rest].slice(0,12);
-    return ordered.map((x,i)=>({
-      seed:i+1,
-      conference:x.conference||'',
-      conferenceSeed:Number(x.conferenceSeed)||null,
-      team:x.team
+    return qualified.sort(compare).map((x,i)=>({
+      seed:i+1, conference:x.conference||'',
+      conferenceSeed:Number(x.conferenceSeed)||null, team:x.team
     }));
   }
   function match(id,seedA,seedB,teamA=null,teamB=null){ return {id,seedA,seedB,teamA,teamB,winner:null,status:'pending',source:'bracket'}; }

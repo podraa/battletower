@@ -93,10 +93,13 @@
     return b.left - reserve;
   }
 
+  function budgetCanAfford(d, team, mon){
+    const b = budgetInfo(d, team);
+    return b.room > 0 && (Number(mon?.points) || 0) <= b.left;
+  }
   function canAfford(d, team, mon){
     const b = budgetInfo(d, team);
-    if (!(b.room > 0)) return false;
-    if (megaBlock(d, team, mon)) return false;
+    if (!(b.room > 0) || megaBlock(d, team, mon)) return false;
     return (Number(mon.points) || 0) <= spendLimitFor(d, team, mon);
   }
 
@@ -165,7 +168,10 @@
       const pts = Number(m.points) || 0;
       if (minP != null && !Number.isNaN(minP) && pts < minP) return false;
       if (maxP != null && !Number.isNaN(maxP) && pts > maxP) return false;
-      if (f.affordable && !m.drafted && !canAfford(d, team, m)) return false;
+      // Filtering is about current spendable balance, not pick-turn legality.
+      // Mega minimum is enforced only when a pick is submitted; it must not
+      // make ordinary queued Pokémon disappear or look unavailable early.
+      if (f.affordable && !m.drafted && !budgetCanAfford(d, team, m)) return false;
       if (f.queuedOnly && !queued.has(String(m.id))) return false;
       return true;
     });
@@ -188,5 +194,5 @@
     return null;
   }
 
-  window.SBL.draftDash = { MEGA_MIN, MEGA_MAX, isMegaMon, megaInfo, megaBlock, spendLimitFor, turnsLeft, budgetInfo, minPoolCost, spendLimit, canAfford, allTypes, statValue, applyFilters, sortPool, picksUntil };
+  window.SBL.draftDash = { MEGA_MIN, MEGA_MAX, isMegaMon, megaInfo, megaBlock, spendLimitFor, turnsLeft, budgetInfo, minPoolCost, spendLimit, budgetCanAfford, canAfford, allTypes, statValue, applyFilters, sortPool, picksUntil };
 })();

@@ -16,6 +16,9 @@
   let tradeCacheKey = '';
   let tradePromise = null;
   let tradePromiseKey = '';
+  const DEFAULT_TIMING_SETTINGS = { cutoff_day: 5, cutoff_hour: 23, cutoff_minute: 59, weekday_weeks_ahead: 1, after_cutoff_weeks_ahead: 2 };
+  let timingSettings = { ...DEFAULT_TIMING_SETTINGS };
+  function setTimingSettings(row){ timingSettings = { ...DEFAULT_TIMING_SETTINGS, ...(row || {}) }; }
   function invalidateTradeCache(){ tradeCache = null; tradeCacheKey=''; tradePromise = null; tradePromiseKey=''; }
 
   function acceptedAt(trade) {
@@ -32,17 +35,34 @@
     return d;
   }
 
-  // Friday 23:59:59 is the weekly cutoff. Saturday/Sunday acceptance misses
-  // the following Monday and therefore waits one additional week.
+  // League-persisted cutoff and effective-week settings. Comparisons use the
+  // browser-local league timezone, matching the legacy roster schedule.
   function effectiveAt(trade) {
     const accepted = acceptedAt(trade);
     if (!accepted) return null;
     const weekMonday = mondayStart(accepted);
-    const day = accepted.getDay(); // Sun=0, Mon=1 ... Fri=5, Sat=6
-    const weeksAhead = (day === 0 || day === 6) ? 2 : 1;
+    const rule = { ...timingSettings, ...(trade?.timing_snapshot || {}) };
+    const cutoffDay = Math.max(1, Math.min(5, Number(rule.cutoff_day) || 5));
+    const cutoff = new Date(weekMonday);
+    cutoff.setDate(cutoff.getDate() + cutoffDay - 1);
+    cutoff.setHours(Number(rule.cutoff_hour) || 0, Number(rule.cutoff_minute) || 0, 59, 999);
+    const beforeOrAtCutoff = accepted.getTime() <= cutoff.getTime();
+    const weeksAhead = beforeOrAtCutoff
+      ? Math.max(1, Number(rule.weekday_weeks_ahead) || 1)
+      : Math.max(1, Number(rule.after_cutoff_weeks_ahead) || 2);
     const effective = new Date(weekMonday);
     effective.setDate(effective.getDate() + weeksAhead * 7);
     return effective;
+  }
+
+  async function loadTimingSettings(client){
+    const db=client||SBL.getSupabase();
+    const leagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
+    if(!leagueId){ setTimingSettings(null); return timingSettings; }
+    const {data,error}=await db.from('league_trade_timing_settings').select('*').eq('league_id',leagueId).maybeSingle();
+    if(error && error.code!=='42P01') throw error;
+    setTimingSettings(error?null:data||null);
+    return timingSettings;
   }
 
   function isAccepted(trade) {
@@ -177,6 +197,7 @@
     if (tradePromise && tradePromiseKey===cacheKey) return { data: await tradePromise, error: null };
     tradePromiseKey=cacheKey;
     tradePromise = (async () => {
+      await loadTimingSettings(db);
       let query = db.from('trade_requests').select('*').order('created_at', { ascending: false });
       if (leagueId) query = query.eq('league_id', leagueId);
       if (seasonId) query = query.or(`season_id.is.null,season_id.eq.${seasonId}`);
@@ -268,6 +289,8 @@
   SBL.services = SBL.services || {};
   SBL.services.trades = {
     load,
+    loadTimingSettings,
+    timingSettings: () => ({ ...timingSettings }),
     create,
     respond,
     accept,

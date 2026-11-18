@@ -23,12 +23,12 @@
     }
     function resolve(monOrName){
       const name=typeof monOrName==='string'?monOrName:monOrName?.name;
-      const entry=poolEntry(name);
-      if(entry){
-        const hasStats=draftDash?.statValue?.(entry,'hp')!=null || draftDash?.statValue?.(entry,'atk')!=null || draftDash?.statValue?.(entry,'spe')!=null;
-        if(hasStats) return entry;
-      }
-      return exactDexEntry(name);
+      const entry=poolEntry(name),dexEntry=exactDexEntry(name);
+      if(!entry)return dexEntry;
+      if(!dexEntry)return entry;
+      // Pool metadata can be partial. Merge exact-form Showdown stats first,
+      // then let every persisted pool value take precedence.
+      return {...dexEntry,...entry,baseStats:{...(dexEntry.baseStats||{}),...(entry.stats||{}),...(entry.baseStats||{})}};
     }
     function statValue(monOrName,stat){
       const entry=resolve(monOrName);

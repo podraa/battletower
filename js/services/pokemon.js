@@ -16,7 +16,8 @@
 
   const SPRITE_ROOTS={
     '3d':'https://play.pokemonshowdown.com/sprites/home/',
-    '2d':'https://play.pokemonshowdown.com/sprites/gen5/'
+    '2d':'https://play.pokemonshowdown.com/sprites/gen5/',
+    'ani':'https://play.pokemonshowdown.com/sprites/ani/'
   };
   const SPRITE_PREF_KEY='sbl_sprite_style';
   function getSpriteStyle(){
@@ -45,7 +46,7 @@
     'landorus-incarnate':'landorus','landorus-i':'landorus','landorus-t':'landorus-therian',
     'tornadus-incarnate':'tornadus','tornadus-i':'tornadus','tornadus-t':'tornadus-therian',
     'thundurus-incarnate':'thundurus','thundurus-i':'thundurus','thundurs':'thundurus','thundurs-incarnate':'thundurus','thundurus-t':'thundurus-therian',
-    'terapagos':'terapagos','terapogos':'terapagos','teraagos':'terapagos','terapagos-middle':'terapagos','terapagos-mid':'terapagos','meowstic-male':'meowstic','meowstic-m':'meowstic','meowstic-m':'meowstic','tauros-blaze':'tauros-paldeablaze','tauros-combat':'tauros-paldeacombat',
+    'terapagos':'terapagos','terapogos':'terapagos','teraagos':'terapagos','terapagos-middle':'terapagos-terastal','terapagos-mid':'terapagos-terastal','tauros-blaze':'tauros-paldeablaze','tauros-combat':'tauros-paldeacombat',
     'tauros-blaze':'tauros-paldeablaze','tauros-combat':'tauros-paldeacombat','taurus-blaze':'tauros-paldeablaze','taurus-combat':'tauros-paldeacombat',
     'cinccinno':'cinccino','cincinno':'cinccino','daschbun':'dachsbun',
     'enamorus-incarnate':'enamorus','enamorus-i':'enamorus','enamorus-t':'enamorus-therian',
@@ -78,7 +79,7 @@
     'necrozma-dusk-mane':'necrozma-duskmane','necrozma-dawn-wings':'necrozma-dawnwings','necrozma-ultra':'necrozma-ultra',
     'kyurem-black':'kyurem-black','kyurem-white':'kyurem-white','giratina-origin':'giratina-origin','shaymin-sky':'shaymin-sky','hoopa-unbound':'hoopa-unbound',
     'genesect-douse':'genesect-douse','genesect-shock':'genesect-shock','genesect-burn':'genesect-burn','genesect-chill':'genesect-chill',
-    'terapagos':'terapagos','terapagos-normal':'terapagos','terapagos-base':'terapagos','terapagos':'terapagos','terapagos-normal':'terapagos','terapagos-base':'terapagos','terapagos-terastal':'terapagos-terastal','terapagos-stellar':'terapagos-stellar','zacian-crowned':'zacian-crowned','zamazenta-crowned':'zamazenta-crowned'
+    'terapagos':'terapagos','terapagos-normal':'terapagos','terapagos-base':'terapagos','terapagos-middle':'terapagos-terastal','terapagos-mid':'terapagos-terastal','terapagos-terastal':'terapagos-terastal','terapagos-stellar':'terapagos-stellar','zacian-crowned':'zacian-crowned','zamazenta-crowned':'zamazenta-crowned'
   };
 
   const FORM_FILES={
@@ -290,7 +291,15 @@
     const typo=TYPO_CANONICAL[id]||id;
     const SPECIAL={scovillain:'Scovillain'};
     if(SPECIAL[typo]) return SPECIAL[typo];
-    const words=typo.split('-').map((w,i)=>{
+    // Mega is a prefix in human-facing UI, not part of a hyphenated species id.
+    // Keep the canonical hyphenated id internally for data and sprite lookup.
+    const mega=megaParts(typo);
+    if(mega){
+      const species=mega.base.split('-').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+      const suffix=mega.suffix==='mega'?'':mega.suffix.slice(4).toUpperCase();
+      return `Mega ${species}${suffix?' '+suffix:''}`;
+    }
+    const words=typo.split('-').map(w=>{
       if(!w) return w;
       if(w==='f') return 'F'; if(w==='m') return 'M';
       return w.charAt(0).toUpperCase()+w.slice(1);
@@ -300,6 +309,7 @@
 
   function displayName(name){
     const id=normalizeName(name);
+    if(megaParts(id)) return displayNameWithForm(id);
     return DISPLAY_CANONICAL[id]||String(name??'').trim();
   }
 
@@ -312,6 +322,8 @@
   }
 
   function spriteFilename(name){
+    const mega=megaParts(name);
+    if(mega) return String(MEGA_FORM_FILES[mega.base] || (mega.base+'-'+mega.suffix)).toLowerCase();
     const ids=candidateIds(name);
     for(const id of ids){
       if(EXTRA_FORM_FILES[id]) return EXTRA_FORM_FILES[id];
@@ -324,7 +336,7 @@
   }
 
   function spriteUrl(name,styleOverride){
-    if(styleOverride==='hd') return spriteUrlCandidates(name,'hd')[0]||'';
+    if(megaParts(name)||styleOverride==='hd') return spriteUrlCandidates(name,styleOverride)[0]||'';
     const style=styleOverride==='2d'?'2d':styleOverride==='3d'?'3d':getSpriteStyle();
     const file=spriteFilename(name);
     return file ? `${SPRITE_ROOTS[style]}${encodeURIComponent(file)}.png` : '';
@@ -334,6 +346,7 @@
      "Mega Floette" -> "floette-mega". Returns [] for non-megas. */
   function megaParts(name){
     const id=normalizeName(name);
+    if(/^raichu-[xy]$/.test(id)) return {base:'raichu',suffix:'mega'+id.slice(-1)};
     let m=id.match(/^mega-(.+?)-([xyz])$/); if(m) return {base:m[1],suffix:'mega'+m[2]};
     m=id.match(/^(.+?)-mega-([xyz])$/); if(m) return {base:m[1],suffix:'mega'+m[2]};
     m=id.match(/^mega-(.+)$/); if(m) return {base:m[1],suffix:'mega'};
@@ -371,8 +384,27 @@
   // A few Mega filenames collapse or abbreviate the base form differently
   // from the roster's canonical species name.
   const MEGA_FORM_FILES={
+    'meowstic':'meowstic-mmega',
     'meowstic-male':'meowstic-mmega',
     'meowstic-female':'meowstic-fmega'
+  };
+
+  /* Verified static Pokémon HOME renders for newer Mega forms not yet present
+   * in the public Showdown HOME sprite directory. These are direct 512×512
+   * still assets (not animated Showdown WebP/GIFs). Keys are exact canonical
+   * Mega filenames after megaParts() normalization. */
+  const MEGA_STATIC_ASSETS={
+    'raichu-megax':'https://assets.pokestats.gg/pokeapi/orig/pokemon/other/home/10304.png',
+    'raichu-megay':'https://assets.pokestats.gg/pokeapi/orig/pokemon/other/home/10305.png',
+    'scolipede-mega':'https://assets.pokestats.gg/pokeapi/orig/pokemon/other/home/10288.png',
+    'dragalge-mega':'https://assets.pokestats.gg/pokeapi/orig/pokemon/other/home/10299.png',
+    'eelektross-mega':'https://assets.pokestats.gg/pokeapi/orig/pokemon/other/home/10290.png',
+    'pyroar-mega':'https://assets.pokestats.gg/pokeapi/orig/pokemon/other/home/10295.png',
+    'falinks-mega':'https://assets.pokestats.gg/pokeapi/orig/pokemon/other/home/10303.png',
+    'barbaracle-mega':'https://assets.pokestats.gg/pokeapi/orig/pokemon/other/home/10298.png',
+    'malamar-mega':'https://assets.pokestats.gg/pokeapi/orig/pokemon/other/home/10297.png',
+    'meowstic-mmega':'https://assets.pokestats.gg/pokeapi/orig/pokemon/other/home/10314.png',
+    'meowstic-fmega':'https://assets.pokestats.gg/pokeapi/orig/pokemon/other/home/10326.png'
   };
   const MEGA_BASE_FILES={
     'meowstic-male':'meowstic',
@@ -386,6 +418,12 @@
     const showcase=styleOverride==='hd';
     const style=styleOverride==='2d'?'2d':styleOverride==='3d'?'3d':showcase?'3d':getSpriteStyle();
     const ids=candidateIds(name);
+    const normalizedForm=normalizeName(name);
+    // Terapagos' Terastal and Stellar forms must not collapse to the base
+    // filename through display-name aliases.
+    if(normalizedForm==='terapagos-terastal'||normalizedForm==='terapagos-stellar'){
+      for(let i=ids.length-1;i>=0;i--)if(ids[i]==='terapagos')ids.splice(i,1);
+    }
     const files=[];
     const addFile=f=>{ if(!f) return; const v=String(f).toLowerCase(); if(!files.includes(v)) files.push(v); };
     const mega=megaParts(name);
@@ -416,11 +454,15 @@
       }
     };
     if(mega){
+      // Mega identity is authoritative: exact-form assets only, never the
+      // base species. Newer ZA/Champions forms use verified static HOME renders.
+      const megaKey=String(MEGA_FORM_FILES[mega.base] || (mega.base+'-'+mega.suffix)).toLowerCase();
+      const staticAsset=MEGA_STATIC_ASSETS[megaKey];
+      if(staticAsset){urls.push(staticAsset);return urls;}
       const roots=showcase?[SPRITE_ROOTS['3d'],SPRITE_ROOTS['2d']]:[SPRITE_ROOTS[style],SPRITE_ROOTS[style==='3d'?'2d':'3d']];
-      const megaFiles=files.filter(file=>file!==mega.base);
-      roots.forEach(root=>megaFiles.forEach(file=>addUrl(root,file)));
-      const baseFile=MEGA_BASE_FILES[mega.base] || FORM_FILES[mega.base] || mega.base;
-      roots.forEach(root=>addUrl(root,baseFile));
+      // Pokémon Showdown HOME's verified convention is <species>-mega.png,
+      // or <species>-megax / -megay for lettered variants.
+      roots.forEach(root=>addUrl(root,megaKey));
       return urls;
     }
     addOfficialArtwork();
@@ -461,7 +503,7 @@
   }
 
   function spriteMarkup(name,cls,styleOverride){
-    const safe=escapeHtml(name);
+    const safe=escapeHtml(displayNameWithForm(name));
     const isHyphenated=normalizeName(name).includes('-');
     const baseClass=(cls||'sprite')+(isHyphenated?' sbl-form-sprite':'');
     const urls=spriteUrlCandidates(name,styleOverride);
