@@ -278,6 +278,15 @@
   .trade-workspace-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
   .trade-workspace-title{font-size:18px; margin:0; display:flex; align-items:center; gap:8px;}
   .trade-subnav{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid var(--border);}
+  .trade-timing-panel{margin-bottom:16px;}
+  .trade-timing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:10px;margin-top:12px;}
+  .trade-timing-stat{padding:13px;border:1px solid var(--border);border-radius:10px;background:var(--panel-alt);min-width:0;}
+  .trade-timing-label{display:block;color:var(--text-dim);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px;}
+  .trade-timing-stat strong{display:block;font-size:15px;line-height:1.4;overflow-wrap:anywhere;}
+  .trade-timing-stat small{display:block;color:var(--text-dim);font-size:11px;line-height:1.45;margin-top:5px;}
+  .trade-timing-rules{margin-top:13px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;}
+  .trade-timing-rules ul{margin:7px 0 0;padding-left:19px;color:var(--text-dim);}
+  .trade-timing-rules li{margin:4px 0;}
   .trade-subnav-item{
     background:var(--panel); border:1px solid var(--border); color:var(--text-dim);
     padding:8px 14px; border-radius:20px; font-size:12px; font-weight:600; cursor:pointer;
@@ -1174,23 +1183,6 @@ body[data-admin="true"] .admin-nav-group.open .admin-nav-group-toggle > span:las
 .franchise-owner-label{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;}
 @media(max-width:700px){.franchise-owner-label{max-width:140px;}}
 
-/* ---- Draft lottery panel (CP4.1) ---- */
-.lottery-slots{display:flex;flex-direction:column;gap:6px;margin:10px 0}
-.lottery-slot{display:grid;grid-template-columns:28px 1fr 84px auto auto;gap:8px;align-items:center;padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--panel-alt)}
-.lottery-slot .n{color:var(--text-dim);font-weight:700;font-size:12px}
-.lottery-slot .t{font-weight:700}
-.lottery-slot input{width:100%;padding:6px 8px}
-.lottery-odds{border-collapse:collapse;width:100%;font-size:12px}
-.lottery-odds th,.lottery-odds td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap}
-.lottery-odds th:nth-child(-n+2),.lottery-odds td:nth-child(-n+2){text-align:left}
-.lottery-odds th{color:var(--text-dim);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
-.lottery-odds td.hot{color:var(--amber);font-weight:700}
-.lottery-result{list-style:none;margin:10px 0;padding:0;display:grid;gap:6px}
-.lottery-result li{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel-alt);font-weight:700}
-.lottery-result li.hidden{opacity:.55;border-style:dashed}
-.lottery-result .n{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--amber);color:var(--amber-text);font-size:12px}
-@media(max-width:700px){.lottery-slot{grid-template-columns:24px 1fr 70px auto auto}}
-
 /* CP4.4.2 streamlined People & Franchises workspace */
 .people-workspace .admin-kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px;margin:14px 0 18px}
 .people-workspace .people-metric{padding:14px;display:flex;flex-direction:column;gap:7px}
@@ -1250,3 +1242,30 @@ body[data-admin="true"] .admin-nav-group.open .admin-nav-group-toggle > span:las
 .team-colour-row.none input[type=color]{opacity:.4}
 .team-colour-name{flex:1;font-weight:600;overflow-wrap:anywhere}
 .team-colour-row input[type=color]{width:44px;height:30px;padding:0;border:1px solid var(--border);border-radius:6px;background:none;cursor:pointer}
+
+/* CP4.68: click-based administrator roster and trade editor. */
+.admin-roster-controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:14px 0;align-items:end}
+.admin-roster-controls>div{min-width:0}
+.admin-roster-controls select,.admin-roster-controls input{width:100%;min-height:40px;background:var(--panel-alt);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 10px}
+.admin-roster-pick-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:12px;margin:14px 0}
+.admin-roster-pick-panel{min-width:0;padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--panel-alt)}
+.admin-roster-pick-panel h3{margin:0 0 5px}
+.admin-mon-choice-list{display:flex;flex-wrap:wrap;gap:7px;max-height:320px;overflow:auto;padding:3px 2px}
+.admin-mon-choice{border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:999px;padding:7px 11px;cursor:pointer;font:inherit;font-size:.88rem}
+.admin-mon-choice:hover{border-color:var(--accent, #6b73d9);}
+.admin-mon-choice.selected{background:color-mix(in srgb,var(--accent, #6b73d9) 22%,var(--panel));border-color:var(--accent, #6b73d9);box-shadow:inset 0 0 0 1px var(--accent, #6b73d9)}
+.admin-roster-selection-summary{padding:10px 12px;margin:12px 0;border-radius:9px;background:var(--panel-alt);font-size:.92rem}
+.trade-timing-editor{margin-top:16px;padding-top:14px;border-top:1px solid var(--border)}
+.trade-timing-editor h4{margin:0 0 8px}
+.trade-timing-editor #tradeTimingSaveStatus{display:inline-block;margin-left:10px}
+
+/* CP4.79 — global Pokémon role management in League Admin */
+#pokemonRoleAssignmentPanel .role-admin-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:7px;margin-top:12px}
+#pokemonRoleAssignmentPanel .role-admin-option{display:flex;align-items:center;gap:8px;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--panel-alt);font-size:12px}
+#pokemonRoleAssignmentPanel .role-admin-option input{accent-color:var(--teal)}
+#pokemonRoleAssignmentPanel table{width:100%;border-collapse:collapse}
+#pokemonRoleAssignmentPanel th,#pokemonRoleAssignmentPanel td{padding:9px 8px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle}
+#pokemonRoleAssignmentPanel th{font-size:11px;color:var(--text-dim);position:sticky;top:0;background:var(--panel)}
+#pokemonRoleAssignmentPanel td .sprite{vertical-align:middle}
+#pokemonRoleSettingsPanel .row>div{min-width:min(100%,220px)}
+@media(max-width:650px){#pokemonRoleSettingsPanel .row,#pokemonRoleAssignmentPanel .row{align-items:stretch!important;flex-direction:column}#pokemonRoleSettingsPanel .row>div,#pokemonRoleAssignmentPanel .row>div{width:100%;min-width:0;flex:1 1 auto!important}}

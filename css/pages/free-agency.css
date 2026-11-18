@@ -686,3 +686,24 @@ body{padding-top:52px }
 .points-select-pair select{width:100%;min-width:0;min-height:38px;padding:7px 28px 7px 10px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--text);font:inherit;font-weight:700;cursor:pointer;}
 .points-range-dash{padding:0 1px 10px;color:var(--dim);font-weight:800;}
 .points-select-pair select:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+
+/* CP4.64: genuine dual-thumb points range slider. */
+.points-dual-slider{position:relative;height:34px;margin:5px 4px 0;touch-action:pan-y}
+.points-slider-track{position:absolute;left:0;right:0;top:14px;height:6px;border-radius:99px;background:var(--border);pointer-events:none}
+.points-slider-track i{position:absolute;top:0;height:100%;border-radius:99px;background:var(--accent)}
+.points-dual-slider input[type=range]{position:absolute;inset:0;width:100%;height:34px;margin:0;background:transparent;appearance:none;-webkit-appearance:none;pointer-events:none;outline:none}
+.points-dual-slider input[type=range]::-webkit-slider-runnable-track{height:6px;background:transparent}
+.points-dual-slider input[type=range]::-moz-range-track{height:6px;background:transparent}
+.points-dual-slider input[type=range]::-webkit-slider-thumb{width:17px;height:17px;margin-top:-5.5px;border:2px solid var(--panel);border-radius:50%;background:var(--accent);box-shadow:0 0 0 1px var(--accent);appearance:none;-webkit-appearance:none;pointer-events:auto;cursor:grab}
+.points-dual-slider input[type=range]::-moz-range-thumb{width:13px;height:13px;border:2px solid var(--panel);border-radius:50%;background:var(--accent);box-shadow:0 0 0 1px var(--accent);pointer-events:auto;cursor:grab}
+.points-dual-slider input#filterPtsMin{z-index:3}
+.points-dual-slider input#filterPtsMax{z-index:4}
+.points-dual-slider input:focus-visible::-webkit-slider-thumb{outline:3px solid color-mix(in srgb,var(--accent) 35%,transparent);outline-offset:3px}
+.points-slider-ends{display:flex;justify-content:space-between;margin-top:1px;color:var(--dim);font-size:10px}
+
+.fa-mulligan-panel{margin:0 0 14px;border-color:color-mix(in srgb,var(--accent) 38%,var(--border));}
+.fa-mulligan-panel h2{margin:0 0 4px;font-size:17px;color:var(--text)}
+.fa-mulligan-panel .row>div{min-width:190px;flex:1}
+.fa-mulligan-panel select{width:100%;min-height:39px;padding:8px 10px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--text);font:inherit}
+.fa-mulligan-panel .note[role=status]{margin-top:8px}
+.points-dual-slider input[type=range]:focus{z-index:6!important}
