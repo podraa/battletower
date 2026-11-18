@@ -1185,7 +1185,7 @@
     const confName=conferenceDisplayName(a.conf);
     const status=a.exactClinched?`Finals Qualified — #${a.currentSeed} Clinched`:a.finalsClinched?`Finals Qualified — currently #${a.currentSeed}`:a.finalsSeeds.length?`Still in the hunt — currently #${a.currentSeed}`:`Eliminated from the finals`;
     const cls=a.finalsClinched?'qualified':(a.finalsSeeds.length?'alive':'eliminated');
-    const explanation=a.exactClinched?'Your seed is locked.':a.finalsClinched?'Your finals place is locked, but your seed can still change.':a.finalsSeeds.length?'You are not qualified yet. You can still reach the finals, but you can also miss them.':'No remaining results can put you in the top 6.';
+    const explanation=a.exactClinched?'Your seed is locked.':a.finalsClinched?'Your finals place is locked, but your seed can still change.':a.finalsSeeds.length?'You are not qualified yet. You can still reach the finals, but you can also miss them.':'No remaining results can put you into the Finals qualification places.';
     let html=`<div class="route-status ${cls}"><strong>${status}</strong> in ${SBL.pokemon.escapeHtml(confName)}. ${explanation}</div>`;
     const other=a.finalsSeeds.length ? a.reachableSeeds.filter(s=>s!==a.currentSeed) : [];
     if(other.length){
@@ -2042,7 +2042,7 @@
           const ownerLabel=seasonOwnerLabel(x.team) || x.team;
           const teamStyle=teamTintForTeam(x.team);
           const diff=Number(x.diff||0);
-          const finalsBound = isConference && i<6;
+          const finalsBound = isConference && i<(Number(STATE.settings?.qualificationPlaces)||6);
           const form = teamRecentForm(x.team,4);
           const formHtml = form.length ? `<div class="standings-form">${form.map(f=>`<span class="form-pip ${f.win?'win':'loss'}">${f.win?'W':'L'}</span>`).join('')}</div>` : '';
           const status = isConference ? qualificationStatus(x.team) : null;
@@ -2065,7 +2065,7 @@
     }
 
     const note = Object.keys(assignments).length
-      ? 'Standings are split using the conference assignments saved in Admin → Season Setup. The top 6 in each conference (highlighted, tagged "Finals") are finals bound. Click any franchise to see its route to qualification.'
+      ? 'Standings are split using the conference assignments saved in Admin → Season Setup. The top 6 in each conference (highlighted, tagged "Finals") qualify. Finals seeds are then ranked across both conferences together by overall standings. Click any franchise to see its route to qualification.'
       : 'No conference assignments have been saved yet. Assign each franchise to a conference from Admin → Season Setup.';
 
     return `<div class="panel">

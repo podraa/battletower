@@ -42,6 +42,10 @@
   let themePickerState = { group:'All' };
   let draft = { target:'', offered:new Set(), requested:new Set(), faQuery:'' };
   let statusMsg = '';
+  let rosterRefreshBusy = false;
+  let rosterRealtimeChannel = null;
+  let preDraftPlan = { seasonId:'', queue:[], loaded:false, saving:false, message:'', query:'', typeFilter:'', roleFilter:'',showAbilities:false };
+  let preDraftSaveChain=Promise.resolve(), preDraftSaveVersion=0;
     // Shared trade status helper. The trade composer is rendered dynamically,
     // so keep this helper independent of the auth form's local setMsg().
     function setStatus(text, danger){
@@ -193,6 +197,8 @@
     });
     if(!seasonSnap) throw new Error('The selected season could not be loaded.');
 
+    DASH.seasonId = String(seasonSnap.seasonId || seasonSnap.id || SBL.leagueDb.selectedSeasonId?.() || '');
+    DASH.seasonStatus = String(seasonSnap.status || '');
     DASH.teamMap = seasonSnap.teamMap || {};
     DASH.settings = Object.assign(
       {rosters:{},freeAgency:{mons:[]}},
@@ -344,6 +350,39 @@
       rawRosters,
       trades
     );
+  }
+
+  async function refreshRosterState(){
+    if(rosterRefreshBusy||!session||!DASH.leagueId)return;
+    rosterRefreshBusy=true;
+    try{
+      const seasonId=SBL.leagueDb?.selectedSeasonId?.()||'';
+      const snap=await SBL.seasons.loadSnapshot({leagueId:DASH.leagueId,seasonId});
+      if(!snap)return;
+      const before=JSON.stringify({rosters:DASH.settings.rosters,freeAgency:DASH.settings.freeAgency});
+      const rawSettings=snap.settings||{};
+      DASH.teamMap=snap.teamMap||DASH.teamMap||{};
+      DASH.settings=Object.assign({rosters:{},freeAgency:{mons:[]}},rawSettings);
+      const rawRosters=normalizeStoredRosters(DASH.settings.rosters||{});
+      DASH.settings.rosters=SBL.trades.getEffectiveRosters(rawRosters,trades);
+      DASH.settings.freeAgency=DASH.settings.freeAgency||{mons:[]};
+      DASH.settings.freeAgency.mons=SBL.trades.restoreFutureFreeAgencyPool(DASH.settings.freeAgency.mons||[],rawRosters,trades);
+      const after=JSON.stringify({rosters:DASH.settings.rosters,freeAgency:DASH.settings.freeAgency});
+      if(before!==after)render();
+    }catch(error){console.warn('Live roster refresh failed:',error);}
+    finally{rosterRefreshBusy=false;}
+  }
+  function startRosterRealtimeRefresh(){
+    const seasonId=SBL.leagueDb?.selectedSeasonId?.()||'';
+    if(seasonId){
+      try{
+        rosterRealtimeChannel=supabase.channel('my-team-roster:'+seasonId)
+          .on('postgres_changes',{event:'UPDATE',schema:'public',table:'league_seasons',filter:'id=eq.'+seasonId},()=>refreshRosterState())
+          .subscribe();
+      }catch(error){console.warn('My Team realtime roster subscription unavailable:',error);}
+    }
+    // Realtime is the fast path; polling is a recovery path for disconnected tabs.
+    setInterval(()=>{if(!document.hidden)refreshRosterState();},12000);
   }
 
   // ---------- auth screens ----------
@@ -1009,11 +1048,160 @@
     document.getElementById('joinLeagueBtn')?.addEventListener('click',()=>openLeagueActionModal('join'));
   }
 
+  function isPreDraftSeason(){
+    const d=DASH.settings?.draft;
+    return !!d && ['setup','lobby'].includes(String(d.status||'setup'));
+  }
+  function draftPoolForPlanner(){
+    const d=DASH.settings?.draft||{};
+    return (Array.isArray(d.pool)?d.pool:[]).filter(m=>m&&m.name);
+  }
+  function plannerMon(id){return draftPoolForPlanner().find(m=>String(m.id||m.name)===String(id));}
+  function plannerAvailable(){return draftPoolForPlanner().filter(m=>!m.drafted);}
+  async function loadPlannerAbilities(){
+    const queued=preDraftPlan.queue.map(plannerMon).filter(Boolean).filter(m=>!Array.isArray(m.abilities)||!m.abilities.length);
+    if(!queued.length)return;
+    let cursor=0;
+    const worker=async()=>{while(cursor<queued.length){const mon=queued[cursor++];
+      const raw=String(mon.name||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[’']/g,'').replace(/♀/g,'-f').replace(/♂/g,'-m').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+      const candidates=[...(SBL.pokemon?.draftStatsApiCandidates?.(mon.name)||[]),raw].filter(Boolean);
+      let abilities=null;
+      for(const slug of [...new Set(candidates)]){
+        const key='sbl_plan_abilities_v1:'+slug;
+        try{const cached=JSON.parse(sessionStorage.getItem(key)||'null');if(Array.isArray(cached)&&cached.length){abilities=cached;break;}}catch(_){}
+        try{const response=await fetch('https://pokeapi.co/api/v2/pokemon/'+encodeURIComponent(slug));if(!response.ok)continue;const data=await response.json();abilities=(data.abilities||[]).map(x=>String(x.ability?.name||'').replace(/-/g,' ')).filter(Boolean);if(abilities.length){try{sessionStorage.setItem(key,JSON.stringify(abilities));}catch(_){}break;}}catch(_){}
+      }
+      if(abilities?.length)mon.abilities=abilities;
+    }};
+    await Promise.all(Array.from({length:Math.min(3,queued.length)},worker));
+    if(preDraftPlan.showAbilities)renderDraftPlannerBody();
+  }
+  async function loadPreDraftPlan(){
+    const seasonId=String(DASH.seasonId||SBL.leagueDb.selectedSeasonId?.()||'');
+    if(!seasonId)return [];
+    if(preDraftPlan.loaded&&preDraftPlan.seasonId===seasonId){
+      const clean=preDraftPlan.queue.filter(id=>plannerMon(id)&&!plannerMon(id)?.drafted);
+      if(clean.length!==preDraftPlan.queue.length){preDraftPlan.queue=clean;savePreDraftPlan();}
+      return preDraftPlan.queue;
+    }
+    preDraftPlan={seasonId,queue:[],loaded:false,saving:false,message:'Loading your saved plan…',query:'',typeFilter:'',roleFilter:'',showAbilities:false};
+    let ids=null;
+    try{ ids=await SBL.draft.queue.load(); }
+    catch(error){ console.warn('Draft plan load failed:',error); }
+    if(!Array.isArray(ids)){try{ids=JSON.parse(localStorage.getItem('sbl_draft_queue:'+seasonId)||'null')}catch(_){ids=null}}
+    const valid=new Set(draftPoolForPlanner().map(m=>String(m.id||m.name)));
+    const original=Array.isArray(ids)?ids.map(String):[];
+    preDraftPlan.queue=original.filter(id=>valid.has(id)&&!plannerMon(id)?.drafted);
+    preDraftPlan.loaded=true;preDraftPlan.message='Your plan is ready.';
+    if(preDraftPlan.queue.length!==original.length){
+      try{const saved=await SBL.draft.queue.save(preDraftPlan.queue);preDraftPlan.message=saved?.ok?'Taken picks removed · plan synced':'Taken picks removed · saved on this device';}
+      catch(error){console.warn('Pruned draft plan sync failed:',error);}
+    }
+    return preDraftPlan.queue;
+  }
+  async function savePreDraftPlan(){
+    const ids=preDraftPlan.queue.map(String),version=++preDraftSaveVersion;
+    preDraftPlan.saving=true;preDraftPlan.message='Saving…';
+    const write=async()=>{
+      try{
+        const result=await SBL.draft.queue.save(ids);
+        if(version===preDraftSaveVersion)preDraftPlan.message=result?.ok?'Saved · synced to Draft Room':'Saved on this device only';
+      }catch(error){console.warn('Draft plan save failed:',error);if(version===preDraftSaveVersion)preDraftPlan.message='Saved on this device only';}
+    };
+    preDraftSaveChain=preDraftSaveChain.then(write,write);
+    await preDraftSaveChain;
+    if(version===preDraftSaveVersion){preDraftPlan.saving=false;renderDraftPlannerBody();}
+  }
+  function queuePreDraftPlan(){
+    preDraftPlan.queue=preDraftPlan.queue.filter(id=>plannerMon(id)&&!plannerMon(id)?.drafted);
+    savePreDraftPlan();
+  }
+  function plannerCard(mon,queued=false,index=-1){
+    const id=String(mon.id||mon.name),sprite=SBL.pokemon.spriteMarkup(mon.name,'sprite');
+    const types=Array.isArray(mon.types)&&mon.types.length?mon.types:(SBL.pokemonTypes?.lookupTypes(mon.name)||[]);
+    const abilities=Array.isArray(mon.abilities)?mon.abilities:[];
+    return `<article class="pre-draft-mon" ${queued?`draggable="true" data-plan-drag-id="${SBL.pokemon.escapeHtml(id)}"`:''}><div class="pre-draft-mon-art">${sprite}</div><div class="pre-draft-mon-info"><strong>${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(mon.name)||mon.name)}</strong><span>${Number(mon.points)||0} pts${types.length?' · '+types.join(' / '):''}</span>${queued&&preDraftPlan.showAbilities?`<small class="pre-draft-abilities">Abilities: ${abilities.length?abilities.map(x=>SBL.pokemon.escapeHtml(String(x).replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase()))).join(' · '):'Loading / unavailable'}</small>`:''}</div>${queued?`<div class="pre-draft-order">#${index+1}</div><div class="pre-draft-actions"><button type="button" data-plan-action="up" data-plan-id="${SBL.pokemon.escapeHtml(id)}" ${index===0?'disabled':''} aria-label="Move up">↑</button><button type="button" data-plan-action="down" data-plan-id="${SBL.pokemon.escapeHtml(id)}" ${index===preDraftPlan.queue.length-1?'disabled':''} aria-label="Move down">↓</button><button type="button" data-plan-action="remove" data-plan-id="${SBL.pokemon.escapeHtml(id)}" aria-label="Remove">×</button></div>`:`<button type="button" class="pre-draft-add" data-plan-action="add" data-plan-id="${SBL.pokemon.escapeHtml(id)}">Add to plan</button>`}</article>`;
+  }
+  function plannerRoleData(){
+    const assignments=DASH.settings?.pokemonRoleAssignments&&typeof DASH.settings.pokemonRoleAssignments==='object'?DASH.settings.pokemonRoleAssignments:{};
+    const roles=[...new Set([...(Array.isArray(DASH.settings?.pokemonRoleCatalog)?DASH.settings.pokemonRoleCatalog:[]),...Object.values(assignments).flatMap(v=>Array.isArray(v)?v:[])])].sort((a,b)=>(SBL.rosterAnalysis?.roleLabel?.(a)||a).localeCompare(SBL.rosterAnalysis?.roleLabel?.(b)||b));
+    return {assignments,roles};
+  }
+  function renderDraftPlannerBody(){
+    const root=document.getElementById('preDraftPlanner');if(!root)return;
+    preDraftPlan.queue=preDraftPlan.queue.filter(id=>plannerMon(id)&&!plannerMon(id)?.drafted);
+    const pool=plannerAvailable(),queued=preDraftPlan.queue.map(plannerMon).filter(Boolean);
+    const {assignments,roles}=plannerRoleData();
+    const query=String(preDraftPlan.query||'').trim().toLowerCase();
+    const filtered=pool.filter(m=>!preDraftPlan.queue.includes(String(m.id||m.name))&&(!query||String(m.name).toLowerCase().includes(query))).filter(m=>{
+      const types=Array.isArray(m.types)&&m.types.length?m.types:(SBL.pokemonTypes?.lookupTypes(m.name)||[]);
+      const monRoles=assignments[analysisRoleKey(m.name)]||[];
+      return (!preDraftPlan.typeFilter||types.some(t=>String(t).toLowerCase()===preDraftPlan.typeFilter))&&(!preDraftPlan.roleFilter||monRoles.includes(preDraftPlan.roleFilter));
+    }).sort((a,b)=>(Number(b.points)||0)-(Number(a.points)||0)||String(a.name).localeCompare(String(b.name)));
+    const list=root.querySelector('[data-planner-available]');
+    const plan=root.querySelector('[data-planner-queue]');
+    const status=root.querySelector('[data-planner-status]');
+    const count=root.querySelector('[data-planner-count]');
+    if(count)count.textContent=`${queued.length} Pokémon planned`;
+    const analysisRoot=document.getElementById('myTeamPlannerAnalysis');
+    if(analysisRoot){
+      const assignments=DASH.settings?.pokemonRoleAssignments&&typeof DASH.settings.pokemonRoleAssignments==='object'?DASH.settings.pokemonRoleAssignments:{};
+      const roles=[...new Set([...(Array.isArray(DASH.settings?.pokemonRoleCatalog)?DASH.settings.pokemonRoleCatalog:[]),...Object.values(assignments).flatMap(v=>Array.isArray(v)?v:[])])].sort((a,b)=>(SBL.rosterAnalysis?.roleLabel?.(a)||a).localeCompare(SBL.rosterAnalysis?.roleLabel?.(b)||b));
+      const actual=(myRoster()||[]).map(mon=>({name:mon.name,status:'actual',types:SBL.pokemonTypes?.lookupTypes(mon.name)||[],roles:Array.isArray(assignments[analysisRoleKey(mon.name)])?assignments[analysisRoleKey(mon.name)]:[]}));
+      const planned=queued.map(mon=>({name:mon.name,status:'planned',types:Array.isArray(mon.types)&&mon.types.length?mon.types:(SBL.pokemonTypes?.lookupTypes(mon.name)||[]),roles:Array.isArray(assignments[analysisRoleKey(mon.name)])?assignments[analysisRoleKey(mon.name)]:[],abilities:Array.isArray(mon.abilities)?mon.abilities:[]}));
+      const entries=[...actual,...planned];
+      analysisRoot.innerHTML=window.SBL?.rosterAnalysis?.render?SBL.rosterAnalysis.render({team:myLeagueTeam(),heading:'Team Analysis',entries,roles,showAbilities:preDraftPlan.showAbilities,sprite:name=>SBL.pokemon.spriteMarkup(name,'sprite','hd')}):'<section class="roster-analysis"><h2>Team Analysis</h2><p>Team Analysis is temporarily unavailable. Please refresh the page.</p></section>';
+      SBL.rosterAnalysis?.bind?.(analysisRoot);
+    }
+    if(status)status.textContent=preDraftPlan.message||'Your plan is saved automatically.';
+    const clearButton=root.querySelector('[data-plan-clear]');if(clearButton)clearButton.disabled=queued.length===0||preDraftPlan.saving;
+    if(plan)plan.innerHTML=queued.length?queued.map((m,i)=>plannerCard(m,true,i)).join(''):'<div class="pre-draft-empty">Your plan is empty. Add Pokémon from the available pool to start building your draft priorities.</div>';
+    if(list)list.innerHTML=filtered.length?filtered.slice(0,160).map(m=>plannerCard(m,false)).join(''):'<div class="pre-draft-empty">No available Pokémon match those filters.</div>';
+  }
+  async function renderDraftPlanner(){
+    contentEl.innerHTML=`<section class="pre-draft-hero"><div><div class="myteam-kicker">PRE-SEASON WORKSPACE</div><h2>Draft Planner</h2><p>Build and evaluate your draft priorities. Your saved plan syncs with the Draft Room, where your actual picks and remaining plan are combined into one live projection.</p></div><div class="pre-draft-hero-stat"><strong data-planner-count>0 Pokémon planned</strong><span>Priority order is yours to change</span></div></section><section class="pre-draft-layout" id="preDraftPlanner"><div class="pre-draft-panel"><div class="pre-draft-panel-head"><div><h3>Your Draft Plan</h3><p>Drag Pokémon to reorder, or use the up/down controls. The first Pokémon is your highest priority.</p></div><div class="pre-draft-head-tools"><label class="pre-draft-ability-toggle"><input type="checkbox" data-plan-abilities ${preDraftPlan.showAbilities?'checked':''}> Show Abilities</label><button type="button" class="pre-draft-clear" data-plan-clear ${preDraftPlan.queue.length?'':'disabled'}>Clear Draft Plan</button><span class="pre-draft-save" data-planner-status>Loading your saved plan…</span></div></div><div data-planner-queue class="pre-draft-list"><div class="pre-draft-empty">Loading your plan…</div></div></div><div class="pre-draft-panel"><div class="pre-draft-panel-head"><div><h3>Available Draft Pool</h3><p>Search and filter the pool, then add Pokémon to your plan.</p></div></div><input class="pre-draft-search" type="search" placeholder="Search Pokémon…" aria-label="Search draft pool" value="${SBL.pokemon.escapeHtml(preDraftPlan.query)}"><div class="pre-draft-filter-row"><select class="pre-draft-type-filter" aria-label="Filter pool by type"><option value="">All types</option>${['Normal','Fire','Water','Electric','Grass','Ice','Fighting','Poison','Ground','Flying','Psychic','Bug','Rock','Ghost','Dragon','Dark','Steel','Fairy'].map(t=>`<option value="${t.toLowerCase()}" ${preDraftPlan.typeFilter===t.toLowerCase()?'selected':''}>${t}</option>`).join('')}</select><select class="pre-draft-role-filter" aria-label="Filter pool by competitive role"><option value="">All roles</option>${plannerRoleData().roles.map(r=>`<option value="${SBL.pokemon.escapeHtml(r)}" ${preDraftPlan.roleFilter===r?'selected':''}>${SBL.pokemon.escapeHtml(SBL.rosterAnalysis?.roleLabel?.(r)||r)}</option>`).join('')}</select></div><div data-planner-available class="pre-draft-list"><div class="pre-draft-empty">Loading available Pokémon…</div></div></div></section><div id="myTeamPlannerAnalysis" class="my-team-planner-analysis"><section class="roster-analysis"><h2>Team Analysis</h2><p>Loading your roster and draft plan analysis…</p></section></div>`;
+    await loadPreDraftPlan();renderDraftPlannerBody();
+    const root=document.getElementById('preDraftPlanner');
+    if(root&&!root.dataset.abilitiesBound){root.dataset.abilitiesBound='1';root.addEventListener('change',e=>{if(e.target.matches('[data-plan-abilities]')){preDraftPlan.showAbilities=!!e.target.checked;renderDraftPlannerBody();if(preDraftPlan.showAbilities)void loadPlannerAbilities();}});}
+    if(root&&!root.dataset.dragBound){
+      root.dataset.dragBound='1';let dragging='';
+      root.addEventListener('dragstart',e=>{const card=e.target.closest('[data-plan-drag-id]');if(!card)return;dragging=card.dataset.planDragId;e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',dragging);card.classList.add('is-dragging');});
+      root.addEventListener('dragend',()=>{dragging='';root.querySelectorAll('.is-dragging,.is-drop-target').forEach(x=>x.classList.remove('is-dragging','is-drop-target'));});
+      root.addEventListener('dragover',e=>{const card=e.target.closest('[data-plan-drag-id]');if(!card||!dragging)return;e.preventDefault();root.querySelectorAll('.is-drop-target').forEach(x=>x.classList.remove('is-drop-target'));card.classList.add('is-drop-target');});
+      root.addEventListener('drop',e=>{const card=e.target.closest('[data-plan-drag-id]');if(!card||!dragging)return;e.preventDefault();const from=preDraftPlan.queue.indexOf(dragging),to=preDraftPlan.queue.indexOf(card.dataset.planDragId);if(from<0||to<0||from===to)return;const [id]=preDraftPlan.queue.splice(from,1);preDraftPlan.queue.splice(to,0,id);renderDraftPlannerBody();queuePreDraftPlan();});
+    }
+  }
+  function handleDraftPlannerClick(event){
+    const clearButton=event.target.closest('[data-plan-clear]');
+    if(clearButton){
+      if(!preDraftPlan.queue.length||!window.confirm('Clear your entire Draft Plan? This removes all planned picks from My Team and the Draft Room. Your actual drafted Pokémon will not be affected.'))return;
+      preDraftPlan.queue=[];preDraftPlan.message='Clearing your Draft Plan…';renderDraftPlannerBody();queuePreDraftPlan();return;
+    }
+    const button=event.target.closest('[data-plan-action]');if(!button)return;
+    const id=String(button.dataset.planId||''),action=button.dataset.planAction;
+    if(action==='add'&&!preDraftPlan.queue.includes(id)&&plannerMon(id)&&!plannerMon(id).drafted)preDraftPlan.queue.push(id);
+    else if(action==='remove')preDraftPlan.queue=preDraftPlan.queue.filter(x=>x!==id);
+    else if(action==='up'||action==='down'){
+      const i=preDraftPlan.queue.indexOf(id),j=action==='up'?i-1:i+1;
+      if(i>=0&&j>=0&&j<preDraftPlan.queue.length)[preDraftPlan.queue[i],preDraftPlan.queue[j]]=[preDraftPlan.queue[j],preDraftPlan.queue[i]];
+    }else return;
+    renderDraftPlannerBody();queuePreDraftPlan();
+  }
+  function analysisRoleKey(name){return String(name||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/♀/g,'-f').replace(/♂/g,'-m').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');}
+  function myTeamAnalysisMarkup(roster){
+    if(!window.SBL?.rosterAnalysis?.render)return '';
+    const assignments=DASH.settings?.pokemonRoleAssignments&&typeof DASH.settings.pokemonRoleAssignments==='object'?DASH.settings.pokemonRoleAssignments:{};
+    const roles=[...new Set([...(Array.isArray(DASH.settings?.pokemonRoleCatalog)?DASH.settings.pokemonRoleCatalog:[]),...Object.values(assignments).flatMap(v=>Array.isArray(v)?v:[])])].sort((a,b)=>a.localeCompare(b));
+    const entries=(roster||[]).map(mon=>({name:mon.name,types:SBL.pokemonTypes?.lookupTypes(mon.name)||[],roles:Array.isArray(assignments[analysisRoleKey(mon.name)])?assignments[analysisRoleKey(mon.name)]:[]}));
+    return SBL.rosterAnalysis.render({team:myLeagueTeam(),heading:'Team Analysis',entries,roles,sprite:name=>SBL.pokemon.spriteMarkup(name,'sprite','hd')});
+  }
+
   function renderMyTeam(){
     const pageTitle=document.querySelector('#app > header h1');
     const pageSub=document.querySelector('#app > header .sub');
     if(pageTitle) pageTitle.textContent='My Team';
-    if(pageSub) pageSub.textContent=`${DASH.leagueName || 'League'} · Manage your roster, trades and league activity`;
+    if(pageSub) pageSub.textContent=isPreDraftSeason()?`${DASH.leagueName || 'League'} · Prepare your draft priorities`:`${DASH.leagueName || 'League'} · Manage your roster, trades and league activity`;
+    if(isPreDraftSeason() && ['active','approved'].includes(authoritativeClaimStatus())){ renderDraftPlanner(); return; }
     if(authoritativeClaimStatus() !== 'active' && authoritativeClaimStatus() !== 'approved'){
       contentEl.innerHTML = `<div class="panel"><div class="empty-state">Your team claim needs to be approved by a commissioner before you can manage your roster.</div></div>`;
       return;
@@ -1078,6 +1266,8 @@
         }).join('')}</div>`:'<div class="empty-state">No roster published for your team yet.</div>'}
       </section>
 
+      ${myTeamAnalysisMarkup(roster)}
+
       <section class="panel" id="recentBattlesPanel">
         <div class="myteam-section-head"><div><h2>Recent Battles</h2><div class="note">Your latest completed matches. Click Summary to view the full replay-browser-style match breakdown.</div></div><button class="ghost small" type="button" id="viewAllBattlesBtn">View all</button></div>
         <div class="recent-battles-list">${myTeamMatchData().slice(0,5).map(recentBattleRowHtml).join('') || '<div class="empty-state">No match history yet.</div>'}</div>
@@ -1105,6 +1295,7 @@
         </section>
       </div>`;
 
+    SBL.rosterAnalysis?.bind(contentEl);
     document.getElementById('rerollTradeBtn').onclick=()=>renderMyTeam();
     if(suggestion){ document.getElementById('useTradeSuggestionBtn').onclick=()=>useRandomTradeSuggestion(suggestion); }
     wireNextBattle();
@@ -1940,6 +2131,9 @@
     if(activeTab === 'account') return renderAccount();
   }
 
+  contentEl.addEventListener('input',e=>{if(e.target.matches('.pre-draft-search')){preDraftPlan.query=e.target.value;renderDraftPlannerBody();const input=contentEl.querySelector('.pre-draft-search');if(input){input.focus();input.setSelectionRange(input.value.length,input.value.length);}}});
+  contentEl.addEventListener('change',e=>{if(e.target.matches('.pre-draft-type-filter')){preDraftPlan.typeFilter=e.target.value;renderDraftPlannerBody();}if(e.target.matches('.pre-draft-role-filter')){preDraftPlan.roleFilter=e.target.value;renderDraftPlannerBody();}});
+
   async function boot(){
     contentEl.innerHTML = '<div class="empty-state">Loading…</div>';
     try{
@@ -1951,6 +2145,7 @@
   }
 
   contentEl.addEventListener('click',e=>{
+    if(e.target.closest('[data-plan-action],[data-plan-clear]')){handleDraftPlannerClick(e);return;}
     const matchBtn=e.target.closest('[data-myteam-match]');
     if(matchBtn){e.preventDefault();openMyTeamReplaySummary(matchBtn.dataset.myteamMatch);return;}
     const recordBtn=e.target.closest('[data-record-adjust]');
@@ -1969,7 +2164,7 @@
   (async function init(){
     const {data} = await supabase.auth.getSession();
     session = data.session;
-    if(session){ await boot(); }
+    if(session){ await boot(); startRosterRealtimeRefresh(); }
     else{ renderAuthGate(); }
 
     supabase.auth.onAuthStateChange((event, newSession)=>{

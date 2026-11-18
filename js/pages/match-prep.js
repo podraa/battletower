@@ -1324,6 +1324,100 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
     ${!coverageRows.length?'<div class="tc2-empty">No legal damaging moves outside Normal-type were found for this Pokémon.</div>':''}
   </section>`;
 
+
+  // -------- Match Prep: Opponent Threat Board + six-Pokémon Team Planner --------
+  // Both tools use the already-loaded current rosters, replay aggregates and
+  // Showdown/PokéAPI type data. They do not introduce sample data or writes.
+  const threatGames=opponentAggregate.games.length;
+  const threatRows=opp.map(mon=>{
+    const u=usageFor(mon);
+    const bring=threatGames?Math.round((Number(u.appearances||0)/threatGames)*100):0;
+    const sentOutMatches=(u.gameSets||[]).filter(set=>Number(set.sentOut||0)>0).length;
+    const sentOut=threatGames?Math.round((sentOutMatches/threatGames)*100):0;
+    const pressure=your.filter(ym=>{
+      const mult=combinedMultiplier(typeMap[mon.species]||[],typeMap[ym.species]||[]);
+      return mult!==null&&mult>=2;
+    }).length;
+    const pressurePct=your.length?Math.round(pressure/your.length*100):0;
+    const maxKOs=Math.max(1,...opp.map(x=>Number(usageFor(x).kills||0)));
+    const koScore=Math.round(Math.min(100,(Number(u.kills||0)/maxKOs)*100));
+    const score=Math.round(bring*.30+sentOut*.15+koScore*.20+pressurePct*.35);
+    const items=[...Object.entries(u.confirmedItems||{}).map(([name])=>`${name} · observed`),...Object.entries(u.inferredItems||{}).map(([name])=>`${name} · inferred`)].slice(0,4);
+    return {mon,u,bring,sentOut,pressure,pressurePct,score,items,moves:observedFor(mon),roles:rolesFor(mon)};
+  }).sort((a,b)=>b.score-a.score||b.bring-a.bring);
+  const threatLevel=s=>s>=70?'high':s>=45?'medium':'low';
+  const threatLabel=s=>s>=70?'High':s>=45?'Medium':'Lower';
+  const threatDetailMarkup=row=>{
+    if(!row)return '<div class="prep-new-empty">Select an opponent Pokémon to inspect its threat profile.</div>';
+    const m=row.mon,types=normalizedTypes(typeMap[m.species]||[]);
+    const weak=defensiveTypeEffectiveness(types).filter(x=>x.mult!==null&&x.mult>1);
+    const yourThreats=your.filter(ym=>{const mult=combinedMultiplier(typeMap[m.species]||[],typeMap[ym.species]||[]);return mult!==null&&mult>=2;});
+    return `<div class="prep-new-detail-head">${sprite(m.species,'prep-new-detail-sprite')}<div><h3>${esc(displaySpecies(m))}</h3><div class="type-row">${types.map(typePill).join('')}</div><span>${esc(row.roles.slice(0,2).join(' · ')||'Role not established')}</span></div></div>
+      <div class="prep-new-scoreline"><div><small>THREAT SCORE</small><strong>${row.score}<em>/100</em></strong></div><span class="prep-new-threat-pill ${threatLevel(row.score)}">${threatLabel(row.score)} priority</span></div>
+      <div class="prep-new-statgrid"><div><small>BROUGHT</small><b>${row.bring}%</b></div><div><small>SENT OUT</small><b>${row.sentOut}%</b></div><div><small>KOs</small><b>${Number(row.u.kills||0)}</b></div><div><small>DAMAGE DEALT</small><b>${Math.round(Number(row.u.dealt||0)).toLocaleString()}</b></div></div>
+      <div class="prep-new-detail-block"><h4>OBSERVED MOVES</h4><div class="prep-new-chips">${row.moves.length?row.moves.slice(0,8).map(x=>`<span>${esc(x)}</span>`).join(''):'<i>No replay move data yet</i>'}</div></div>
+      <div class="prep-new-detail-block"><h4>ITEM EVIDENCE</h4><div class="prep-new-chips">${row.items.length?row.items.map(x=>`<span>${esc(x)}</span>`).join(''):'<i>No item evidence recorded</i>'}</div></div>
+      <div class="prep-new-detail-block"><h4>THREATENS BY TYPE</h4><div class="prep-new-chips">${yourThreats.length?yourThreats.map(x=>`<span>${esc(displaySpecies(x))}</span>`).join(''):'<i>No clear type advantage against your roster</i>'}</div></div>
+      <div class="prep-new-detail-block"><h4>TYPE WEAKNESSES</h4><div class="prep-new-chips">${weak.length?weak.map(x=>`<span>${esc(x.type)} ${fmtMult(x.mult)}</span>`).join(''):'<i>No type weaknesses identified</i>'}</div></div>`;
+  };
+  const selectedThreatKey=STATE.prepThreatSelected&&opp.some(m=>norm(m.species)===norm(STATE.prepThreatSelected))?STATE.prepThreatSelected:(threatRows[0]?.mon.species||'');
+  STATE.prepThreatSelected=selectedThreatKey;
+  window.__sblRefreshPrepThreatBoard=()=>{
+    const root=document.getElementById('prepThreatBoard'); if(!root)return;
+    const query=String(root.querySelector('#prepThreatSearch')?.value||'').trim().toLowerCase();
+    const filter=root.querySelector('#prepThreatFilter')?.value||'all';
+    const sort=root.querySelector('#prepThreatSort')?.value||'score';
+    let rows=threatRows.filter(r=>!query||displaySpecies(r.mon).toLowerCase().includes(query)||normalizedTypes(typeMap[r.mon.species]||[]).join(' ').toLowerCase().includes(query));
+    rows=rows.filter(r=>filter==='all'||threatLevel(r.score)===filter);
+    rows.sort((a,b)=>sort==='bring'?b.bring-a.bring:sort==='sent'?b.sentOut-a.sentOut:sort==='kos'?Number(b.u.kills||0)-Number(a.u.kills||0):sort==='speed'?(b.mon.baseSpeed??-1)-(a.mon.baseSpeed??-1):b.score-a.score);
+    const body=root.querySelector('#prepThreatRows');
+    if(body)body.innerHTML=rows.map(r=>`<tr data-threat-mon="${esc(r.mon.species)}" class="${norm(r.mon.species)===norm(STATE.prepThreatSelected)?'selected':''}"><td><div class="prep-new-mon-cell">${sprite(r.mon.species,'prep-new-table-sprite')}<div><strong>${esc(displaySpecies(r.mon))}</strong><small>${normalizedTypes(typeMap[r.mon.species]||[]).map(esc).join(' / ')||'Typing unavailable'}</small></div></div></td><td><span class="prep-new-threat-pill ${threatLevel(r.score)}">${threatLabel(r.score)}</span><div class="prep-new-meter"><i style="width:${r.score}%"></i></div></td><td>${r.bring}%</td><td>${r.sentOut}%</td><td>${Number(r.u.kills||0)}</td><td>${r.mon.baseSpeed??'—'}</td></tr>`).join('');
+    const empty=root.querySelector('#prepThreatEmpty'); if(empty)empty.hidden=rows.length>0;
+    const count=root.querySelector('#prepThreatCount'); if(count)count.textContent=`${rows.length} / ${opp.length}`;
+    const selected=threatRows.find(r=>norm(r.mon.species)===norm(STATE.prepThreatSelected));
+    const detail=root.querySelector('#prepThreatDetail'); if(detail)detail.innerHTML=threatDetailMarkup(selected);
+  };
+  const threatBoardSection=`<section id="prepThreatBoard" class="panel prep-selectable-section prep-new-section" data-prep-section="threats">
+    <div class="prep-new-section-head"><div><span class="prep-new-kicker">SCOUTING PRIORITIES</span><h2>Opponent Threat Board</h2><p class="panel-desc">A matchup-specific ranking built from recorded replay usage, KOs, observed moves and type pressure against your current roster.</p></div><div class="prep-new-count"><strong id="prepThreatCount">${opp.length} / ${opp.length}</strong><small>OPPONENTS</small></div></div>
+    <div class="prep-new-toolbar"><input id="prepThreatSearch" type="search" placeholder="Search opponent Pokémon or type…" aria-label="Search opponent threats"><select id="prepThreatSort" aria-label="Sort threats"><option value="score">Sort: Threat score</option><option value="bring">Bring rate</option><option value="sent">Sent-out rate</option><option value="kos">KOs</option><option value="speed">Base Speed</option></select><select id="prepThreatFilter" aria-label="Filter threat priority"><option value="all">All priorities</option><option value="high">High priority</option><option value="medium">Medium priority</option><option value="low">Lower priority</option></select></div>
+    <div class="prep-new-threat-layout"><div class="prep-new-table-wrap"><table class="prep-new-table"><thead><tr><th>Pokémon</th><th>Priority</th><th>Brought</th><th>Sent out</th><th>KOs</th><th>Base Spe</th></tr></thead><tbody id="prepThreatRows"></tbody></table><div id="prepThreatEmpty" class="prep-new-empty" hidden>No Pokémon match these filters.</div></div><aside id="prepThreatDetail" class="prep-new-detail"></aside></div>
+    <p class="prep-new-footnote">Threat score is a comparative scouting aid, not a prediction. Usage rates use the opponent's recorded matches; missing replay evidence is shown as unavailable rather than assumed.</p>
+  </section>`;
+  const validPlannerNames=your.map(m=>m.species);
+  if(STATE.prepPlannerTeam!==teamKey(yourTeam)){STATE.prepPlannerTeam=teamKey(yourTeam);STATE.prepPlannerSelected=validPlannerNames.slice(0,6);}
+  if(!Array.isArray(STATE.prepPlannerSelected))STATE.prepPlannerSelected=validPlannerNames.slice(0,6);
+  STATE.prepPlannerSelected=validPlannerNames.filter(sp=>STATE.prepPlannerSelected.includes(sp)).slice(0,6);
+  const plannerTypeCounts=team=>{
+    const counts={};team.forEach(mon=>defensiveTypeEffectiveness(typeMap[mon.species]||[]).forEach(x=>{if(x.mult!==null&&x.mult>1)counts[x.type]=(counts[x.type]||0)+1;}));
+    return Object.entries(counts).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));
+  };
+  const plannerMarkup=()=>{
+    const query=String(STATE.prepPlannerSearch||'').toLowerCase();
+    const team=your.filter(m=>STATE.prepPlannerSelected.some(sp=>norm(sp)===norm(m.species)));
+    const filtered=your.filter(m=>!query||displaySpecies(m).toLowerCase().includes(query)||(typeMap[m.species]||[]).join(' ').toLowerCase().includes(query));
+    const weak=plannerTypeCounts(team).slice(0,7);
+    const oppPressure=opp.map(m=>({mon:m,count:team.filter(y=>{const mult=combinedMultiplier(typeMap[m.species]||[],typeMap[y.species]||[]);return mult!==null&&mult>=2;}).length})).sort((a,b)=>b.count-a.count);
+    const speedRows=team.map(m=>({mon:m,beats:opp.filter(o=>m.maxSpeed!==null&&o.maxSpeed!==null&&m.maxSpeed>o.maxSpeed).length,total:opp.filter(o=>m.maxSpeed!==null&&o.maxSpeed!==null).length})).sort((a,b)=>b.beats-a.beats);
+    const selectedMoves=team.map(m=>({mon:m,moves:window.__sblPlannerMoves?.[m.species]||[]}));
+    const offensive=TYPE_NAMES.map(type=>({type,targets:opp.filter(o=>selectedMoves.some(x=>x.moves.some(mv=>mv.type===type)&&normalizedTypes(typeMap[o.species]||[]).length&&normalizedTypes(typeMap[o.species]||[]).reduce((v,d)=>v*typeChartMultiplier(type,d),1)>=2))})).filter(x=>x.targets.length).sort((a,b)=>b.targets.length-a.targets.length);
+    const maxWeak= Math.max(1,...weak.map(x=>x[1]));
+    return `<div class="prep-new-planner-layout"><div class="prep-new-roster-side"><div class="prep-new-planner-top"><div><h3>Your roster</h3><p>Choose up to six Pokémon for this matchup.</p></div><span class="prep-new-selected-count"><b>${team.length}</b> / 6 selected</span></div><div class="prep-new-roster-grid">${filtered.map(m=>{const on=team.some(x=>norm(x.species)===norm(m.species));return `<button type="button" class="prep-new-roster-card ${on?'selected':''}" data-planner-mon="${esc(m.species)}" ${!on&&team.length>=6?'disabled':''}>${sprite(m.species,'prep-new-roster-sprite')}<span><strong>${esc(displaySpecies(m))}</strong><small>${(typeMap[m.species]||[]).map(esc).join(' / ')||'Type unavailable'} · Spe ${m.baseSpeed??'—'}</small></span><i>${on?'✓':'＋'}</i></button>`;}).join('')||'<div class="prep-new-empty">No roster Pokémon match this search.</div>'}</div></div>
+      <aside class="prep-new-planner-side"><section class="prep-new-planner-card"><div class="prep-new-card-title"><h3>Selected six</h3><button type="button" class="prep-new-clear" data-planner-clear>Clear</button></div><div class="prep-new-selected-list">${team.length?team.map(m=>`<div class="prep-new-selected-row">${sprite(m.species,'prep-new-selected-sprite')}<div><strong>${esc(displaySpecies(m))}</strong><small>${(typeMap[m.species]||[]).map(esc).join(' / ')} · ${m.baseSpeed??'—'} Spe</small></div><button type="button" data-planner-remove="${esc(m.species)}" aria-label="Remove ${esc(displaySpecies(m))}">×</button></div>`).join(''):'<div class="prep-new-empty">Select Pokémon from your roster.</div>'}</div><p class="prep-new-validation">${team.length===6?'Complete team selected.':`${6-team.length} more selection${6-team.length===1?'':'s'} needed.`}</p></section>
+      <section class="prep-new-planner-card"><h3>Defensive weaknesses</h3><p>Number of selected Pokémon weak to each attacking type.</p>${weak.length?weak.map(([type,n])=>`<div class="prep-new-coverage-row"><span>${typePill(type)}</span><div class="prep-new-meter"><i style="width:${n/maxWeak*100}%"></i></div><b>${n}/${team.length}</b></div>`).join(''):'<div class="prep-new-empty">No shared weaknesses identified yet.</div>'}</section></aside></div>
+      <div class="prep-new-planner-insights"><section class="prep-new-planner-card"><h3>Offensive coverage</h3><p>Attacking move types found in the selected Pokémon's learnsets that hit the opponent super-effectively.</p><div class="prep-new-insight-chips">${offensive.length?offensive.map(x=>`<span>${typePill(x.type)} <b>${x.targets.length}/${opp.length}</b></span>`).join(''):'<i>Move coverage is still loading or no super-effective coverage was found.</i>'}</div></section>
+      <section class="prep-new-planner-card"><h3>Matchup pressure</h3><p>Opposing Pokémon with a type advantage against your selected team.</p>${oppPressure.length?oppPressure.map(x=>`<div class="prep-new-pressure-row">${sprite(x.mon.species,'prep-new-pressure-sprite')}<strong>${esc(displaySpecies(x.mon))}</strong><span>${x.count}/${team.length} threatened</span></div>`).join(''):'<div class="prep-new-empty">No opponent roster data available.</div>'}</section>
+      <section class="prep-new-planner-card"><h3>Speed outlook</h3><p>Maximum standard level-100 Speed (252 EVs, positive nature), without field modifiers.</p>${speedRows.length?speedRows.map(x=>`<div class="prep-new-speed-row">${sprite(x.mon.species,'prep-new-pressure-sprite')}<strong>${esc(displaySpecies(x.mon))}</strong><b>${x.mon.maxSpeed??'—'}</b><span>${x.total?`${x.beats}/${x.total} opponents outsped`:'No speed data'}</span></div>`).join(''):'<div class="prep-new-empty">Select Pokémon to compare Speed.</div>'}</section></div>`;
+  };
+  window.__sblRefreshPrepTeamPlanner=()=>{const root=document.getElementById('prepPlannerContent');if(root)root.innerHTML=plannerMarkup();};
+  const teamPlannerSection=`<section id="prepTeamPlanner" class="panel prep-selectable-section prep-new-section" data-prep-section="planner"><div class="prep-new-section-head"><div><span class="prep-new-kicker">BUILD YOUR MATCHUP</span><h2>Six-Pokémon Team Planner</h2><p class="panel-desc">Select your intended six and review their combined defensive profile, offensive type coverage, opponent pressure and Speed outlook.</p></div></div><div class="prep-new-toolbar"><input id="prepPlannerSearch" type="search" value="${esc(STATE.prepPlannerSearch||'')}" placeholder="Search your roster…" aria-label="Search your roster"></div><div id="prepPlannerContent"></div></section>`;
+  // Preload move-type data for selected Pokémon. This only reads public
+  // Pokédex/learnset data and uses the existing Match Prep cache.
+  window.__sblPlannerMoves={};
+  window.__sblLoadPlannerMoveTypes=async species=>{if(!window.__sblPlannerMoves[species]){try{window.__sblPlannerMoves[species]=await loadCoverageMoves(species);}catch(_){window.__sblPlannerMoves[species]=[];}}return window.__sblPlannerMoves[species];};
+  await Promise.all(STATE.prepPlannerSelected.map(async species=>{try{window.__sblPlannerMoves[species]=await loadCoverageMoves(species);}catch(_){window.__sblPlannerMoves[species]=[];}}));
+  window.__sblRefreshPrepThreatBoard();
+  window.__sblRefreshPrepTeamPlanner();
+
   const speedNature=(n)=>n==='positive'?1.1:n==='negative'?0.9:1;
   const speedStatFor=(base,evs,natureKey)=>Math.floor(Math.floor((2*base+31+Math.floor((evs||0)/4))*100/100+5)*speedNature(natureKey));
   const speedCfgFor=(species)=>({nature:'positive',evs:252,...(STATE.prepSpeedConfig?.[species]||{})});
@@ -1553,6 +1647,8 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
   <section class="panel prep-section-picker">
     <div class="prep-section-tabs" id="prepSectionTabs" role="tablist" aria-label="Match Prep sections">
       <button type="button" class="prep-section-tab" data-section="overview" role="tab">Team Overview</button>
+      <button type="button" class="prep-section-tab" data-section="threats" role="tab">Threat Board</button>
+      <button type="button" class="prep-section-tab" data-section="planner" role="tab">Team Planner</button>
       <button type="button" class="prep-section-tab" data-section="typechart" role="tab">Type Chart</button>
       <button type="button" class="prep-section-tab" data-section="coverage" role="tab">Team Coverage</button>
       <button type="button" class="prep-section-tab" data-section="switch" role="tab">Switch-In Analyser</button>
@@ -1575,6 +1671,8 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
       </div>
     </div>
   </section>
+  ${threatBoardSection}
+  ${teamPlannerSection}
   ${latestMatchesSection}
   ${typeChartSection}
   ${coverageSection}
@@ -1611,7 +1709,7 @@ async function render(){
       // let an older render win the race and replace the newer selection.
       if(renderToken!==STATE.prepRenderToken) return;
       const main=$('main');
-      if(main) main.innerHTML=nextMarkup;
+      if(main){ main.innerHTML=nextMarkup; window.__sblRefreshPrepThreatBoard?.(); window.__sblRefreshPrepTeamPlanner?.(); }
     }catch(e){
       console.error('Match Prep render failed:',e);
       $('main').innerHTML=`<section class="panel"><div class="empty">Match Prep could not load: ${esc(e.message||e)}</div></section>`;
@@ -1631,7 +1729,31 @@ async function render(){
         tab.setAttribute('aria-selected',active?'true':'false');
       });
     };
+
     prepSectionTabs.forEach(tab=>tab.addEventListener('click',()=>showPrepSection(tab.dataset.section)));
+    const threatRoot=$('prepThreatBoard');
+    if(threatRoot){
+      threatRoot.addEventListener('input',e=>{if(e.target.id==='prepThreatSearch')window.__sblRefreshPrepThreatBoard?.();});
+      threatRoot.addEventListener('change',e=>{if(e.target.id==='prepThreatSort'||e.target.id==='prepThreatFilter')window.__sblRefreshPrepThreatBoard?.();});
+      threatRoot.addEventListener('click',e=>{const row=e.target.closest('[data-threat-mon]');if(row){STATE.prepThreatSelected=row.dataset.threatMon;window.__sblRefreshPrepThreatBoard?.();}});
+    }
+    const plannerRoot=$('prepTeamPlanner');
+    if(plannerRoot){
+      plannerRoot.addEventListener('input',e=>{if(e.target.id==='prepPlannerSearch'){STATE.prepPlannerSearch=e.target.value;window.__sblRefreshPrepTeamPlanner?.();}});
+      plannerRoot.addEventListener('click',async e=>{
+        const clear=e.target.closest('[data-planner-clear]');
+        const remove=e.target.closest('[data-planner-remove]');
+        const pick=e.target.closest('[data-planner-mon]');
+        if(clear){STATE.prepPlannerSelected=[];}
+        else if(remove){STATE.prepPlannerSelected=STATE.prepPlannerSelected.filter(x=>norm(x)!==norm(remove.dataset.plannerRemove));}
+        else if(pick){const species=pick.dataset.plannerMon;const has=STATE.prepPlannerSelected.some(x=>norm(x)===norm(species));if(has)STATE.prepPlannerSelected=STATE.prepPlannerSelected.filter(x=>norm(x)!==norm(species));else if(STATE.prepPlannerSelected.length<6)STATE.prepPlannerSelected.push(species);}
+        else return;
+        const chosen=[...STATE.prepPlannerSelected];
+        await Promise.all(chosen.map(species=>window.__sblLoadPlannerMoveTypes?.(species))); 
+        window.__sblRefreshPrepTeamPlanner?.();
+      });
+    }
+
 
     const notesStatus=$('prepNotesStatus');
     const notesWeekSelect=$('prepNotesWeek');

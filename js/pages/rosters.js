@@ -63,6 +63,15 @@
       return sum + (Number.isFinite(points) ? points : 0);
     }, 0);
   }
+  function roleKey(name){return String(name||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/♀/g,'-f').replace(/♂/g,'-m').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');}
+  function roleAssignments(settings){const value=settings?.pokemonRoleAssignments;return value&&typeof value==='object'?value:{};}
+  function rolesFor(name,settings){const value=roleAssignments(settings)[roleKey(name)];return Array.isArray(value)?value:[];}
+  function allRoles(settings){return [...new Set([...(Array.isArray(settings?.pokemonRoleCatalog)?settings.pokemonRoleCatalog:[]),...Object.values(roleAssignments(settings)).flatMap(v=>Array.isArray(v)?v:[])])].sort((a,b)=>a.localeCompare(b));}
+  function analysisMarkup(team,list,settings){
+    if(!window.SBL?.rosterAnalysis?.render)return '';
+    const entries=(Array.isArray(list)?list:[]).map(mon=>({name:canonicalName(mon?.name||mon),types:Array.isArray(mon?.types)&&mon.types.length?mon.types:(SBL.pokemonTypes?.lookupTypes(mon?.name||mon)||[]),roles:rolesFor(mon?.name||mon,settings)}));
+    return SBL.rosterAnalysis.render({team,entries,roles:allRoles(settings),sprite:name=>sprite(name)});
+  }
   function budgetMarkup(team, list){
     const spent = rosterPoints(list);
     const remaining = teamBudget(team) - spent;
@@ -159,8 +168,9 @@
         content.innerHTML = `${draftNotice}<div class="grid${team === '__all__' ? '' : ' single'}">${selectedTeams.map(name => `
           <section class="card${SBL.teamColors.get(settings,name)?' team-tinted':''}"${SBL.teamColors.styleAttr(settings,name)}>
             <div class="head"><div><h2><span class="team-link" role="button" tabindex="0" data-team-popup="${esc(name)}" title="Open ${esc(name)} roster">${esc(name)}</span>${ownerTag(name)}</h2><span class="count">${rosters[name].length} Pokémon</span></div>${budgetMarkup(name, rosters[name])}</div>
-            <div class="mons">${rosters[name].map(mon => renderPokemon(name, mon)).join('')}</div>
+            <div class="mons">${rosters[name].map(mon => renderPokemon(name, mon)).join('')}</div>${analysisMarkup(name,rosters[name],settings)}
           </section>`).join('')}</div>`;
+        SBL.rosterAnalysis?.bind(content);
       }
 
       rosterSelect.onchange = () => renderSelection(rosterSelect.value);

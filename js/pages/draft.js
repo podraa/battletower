@@ -18,7 +18,8 @@ function draftViewUrl(view){
   if(MOCK_DRAFT_MODE) url.searchParams.set('mock_draft',MOCK_DRAFT_ID);
   return url.href;
 }
-let state={teamMap:{},settings:{draft:null,rosters:{}}}, session=null, profile=null, currentFranchise=null, filter='', bootError='';
+let state={teamMap:{},settings:{draft:null,rosters:{}}}, session=null, profile=null, profileLoadError='', currentFranchise=null, availableLeagueFranchises=[], franchiseLoadError='', filter='', bootError='';
+if(SBL.rosterAnalysis)SBL.rosterAnalysis.bind(content);
 const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 function defaultDraft(){return{status:'setup',mode:'manual',defaultBudget:120,budgets:{},pool:[],authorizedPickerIds:[],order:[],currentPick:0,picks:[],minPicks:10,maxPicks:10,updatedAt:null}}
 function draftStatSource(m){const out={};for(const k of ['hp','atk','def','spa','spd','spe']){const v=SBL.draftDash?.statValue?.(m,k);if(v!=null)out[k]=v;}return Object.keys(out).length?out:null}
@@ -46,7 +47,7 @@ function draftHasUsableStats(mon){return ['hp','atk','def','spa','spd','spe'].ev
 async function enrichDraftPoolMetadata(){
   const pool=state.settings.draft?.pool||[];
   const missing=pool.filter(m=>!draftHasUsableStats(m)||!Array.isArray(m.abilities)||!m.abilities.length||!Array.isArray(m.types)||!m.types.length);
-  if(!missing.length){if($('dashRoot')&&dash.tab==='pool')drawDashList(state.settings.draft);return;}
+  if(!missing.length){if($('dashRoot')&&dash.tab==='pool')drawDashList(state.settings.draft);else if($('dashRoot')&&dash.tab==='queue')drawDashBody(state.settings.draft,true);return;}
   let cursor=0;const failures=[];
   const worker=async()=>{while(cursor<missing.length){const mon=missing[cursor++];try{
     const localTypes=SBL.pokemonTypes?.lookupTypes?.(mon.name)||[];
@@ -78,6 +79,9 @@ async function enrichDraftPoolMetadata(){
   if($('dashRoot')&&dash.tab==='pool'){
     drawDashList(state.settings.draft);
     const count=$('dashCount');if(count&&unresolved.length)count.textContent+=` · ${unresolved.length} Pokémon still missing complete stats`;
+  }else if($('dashRoot')&&dash.tab==='queue'){drawDashBody(state.settings.draft,true);}
+  else if($('cmdShell')&&cmd.tab==='console'){
+    render();
   }
   if(unresolved.length)console.warn(`Draft Room base stats: ${ready}/${pool.length} complete; missing: ${unresolved.map(m=>m.name).join(', ')}`,failures);
 }
@@ -87,27 +91,67 @@ async function readIdentity(){
   if(s.error)throw s.error;
   session=s.data?.session||null;
   if(!session?.user)return;
-  try{profile=await SBL.profiles.get(session.user.id,'is_commissioner',supabase);}catch(_){profile=null;}
+  profile=null;profileLoadError='';
+  try{profile=await SBL.profiles.get(session.user.id,'id,is_commissioner,status',supabase);}
+  catch(error){profileLoadError=String(error?.message||error);console.error('Draft Room commissioner permission lookup failed:',error);}
   const leagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
-  currentFranchise=leagueId&&SBL.franchiseOwnership?.getUserFranchise
-    ? await SBL.franchiseOwnership.getUserFranchise(leagueId,session.user.id,supabase)
-    : null;
+  currentFranchise=null;
+  if(leagueId&&typeof SBL.franchiseOwnership?.getUserFranchise==='function'){
+    try{
+      currentFranchise=await SBL.franchiseOwnership.getUserFranchise(leagueId,session.user.id,supabase);
+    }catch(error){
+      console.warn('Draft identity: no franchise assignment available; commissioner access remains independent.',error);
+      currentFranchise=null;
+    }
+  }
 }
 function teamKey(t){return String(t??'').normalize('NFKC').trim().toLocaleLowerCase().replace(/\s+/g,' ')}
 function sameTeam(a,b){return teamKey(a)===teamKey(b)}
 function keyedValue(obj,team,fallback){const k=Object.keys(obj||{}).find(x=>sameTeam(x,team));return k==null?fallback:obj[k]}
-function teams(){const d=state.settings.draft;const out=[];[...(d.order||[]),...((d.lottery&&d.lottery.proposed)||[]),...Object.keys(state.settings.rosters||{}),...Object.keys(state.settings.franchises||{})].forEach(t=>{const s=String(t||'').trim();if(s&&!out.some(x=>teamKey(x)===teamKey(s)))out.push(s)});return out}
+function teams(){const d=state.settings.draft;const out=[];[...(d.order||[]),...Object.keys(state.settings.rosters||{}),...Object.keys(state.settings.franchises||{}),...Object.keys(state.settings.budgets||{}),...Object.keys(state.settings.franchiseDefinitions||{}),...availableLeagueFranchises.map(f=>f.name)].forEach(t=>{const s=String(t||'').trim();if(s&&!out.some(x=>teamKey(x)===teamKey(s)))out.push(s)});return out}
 function myTeam(){return String(currentFranchise?.franchise?.name||'').trim()}
 function budget(t){const d=state.settings.draft;return Number(keyedValue(d.budgets,t,d.defaultBudget))||0}
 function spent(t){return state.settings.draft.picks.filter(p=>sameTeam(p.team,t)).reduce((n,p)=>n+(Number(p.points)||0),0)}
 function onClock(){const d=state.settings.draft;return d.mode==='ordered'?(d.order[d.currentPick]||null):null}
 function pickCount(d,t){return d.picks.filter(p=>sameTeam(p.team,t)).length}
+// Role assignments are keyed by canonical Pokémon name, not franchise, so one
+// commissioner assignment is shared by every roster in the league.
+function roleKey(name){return String(name||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/♀/g,'-f').replace(/♂/g,'-m').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')}
+function roleAssignments(){const x=state.settings.pokemonRoleAssignments;return x&&typeof x==='object'?x:{}}
+function rolesFor(name){const a=roleAssignments()[roleKey(name)];return Array.isArray(a)?a:[]}
+function allAssignedRoles(){return [...new Set([...(Array.isArray(state.settings.pokemonRoleCatalog)?state.settings.pokemonRoleCatalog:[]),...Object.values(roleAssignments()).flatMap(x=>Array.isArray(x)?x:[])])].sort((a,b)=>a.localeCompare(b))}
+function rosterEntries(team,d=state.settings.draft){
+  const stored=keyedValue(state.settings.rosters,team,[]);
+  const roster=Array.isArray(stored)?stored:[];
+  const picks=(d?.picks||[]).filter(p=>sameTeam(p.team,team));
+  const source=roster.length?roster:picks;
+  return source.map(x=>{const name=typeof x==='string'?x:x?.name||'';const pool=(d?.pool||[]).find(m=>roleKey(m.name)===roleKey(name));return {name,points:Number(x?.points??pool?.points)||0,types:(Array.isArray(x?.types)&&x.types.length?x.types:pool?.types)||[],abilities:Array.isArray(pool?.abilities)?pool.abilities:[],roles:rolesFor(name)};}).filter(x=>x.name);
+}
+function projectedRosterEntries(team,d=state.settings.draft){
+  const actual=rosterEntries(team,d).map(m=>({...m,status:'actual'}));
+  const seen=new Set(actual.map(m=>SBL.pokemon.matchKey(m.name)));
+  const planned=(dash.queue||[]).map(id=>(d?.pool||[]).find(m=>String(m.id)===String(id))).filter(m=>m&&!m.drafted&&!seen.has(SBL.pokemon.matchKey(m.name))).map(m=>({name:m.name,points:Number(m.points)||0,types:Array.isArray(m.types)&&m.types.length?m.types:(SBL.pokemonTypes?.lookupTypes(m.name)||[]),roles:rolesFor(m.name),abilities:Array.isArray(m.abilities)?m.abilities:[],status:'planned'}));
+  return [...actual,...planned];
+}
 function isAdmin(){return !!profile?.is_commissioner && !window.SBL_SITE?.isUserPreview?.()}
+function displayMonName(name){return SBL.pokemon.displayNameWithForm?.(name)||String(name??'')}
 function canPickFor(t){const d=state.settings.draft;if(!isAdmin()||d.status!=='live'||!t)return false;if(MOCK_DRAFT_MODE&&d.mode==='ordered'&&!sameTeam(t,onClock()))return false;if(pickCount(d,t)>=d.maxPicks)return false;return true}
 function sprite(name){try{return SBL.pokemon.spriteMarkup(name,'sprite','hd')}catch{return ''}}
 function showError(title,msg){content.innerHTML='<div class="errorbox"><strong>'+esc(title)+'</strong><div class="note" style="margin-top:6px">'+esc(msg)+'</div><div class="actions"><button class="ghost" id="retry">Retry</button></div></div>';$('retry').onclick=boot}
-function render(){if(PRESENT){renderPresent();return}const d=state.settings.draft;const ts=teams();const seasonEl=$('seasonLabel'),teamEl=$('myTeamLabel'),roleEl=$('roleLabel');if(seasonEl)seasonEl.textContent=state.settings.activeSeason||'Current season';if(teamEl)teamEl.textContent=myTeam()||'your franchise';if(roleEl)roleEl.innerHTML=isAdmin()?'You have <strong>commissioner controls</strong> as well as the team-owner view.':'The commissioner makes all draft picks. You can browse the board, manage your queue and track your roster here.';if(!d||(d.status==='setup'&&!d.lottery&&!d.order.length)){content.innerHTML='<div class="panel"><h2>Draft not ready</h2><div class="empty">The commissioner has not opened the Draft Room yet.</div></div>';return}if(!isAdmin()||DASHVIEW){renderDashboard(d);return}renderCommissioner(d,ts)}
-function adminPanel(d,ts){const available=d.pool.filter(m=>!m.drafted).sort((a,b)=>b.points-a.points||a.name.localeCompare(b.name));const latest=d.picks.length?d.picks[d.picks.length-1]:null;return '<div class="panel"><h2>Commissioner controls</h2><div class="note">You can use the normal team-owner controls above, plus make a pick for any franchise. In ordered mode, a manual pick for another franchise does not advance the clock unless that franchise is currently on the clock.</div><div class="toolbar"><select id="adminTargetTeam" style="flex:1;min-width:200px;background:var(--panel-alt);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 12px">'+ts.map(t=>'<option value="'+esc(t)+'" '+(t===(d.mode==='ordered'?onClock():myTeam())?'selected':'')+'>'+esc(t)+' — '+pickCount(d,t)+'/'+d.maxPicks+' picks · '+(budget(t)-spent(t))+' pts left</option>').join('')+'</select><select id="adminTargetPokemon" style="flex:1;min-width:220px;background:var(--panel-alt);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 12px"><option value="">Select Pokémon</option>'+available.map(m=>'<option value="'+esc(m.id)+'">'+esc(m.name)+' — '+m.points+' pts</option>').join('')+'</select><button class="primary" id="adminPickBtn" '+(d.status==='live'?'':'disabled')+'>Make pick</button></div><div class="actions">'+(latest?'<button class="ghost" id="revertLastPickBtn">Revert last pick: '+esc(latest.name)+' → '+esc(latest.team)+'</button>':'')+'</div><div class="note danger" id="adminActionErr"></div></div>'}
+function render(){
+  if(PRESENT){renderPresent();return}
+  const d=state.settings.draft,ts=teams();
+  const seasonEl=$('seasonLabel'),teamEl=$('myTeamLabel'),roleEl=$('roleLabel');
+  if(seasonEl)seasonEl.textContent=state.settings.activeSeason||'Current season';
+  if(teamEl)teamEl.textContent=myTeam()||'your franchise';
+  if(roleEl)roleEl.innerHTML=isAdmin()?'You have <strong>commissioner controls</strong> as well as the team-owner view.':'The commissioner makes all draft picks. You can browse the board, manage your queue and track your roster here.';
+  if(!d){content.innerHTML='<div class="panel"><h2>Draft not ready</h2><div class="empty">The commissioner has not configured the draft yet.</div></div>';return}
+  if(!isAdmin()&&profileLoadError){content.innerHTML='<div class="panel"><h2>Draft permissions could not be checked</h2><div class="empty">The site could not verify your account permissions. No commissioner controls have been enabled. Refresh the page or contact the site administrator.</div></div>';return}
+  if(d.status==='setup'&&!d.order.length&&!isAdmin()){renderDashboard(d);return}
+  if(!isAdmin()||DASHVIEW){renderDashboard(d);return}
+  try{renderCommissioner(d,ts)}catch(error){console.error('Commissioner console rendering failed:',error);content.innerHTML='<div class="panel errorbox"><h2>Commissioner console could not render</h2><div class="note">'+esc(error?.message||String(error))+'</div><div class="actions"><button class="ghost" id="retryCommissionerRender">Retry</button></div></div>';$('retryCommissionerRender')?.addEventListener('click',()=>render())}
+}
+function adminPanel(d,ts){const available=d.pool.filter(m=>!m.drafted).sort((a,b)=>b.points-a.points||a.name.localeCompare(b.name));const latest=d.picks.length?d.picks[d.picks.length-1]:null;return '<div class="panel"><h2>Commissioner controls</h2><div class="note">You can use the normal team-owner controls above, plus make a pick for any franchise. In ordered mode, a manual pick for another franchise does not advance the clock unless that franchise is currently on the clock.</div><div class="toolbar"><select id="adminTargetTeam" style="flex:1;min-width:200px;background:var(--panel-alt);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 12px">'+ts.map(t=>'<option value="'+esc(t)+'" '+(t===(d.mode==='ordered'?onClock():myTeam())?'selected':'')+'>'+esc(t)+' — '+pickCount(d,t)+'/'+d.maxPicks+' picks · '+(budget(t)-spent(t))+' pts left</option>').join('')+'</select><select id="adminTargetPokemon" style="flex:1;min-width:220px;background:var(--panel-alt);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 12px"><option value="">Select Pokémon</option>'+available.map(m=>'<option value="'+esc(m.id)+'">'+esc(displayMonName(m.name))+' — '+m.points+' pts</option>').join('')+'</select><button class="primary" id="adminPickBtn" '+(d.status==='live'?'':'disabled')+'>Make pick</button></div><div class="actions">'+(latest?'<button class="ghost" id="revertLastPickBtn">Revert last pick: '+esc(displayMonName(latest.name))+' → '+esc(latest.team)+'</button>':'')+'</div><div class="note danger" id="adminActionErr"></div></div>'}
 function clockPanel(d){const oc=onClock();let text=d.mode==='ordered'?(oc?'On the clock: <span class="amber">'+esc(oc)+'</span>':'Draft order complete'):'Manual mode';let msg=!myTeam()?'Your account has no assigned franchise.':d.mode==='ordered'&&!sameTeam(oc,myTeam())?'Waiting for '+esc(oc||'the next franchise')+'.':'The commissioner makes all picks. You can follow the live board and manage your queue.';return '<div class="panel"><div class="clock"><div><div class="who">'+text+'</div><div class="note">'+esc(msg)+'</div></div><div class="pickno">Pick #'+(d.currentPick+1)+' of '+d.order.length+'</div></div></div>'}
 
 function budgetPanel(d){
@@ -138,7 +182,7 @@ function rosterPanel(d){
       : '<div class="empty">You have no Pokémon on your roster yet.</div>')+
     '</div>';
 }
-function board(d,ts,clickable){const q=String(filter||'').trim().toLowerCase();const mons=q?d.pool.filter(m=>m.name.toLowerCase().includes(q)).slice(0,60):[];const groups={};mons.forEach(m=>(groups[m.points]??=[]).push(m));const tiers=Object.keys(groups).sort((a,b)=>Number(b)-Number(a));let body='';if(!q){body='<div class="empty">Search for a Pokémon to view matching entries. The full draft pool remains stored but is not rendered until you search.</div>';}else if(!mons.length){body='<div class="empty">No Pokémon match your search.</div>';}else{body=tiers.map(p=>'<div class="tier"><div class="tier-title">'+esc(p)+' points</div><div class="grid">'+groups[p].sort((a,b)=>a.name.localeCompare(b.name)).map(m=>{const ok=clickable&&canPickFor(myTeam())&&!m.drafted&&spent(myTeam())+m.points<=budget(myTeam());return '<div class="mon '+(!ok?'disabled':'')+'" '+(ok?'data-pick="'+esc(m.id)+'"':'')+'>'+sprite(m.name)+'<div class="name">'+esc(m.name)+'</div><div class="pts">'+m.points+' pts</div>'+(m.drafted?'<div class="taken">→ '+esc(m.draftedBy||'')+'</div>':(!ok&&clickable?'<div class="taken">Not selectable</div>':''))+'</div>'}).join('')+'</div></div>').join('');if(d.pool.length>mons.length&&q)body+='<div class="note" style="margin-top:10px">Showing up to 60 matching Pokémon.</div>';}return '<h2>Draft board</h2><div class="toolbar"><input id="poolSearch" placeholder="Search Pokémon…" value="'+esc(filter)+'"><span class="badge">'+d.pool.filter(m=>!m.drafted).length+' available</span><span class="badge">'+d.pool.filter(m=>m.drafted).length+' drafted</span></div>'+body}
+function board(d,ts,clickable){const q=String(filter||'').trim().toLowerCase();const mons=q?d.pool.filter(m=>m.name.toLowerCase().includes(q)).slice(0,60):[];const groups={};mons.forEach(m=>(groups[m.points]??=[]).push(m));const tiers=Object.keys(groups).sort((a,b)=>Number(b)-Number(a));let body='';if(!q){body='<div class="empty">Search for a Pokémon to view matching entries. The full draft pool remains stored but is not rendered until you search.</div>';}else if(!mons.length){body='<div class="empty">No Pokémon match your search.</div>';}else{body=tiers.map(p=>'<div class="tier"><div class="tier-title">'+esc(p)+' points</div><div class="grid">'+groups[p].sort((a,b)=>a.name.localeCompare(b.name)).map(m=>{const ok=clickable&&canPickFor(myTeam())&&!m.drafted&&DD()?.canAfford?.(d,myTeam(),m);return '<div class="mon '+(!ok?'disabled':'')+'" '+(ok?'data-pick="'+esc(m.id)+'"':'')+'>'+sprite(m.name)+'<div class="name">'+esc(displayMonName(m.name))+'</div><div class="pts">'+m.points+' pts</div>'+(m.drafted?'<div class="taken">→ '+esc(m.draftedBy||'')+'</div>':(!ok&&clickable?'<div class="taken">Not selectable</div>':''))+'</div>'}).join('')+'</div></div>').join('');if(d.pool.length>mons.length&&q)body+='<div class="note" style="margin-top:10px">Showing up to 60 matching Pokémon.</div>';}return '<h2>Draft board</h2><div class="toolbar"><input id="poolSearch" placeholder="Search Pokémon…" value="'+esc(filter)+'"><span class="badge">'+d.pool.filter(m=>!m.drafted).length+' available</span><span class="badge">'+d.pool.filter(m=>m.drafted).length+' drafted</span></div>'+body}
 function wireSearch(){$('poolSearch')?.addEventListener('input',e=>{filter=e.target.value;clearTimeout(window.__poolSearchT);window.__poolSearchT=setTimeout(()=>{render();const x=$('poolSearch');if(x){x.focus();x.setSelectionRange(x.value.length,x.value.length)}},180)});document.querySelectorAll('[data-pick]').forEach(el=>el.addEventListener('click',()=>openPick(el.dataset.pick)));$('adminPickBtn')?.addEventListener('click',async()=>{const err=$('adminActionErr');if(err)err.textContent='';const team=$('adminTargetTeam')?.value;const id=$('adminTargetPokemon')?.value;const m=state.settings.draft.pool.find(x=>x.id===id);if(!team||!m){err.textContent='Select a franchise and Pokémon first.';return}try{await saveAdminPick(team,m);render()}catch(e){if(err)err.textContent=e.message}});$('revertLastPickBtn')?.addEventListener('click',async()=>{const err=$('adminActionErr');if(err)err.textContent='';const latest=state.settings.draft.picks.slice(-1)[0];const confirmed=await showDraftConfirm({kicker:'Commissioner console · Undo',title:'Revert the most recent pick?',message:latest?`${latest.name} will return to the available Pokémon pool and be removed from ${latest.team}'s roster.`:'The latest pick will be reverted.',spriteName:latest?.name||'',details:latest?[['Pick',`#${latest.pickNumber||'—'}`],['Franchise',latest.team]]:[],confirmLabel:'Revert pick',cancelLabel:'Keep pick',danger:true});if(!confirmed)return;try{await revertLastPick();render()}catch(e){if(err)err.textContent=e.message}})}
 function mockSessionRead(){
   if(!MOCK_DRAFT_MODE)return null;
@@ -163,7 +207,7 @@ function applyMockPick(team,mon){
   if(!franchise)throw new Error('Choose a franchise included in this mock draft.');
   if(d.mode==='ordered'&&!sameTeam(franchise,onClock()))throw new Error(`It is ${onClock()||'no franchise'}'s turn in the configured draft order.`);
   if(pickCount(d,franchise)>=d.maxPicks)throw new Error(`${franchise} has reached the configured maximum roster size.`);
-  {const dd=typeof DD==='function'?DD():null;const block=dd&&dd.megaBlock&&dd.megaBlock(d,franchise,target);if(block)throw new Error(block.message)} // same Mega rule as the real draft
+  {const dd=typeof DD==='function'?DD():null;if(dd?.canAfford&&!dd.canAfford(d,franchise,target)){const block=dd.megaBlock?.(d,franchise,target);throw new Error(block?.message||`${franchise} cannot afford ${target.name} while preserving the required Mega and remaining roster picks.`);}}
   const total=budget(franchise),used=spent(franchise),cost=Number(target.points)||0;
   if(used+cost>total)throw new Error(`${franchise} cannot afford ${target.name}. ${total-used} points remain.`);
   const pickNumber=d.picks.length+1;
@@ -283,7 +327,7 @@ function showDraftConfirm(options={}){
 async function openPick(id){
   const d=state.settings.draft,m=d.pool.find(x=>x.id===id),team=myTeam();
   if(!m||!canPickFor(team)||m.drafted)return;
-  if(spent(team)+m.points>budget(team)){alert('This pick exceeds your remaining budget.');return;}
+  if(!DD()?.canAfford?.(d,team,m)){const block=DD()?.megaBlock?.(d,team,m);alert(block?.message||'This pick would leave insufficient points to complete your roster and reserve a Mega.');return;}
   const remaining=budget(team)-spent(team)-m.points;
   const confirmed=await showDraftConfirm({
     kicker:MOCK_DRAFT_MODE?'Administrative simulation · Pick confirmation':'Draft Room · Pick confirmation',
@@ -378,96 +422,118 @@ async function boot(){bootError='';try{
   if(!selectedSeason) throw new Error('The selected season could not be found in this league.');
   SBL.leagueDb.setSelectedSeasonId(selectedSeason.id,ROUTE_LEAGUE_ID);
   SBL.leagueDb.setSelectedSeasonKey(selectedSeason.season_key,ROUTE_LEAGUE_ID);
+  // Resolve permissions before applying the player-facing draft-status gate.
+  // A commissioner must be able to open the console during setup, before an
+  // order exists, and while sitting out of the draft.
+  await readIdentity();
   const draftStatus=String(selectedSeason.data?.settings?.draft?.status||'setup');
-  if(!['lobby','live'].includes(draftStatus)){
-    if(draftStatus!=='complete'){
-      showError('Draft Room is not open',`The selected season, ${selectedSeason.name}, does not currently have an open draft. The Draft Room is available while its lobby is open, the draft is live, or completed results are available.`);
-      return;
-    }
+  if(!isAdmin()&&profileLoadError){
+    showError('Commissioner permissions could not be verified','The Draft Room could not read your commissioner permission. No commissioner controls have been enabled. Refresh the page or contact the site administrator.');
+    return;
   }
-  await readState();await readIdentity();render();void enrichDraftPoolMetadata();lastDraftVersion=draftVersion(state);try{lastCfg=(await SBL.draft.version())?.cfg||''}catch(_){lastCfg=''}
+  if(!['lobby','live','complete'].includes(draftStatus)&&!isAdmin()){
+    showError('Draft Room is not open',`The selected season, ${selectedSeason.name}, does not currently have an open draft. The Draft Room is available to players while its lobby is open, the draft is live, or completed results are available.`);
+    return;
+  }
+  await readState();
+  // The canonical franchise registry is public.franchises, not the user's
+  // assignment list or season draft order. Load it independently so a
+  // commissioner sitting out can still choose any active franchise.
+  availableLeagueFranchises=[];franchiseLoadError='';
+  try{
+    availableLeagueFranchises=await SBL.leagueDb.listFranchises(ROUTE_LEAGUE_ID,supabase);
+    availableLeagueFranchises=availableLeagueFranchises.filter(f=>String(f.status||'active').toLowerCase()==='active');
+  }catch(error){franchiseLoadError=String(error?.message||error);console.error('Draft Room franchise registry lookup failed:',error)}
+  render();void enrichDraftPoolMetadata();lastDraftVersion=draftVersion(state);try{lastCfg=(await SBL.draft.version())?.cfg||''}catch(_){lastCfg=''}
 }catch(e){console.error(e);showError('Draft Room could not load',e.message||String(e))}}
 
 
-/* ---- LOTTERY + DRAFT BOARD + COMMISSIONER CONSOLE (CP4.1) ------------------------
-   Everything below is read-only for regular users and rerenders from the shared
-   draft state, so the lottery reveal and the board follow the commissioner live. */
-const LT=()=>SBL.draftLottery;
-let lotSeen=-1,oddsCache={k:'',v:null};
-const cmd={tab:'console',team:'',q:''};
-function perRound(d){const u=new Set(d.order||[]).size;return u||(d.lottery?.proposed?.length||0)}
-function lotOdds(l){const k=JSON.stringify([l.proposed,l.weights,l.picks]);if(oddsCache.k!==k)oddsCache={k,v:LT().odds(l)};return oddsCache.v}
-function lotOddsTable(l,me){
-  const o=lotOdds(l),n=l.proposed.length;
-  return '<div class="bd-scroll"><table class="lot-odds"><thead><tr><th>#</th><th>Franchise</th><th>Odds for #1</th><th>Top 3</th></tr></thead><tbody>'+
-    l.proposed.map((t,i)=>{const top3=o[i].slice(0,Math.min(3,n)).reduce((a,b)=>a+b,0);const pc=x=>(x*100).toFixed(1)+'%';
-      return '<tr class="'+(teamKey(t)===me?'mine':'')+'"><td>'+(i+1)+'</td><td>'+esc(t)+'</td><td>'+pc(o[i][0])+'</td><td>'+pc(top3)+'</td></tr>'}).join('')+'</tbody></table></div>';
-}
-function lotteryView(d){
-  if(!d.lottery)return '';
-  const l=LT().normalize(d.lottery),me=teamKey(myTeam());
-  if(l.proposed.length<2)return '';
-  const K=Math.min(l.picks,l.result.length);
-  let body,badge;
-  if(l.status==='setup'||!l.result.length){
-    badge='Odds published';
-    body='<div class="note">The proposed order and odds are set. The lottery has not been run yet — leave this page open and it will update live.</div>'+lotOddsTable(l,me);
-  }else{
-    const vis=LT().visiblePicks(l),done=l.revealed>=K;
-    badge=l.status==='applied'?'Final order':done?'Complete':'Live';
-    const fresh=(lotSeen>=0&&l.revealed>lotSeen&&!done)?K-l.revealed:-1;
-    body='<div class="note">'+(done?'Every drawn pick is revealed.':'The commissioner is revealing the lottery from the last drawn pick up to #1…')+'</div><ol class="lot-picks">'+
-      l.result.map((t,i)=>{
-        if(!vis[i])return '<li class="lot-pick pending"><span class="no">'+(i+1)+'</span><span class="tm">? ? ?</span><span></span></li>';
-        const slot=l.proposed.indexOf(t)+1,mv=i<K&&slot?slot-(i+1):0;
-        const mvTxt=i>=K?'keeps slot '+slot:mv>0?'<b>▲ up '+mv+'</b> from slot '+slot:mv<0?'<b>▼ down '+(-mv)+'</b> from slot '+slot:'stays at slot '+slot;
-        return '<li class="lot-pick '+(mv>0?'up':mv<0?'down':'')+(teamKey(t)===me?' mine':'')+(i===fresh?' fresh':'')+'"><span class="no">'+(i+1)+'</span><span class="tm">'+esc(t)+'</span><span class="mv">'+mvTxt+'</span></li>'}).join('')+'</ol>'+
-      (done?'<div class="note">Seed <code>'+esc(l.seed)+'</code> · '+(LT().verify(l)?'✓ re-running this seed reproduces this result':'⚠ result does not match its seed')+'</div>':'')+
-      '<details><summary class="note" style="cursor:pointer">Pre-lottery odds</summary>'+lotOddsTable(l,me)+'</details>';
-    lotSeen=l.revealed;
+/* ---- DRAFT BOARD + COMMISSIONER CONSOLE -------------------------------- */
+const cmd={tab:'console',team:'',q:'',ability:'',stat:'',statMin:'',statMax:'',minPts:'',maxPts:'',type:'',mega:'all'};
+function perRound(d){return new Set(d.order||[]).size}
+// Build the shared draft-board rows locally. The previous implementation
+// called LT().boardRows(), but LT was never defined or loaded on this page.
+// Pick numbers are authoritative; the franchise order repeats each round.
+function draftBoardRows(order,picks,teamsPerRound){
+  const teams=(Array.isArray(order)?order:[]).map(x=>String(x??'').trim()).filter(Boolean);
+  const width=Math.max(0,Number(teamsPerRound)||teams.length);
+  if(!teams.length||!width)return [];
+  const byNumber=new Map();
+  (Array.isArray(picks)?picks:[]).forEach((pick,index)=>{
+    const number=Math.max(1,Number(pick?.pickNumber??pick?.pick_number)||index+1);
+    byNumber.set(number,pick);
+  });
+  const maxPick=Math.max(teams.length,...byNumber.keys());
+  const roundCount=Math.max(1,Math.ceil(maxPick/width));
+  const rows=[];
+  for(let round=0;round<roundCount;round++){
+    const row=[];
+    for(let slot=0;slot<width;slot++){
+      const pickNumber=round*width+slot+1;
+      const team=teams[slot%teams.length];
+      row.push({team,pickNumber,pick:byNumber.get(pickNumber)||null});
+    }
+    rows.push(row);
   }
-  return '<div class="panel lot-wrap"><div class="lot-head"><h2>Draft lottery</h2><span class="badge">'+badge+'</span></div>'+body+'</div>';
+  return rows;
 }
 function boardView(d){
   if(MOCK_DRAFT_MODE&&d.mode==='manual'){
     const picks=(d.picks||[]).slice().sort((a,b)=>Number(a.pickNumber||0)-Number(b.pickNumber||0));
-    return '<div class="panel"><h2>Simulation draft board <span class="badge">'+picks.length+' picks</span></h2><div class="note">Manual mode records the actual franchise chosen for each pick in chronological order.</div>'+(picks.length?boardSliderHtml()+'<div class="bd-scroll"><div class="bd-row">'+picks.map(p=>'<div class="bd-cell"><span class="pn">#'+esc(p.pickNumber||'—')+'</span>'+sprite(p.name)+'<span class="mn">'+esc(p.name)+'</span><span class="pts">'+(Number(p.points)||0)+' pts</span><span class="tm">'+esc(p.team)+'</span></div>').join('')+'</div></div>':'<div class="empty">No simulated picks yet.</div>')+'</div>';
+    return '<div class="panel"><h2>Simulation draft board <span class="badge">'+picks.length+' picks</span></h2><div class="note">Manual mode records the actual franchise chosen for each pick in chronological order.</div>'+(picks.length?boardSliderHtml()+'<div class="bd-scroll"><div class="bd-row">'+picks.map(p=>'<div class="bd-cell"><span class="pn">#'+esc(p.pickNumber||'—')+'</span>'+sprite(p.name)+'<span class="mn">'+esc(displayMonName(p.name))+'</span><span class="pts">'+(Number(p.points)||0)+' pts</span><span class="tm">'+esc(p.team)+'</span></div>').join('')+'</div></div>':'<div class="empty">No simulated picks yet.</div>')+'</div>';
   }
   const pr=perRound(d);
   if(!d.order.length||!pr)return '<div class="panel"><h2>Draft board</h2><div class="empty">The draft order has not been set yet.</div></div>';
-  const rows=LT().boardRows(d.order,d.picks,pr),me=teamKey(myTeam()),clock=(d.status==='live'&&d.mode==='ordered')?d.currentPick+1:0;
+  const rows=draftBoardRows(d.order,d.picks,pr),me=teamKey(myTeam()),clock=(d.status==='live'&&d.mode==='ordered')?d.currentPick+1:0;
   return '<div class="panel"><h2>Draft board <span class="badge">'+d.picks.length+'/'+d.order.length+' picks</span></h2>'+boardSliderHtml()+'<div class="bd-scroll">'+
     rows.map((r,ri)=>'<div class="bd-round"><h3>Round '+(ri+1)+'</h3><div class="bd-row">'+r.map(c=>{
       const k=teamKey(c.team)===me?' mine':'',cl=c.pickNumber===clock?' clock':'';
-      return c.pick?'<div class="bd-cell'+k+cl+'"><span class="pn">#'+c.pickNumber+'</span>'+sprite(c.pick.name)+'<span class="mn">'+esc(c.pick.name)+'</span><span class="pts">'+(Number(c.pick.points)||0)+' pts</span><span class="tm">'+esc(c.team)+'</span></div>'
+      return c.pick?'<div class="bd-cell'+k+cl+'"><span class="pn">#'+c.pickNumber+'</span>'+sprite(c.pick.name)+'<span class="mn">'+esc(displayMonName(c.pick.name))+'</span><span class="pts">'+(Number(c.pick.points)||0)+' pts</span><span class="tm">'+esc(c.team)+'</span></div>'
         :'<div class="bd-cell empty'+k+cl+'"><span class="pn">#'+c.pickNumber+(cl?' · on the clock':'')+'</span><span class="tm" style="margin-top:auto;margin-bottom:auto">'+esc(c.team)+'</span></div>'}).join('')+'</div></div>').join('')+'</div></div>';
 }
 function dashboardBoardView(d){
   const pr=perRound(d);
   if(!d.order.length||!pr)return '<section class="user-board-panel"><h2>Draft board</h2><div class="dash-empty">The commissioner has not published the draft order yet.</div></section>';
-  const rows=LT().boardRows(d.order,d.picks,pr),me=teamKey(myTeam()),clock=(d.status==='live'&&d.mode==='ordered')?d.currentPick+1:0;
+  const rows=draftBoardRows(d.order,d.picks,pr),me=teamKey(myTeam()),clock=(d.status==='live'&&d.mode==='ordered')?d.currentPick+1:0;
   const next=clock?d.order[d.currentPick]:null;
   const progress=d.order.length?Math.min(100,d.picks.length/d.order.length*100):0;
   return `<section class="user-board-wrap"><div class="user-board-overview"><div><span class="dash-kicker">LIVE DRAFT</span><h2>Draft board</h2><p>${d.picks.length} of ${d.order.length} picks completed · ${rows.length} rounds</p></div><div class="user-board-progress"><strong>${Math.round(progress)}%</strong><span>complete</span></div><div class="user-board-progressbar"><i style="width:${progress}%"></i></div>${next?`<div class="user-board-clock"><span>ON THE CLOCK</span><strong>${esc(next)}</strong><small>Pick #${clock}</small></div>`:''}</div>`+
     boardSliderHtml()+'<div class="board-hscroll">'+rows.map((r,ri)=>`<section class="user-board-round"><header><h3>Round ${ri+1}</h3><span>${r.filter(c=>c.pick).length} / ${r.length} picks</span></header><div class="user-board-grid">${r.map(c=>{
       const mine=teamKey(c.team)===me,active=c.pickNumber===clock,done=!!c.pick;
-      return `<article class="user-board-pick${mine?' mine':''}${active?' clock':''}${done?' complete':' pending'}"><div class="user-board-pick-top"><b>#${c.pickNumber}</b><span>${active?'ON THE CLOCK':done?'PICKED':'UPCOMING'}</span></div><div class="user-board-franchise">${esc(c.team)}</div>${done?`<div class="user-board-mon">${sprite(c.pick.name)}<strong>${esc(c.pick.name)}</strong><span>${Number(c.pick.points)||0} pts</span></div>`:'<div class="user-board-wait">Waiting for pick</div>'}</article>`;
+      return `<article class="user-board-pick${mine?' mine':''}${active?' clock':''}${done?' complete':' pending'}"><div class="user-board-pick-top"><b>#${c.pickNumber}</b><span>${active?'ON THE CLOCK':done?'PICKED':'UPCOMING'}</span></div><div class="user-board-franchise">${esc(c.team)}</div>${done?`<div class="user-board-mon">${sprite(c.pick.name)}<strong>${esc(displayMonName(c.pick.name))}</strong><span>${Number(c.pick.points)||0} pts</span></div>`:'<div class="user-board-wait">Waiting for pick</div>'}</article>`;
     }).join('')}</div></section>`).join('')+'</div></section>';
 }
 
 function cmdTeam(d,ts){
+  // Commissioners may deliberately pick for any franchise, including in an
+  // ordered draft. The clock is only the initial default, not an access lock.
   if(cmd.team&&ts.includes(cmd.team))return cmd.team;
   const oc=onClock();return d.mode==='ordered'&&oc?oc:(ts.some(t=>sameTeam(t,myTeam()))?myTeam():ts[0]||'');
 }
 function cmdResultsHtml(d,team){
-  const norm=x=>String(x).toLowerCase().replace(/[^a-z0-9]/g,''),q=norm(cmd.q);
-  if(!q)return '<div class="note">Search for a Pokémon to draft it.</div>';
-  const list=d.pool.filter(m=>!m.drafted&&norm(m.name).includes(q)).sort((a,b)=>b.points-a.points||a.name.localeCompare(b.name)).slice(0,24);
-  if(!list.length)return '<div class="note">No undrafted Pokémon match.</div>';
+  const norm=x=>String(x??'').toLowerCase().replace(/[^a-z0-9]/g,''),q=norm(cmd.q),ability=norm(cmd.ability);
+  const minStat=cmd.statMin===''?null:Number(cmd.statMin),maxStat=cmd.statMax===''?null:Number(cmd.statMax);
+  const minPts=cmd.minPts===''?null:Number(cmd.minPts),maxPts=cmd.maxPts===''?null:Number(cmd.maxPts);
+  const hasFilter=!!(q||ability||cmd.stat||minPts!=null||maxPts!=null||minStat!=null||maxStat!=null||cmd.type||cmd.mega!=='all');
+  if(!hasFilter)return '<div class="note">Search for a Pokémon or choose filters to view matching entries.</div>';
+  let list=d.pool.filter(m=>{
+    if(m.drafted)return false;
+    if(q&&!norm(m.name).includes(q))return false;
+    if(ability&&!(m.abilities||[]).some(a=>norm(a).includes(ability)))return false;
+    const pts=Number(m.points)||0;if(minPts!=null&&pts<minPts)return false;if(maxPts!=null&&pts>maxPts)return false;
+    if(cmd.type&&!(m.types||[]).some(t=>String(t).toLowerCase()===cmd.type))return false;
+    const mega=DD().isMegaMon(m);if(cmd.mega==='mega'&&!mega)return false;if(cmd.mega==='standard'&&mega)return false;
+    if(cmd.stat&&(minStat!=null||maxStat!=null)){const value=DD().statValue(m,cmd.stat);if(value==null||(minStat!=null&&value<minStat)||(maxStat!=null&&value>maxStat))return false;}
+    return true;
+  });
+  list.sort((a,b)=>cmd.stat?((DD().statValue(b,cmd.stat)??-1)-(DD().statValue(a,cmd.stat)??-1)||b.points-a.points):b.points-a.points||a.name.localeCompare(b.name));
+  list=list.slice(0,60);
+  if(!list.length)return '<div class="note">No undrafted Pokémon match these filters.</div>';
   const live=d.status==='live';
   return '<div class="cmd-results">'+list.map(m=>{const ok=live&&team&&DD().canAfford(d,team,m);
-    const why=!live?'Draft is not live':!ok?'Over budget or roster full for '+team:'Draft for '+team;
-    return '<button class="cmd-mon" data-cmd-pick="'+esc(m.id)+'" '+(ok?'':'disabled')+' title="'+esc(why)+'">'+dashSprite(m.name)+'<span><span class="nm">'+esc(m.name)+'</span><br><span class="sb">'+m.points+' pts</span></span></button>'}).join('')+'</div>';
+    const block=team?DD().megaBlock(d,team,m):null;
+    const why=!live?'Draft is not live':!ok?(block?.message||'Over budget or roster full for '+team):'Draft for '+team;
+    return '<button class="cmd-mon" data-cmd-pick="'+esc(m.id)+'" '+(ok?'':'disabled')+' title="'+esc(why)+'">'+dashSprite(m.name)+'<span><span class="nm">'+esc(displayMonName(m.name))+'</span><br><span class="sb">'+m.points+' pts · '+(m.abilities||[]).slice(0,2).map(esc).join(', ')+'</span></span></button>'}).join('')+'</div>'+(d.pool.filter(m=>!m.drafted).length>60?'<div class="note">Showing the first 60 matches. Narrow the filters to find more specific Pokémon.</div>':'');
 }
 function consoleHtml(d,ts){
   const team=cmdTeam(d,ts),oc=onClock(),live=d.status==='live',pr=perRound(d);
@@ -477,17 +543,23 @@ function consoleHtml(d,ts){
   const status=d.status==='live'?'':d.status==='complete'?'The draft is complete.':'The draft is not live yet — open and start it from Admin → Draft. Picks unlock when it starts.';
   return '<div class="cmd-clock"><div><div class="meta">'+(d.mode==='ordered'?(live?'ON THE CLOCK · Pick #'+(d.currentPick+1)+' · Round '+round:'Ordered draft'):'Manual draft')+'</div><div class="who">'+esc(team||'No franchise')+'</div>'+
     (b?'<div class="meta">'+b.left+' / '+b.total+' pts left · max '+lim+' on one pick · '+b.picks+'/'+b.maxPicks+' picks</div>':'')+'</div>'+
-    '<div class="actions"><a class="ghost" href="'+esc(draftViewUrl('present'))+'" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;text-decoration:none">Open presentation ↗</a>'+(latest?'<button class="ghost" id="cmdRevert">Revert last pick: '+esc(latest.name)+'</button>':'')+'</div></div>'+
+    '<div class="actions"><a class="ghost" href="'+esc(draftViewUrl('present'))+'" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;text-decoration:none">Open presentation ↗</a>'+(latest?'<button class="ghost" id="cmdRevert">Revert last pick: '+esc(displayMonName(latest.name))+'</button>':'')+'</div></div>'+
     (status?'<div class="note" style="margin-top:8px">'+status+'</div>':'')+
     (offClock?'<div class="note danger" style="margin-top:8px">'+esc(team)+' is not on the clock ('+esc(oc)+' is). This pick will not advance the clock.</div>':'')+
-    '<div class="cmd-bar"><select id="cmdTeam" title="Franchise to draft for" '+(d.mode==='ordered'?'disabled':'')+'>'+ts.map(t=>'<option value="'+esc(t)+'" '+(t===team?'selected':'')+'>'+esc(t)+' — '+(budget(t)-spent(t))+' pts left</option>').join('')+'</select>'+
+    '<div class="cmd-bar"><select id="cmdTeam" title="Franchise to draft for" '+''+'>'+ts.map(t=>'<option value="'+esc(t)+'" '+(t===team?'selected':'')+'>'+esc(t)+' — '+(budget(t)-spent(t))+' pts left</option>').join('')+'</select>'+
     '<input type="search" id="cmdSearch" placeholder="Search Pokémon to draft…" autocomplete="off" value="'+esc(cmd.q)+'"></div>'+
+    '<div class="cmd-filter-grid"><input type="search" id="cmdAbility" placeholder="Ability contains…" value="'+esc(cmd.ability)+'"><select id="cmdStat"><option value="">Any stat</option>'+[['bst','BST'],['hp','HP'],['atk','Attack'],['def','Defense'],['spa','Sp. Atk'],['spd','Sp. Def'],['spe','Speed']].map(([v,l])=>'<option value="'+v+'" '+(cmd.stat===v?'selected':'')+'>'+l+'</option>').join('')+'</select><input type="number" id="cmdStatMin" min="0" max="1200" placeholder="Min stat" value="'+esc(cmd.statMin)+'"><input type="number" id="cmdStatMax" min="0" max="1200" placeholder="Max stat" value="'+esc(cmd.statMax)+'"><input type="number" id="cmdMinPts" min="0" placeholder="Min points" value="'+esc(cmd.minPts)+'"><input type="number" id="cmdMaxPts" min="0" placeholder="Max points" value="'+esc(cmd.maxPts)+'"><select id="cmdType"><option value="">Any type</option>'+DD().allTypes(d.pool).map(t=>'<option value="'+esc(t.toLowerCase())+'" '+(cmd.type===t.toLowerCase()?'selected':'')+'>'+esc(t)+'</option>').join('')+'</select><select id="cmdMega"><option value="all" '+(cmd.mega==='all'?'selected':'')+'>All forms</option><option value="mega" '+(cmd.mega==='mega'?'selected':'')+'>Mega only</option><option value="standard" '+(cmd.mega==='standard'?'selected':'')+'>Non-Mega only</option></select><button type="button" class="ghost small" id="cmdResetFilters">Reset filters</button></div>'+
     '<div id="cmdResults">'+cmdResultsHtml(d,team)+'</div><div class="note danger" id="cmdErr"></div>';
 }
 function wireConsole(ts){
   const d0=()=>state.settings.draft,err=m=>{const e=$('cmdErr');if(e)e.textContent=m||''};
   $('cmdTeam')?.addEventListener('change',e=>{cmd.team=e.target.value;render()});
-  $('cmdSearch')?.addEventListener('input',e=>{cmd.q=e.target.value;clearTimeout(window.__cmdT);window.__cmdT=setTimeout(()=>{const r=$('cmdResults');if(r)r.innerHTML=cmdResultsHtml(d0(),cmdTeam(d0(),ts))},150)});
+  const refreshCmdResults=()=>{const r=$('cmdResults');if(r)r.innerHTML=cmdResultsHtml(d0(),cmdTeam(d0(),ts));};
+  $('cmdSearch')?.addEventListener('input',e=>{cmd.q=e.target.value;clearTimeout(window.__cmdT);window.__cmdT=setTimeout(refreshCmdResults,120)});
+  $('cmdAbility')?.addEventListener('input',e=>{cmd.ability=e.target.value;clearTimeout(window.__cmdT);window.__cmdT=setTimeout(refreshCmdResults,120)});
+  [['cmdStat','stat'],['cmdType','type'],['cmdMega','mega']].forEach(([id,key])=>$(id)?.addEventListener('change',e=>{cmd[key]=e.target.value;refreshCmdResults()}));
+  [['cmdStatMin','statMin'],['cmdStatMax','statMax'],['cmdMinPts','minPts'],['cmdMaxPts','maxPts']].forEach(([id,key])=>$(id)?.addEventListener('input',e=>{cmd[key]=e.target.value;if((key==='statMin'||key==='statMax')&&e.target.value&&!cmd.stat){cmd.stat='atk';if($('cmdStat'))$('cmdStat').value='atk';}clearTimeout(window.__cmdT);window.__cmdT=setTimeout(refreshCmdResults,120)}));
+  $('cmdResetFilters')?.addEventListener('click',()=>{Object.assign(cmd,{q:'',ability:'',stat:'',statMin:'',statMax:'',minPts:'',maxPts:'',type:'',mega:'all'});render()});
   $('cmdResults')?.addEventListener('click',async e=>{
     const b=e.target.closest('[data-cmd-pick]');if(!b||b.disabled)return;
     const d=d0(),m=d.pool.find(x=>String(x.id)===b.dataset.cmdPick),team=cmdTeam(d,ts);if(!m||!team)return;
@@ -522,26 +594,27 @@ function wireConsole(ts){
   });
 }
 function renderCommissioner(d,ts){
-  const tabs=MOCK_DRAFT_MODE?[['console','Simulation Draft Room']]:[['console','Commissioner console'],['plan','My plan'],['user','User view']];
+  const tabs=MOCK_DRAFT_MODE?[['console','Simulation Draft Room']]:[['console','Commissioner console'],['user','My plan']];
   if(!$('cmdShell')){
     content.innerHTML=(MOCK_DRAFT_MODE?mockBannerHtml():'')+'<div id="cmdShell"><div class="cmd-tabs" id="cmdTabs"></div><div id="cmdBody"></div></div>';
     if(MOCK_DRAFT_MODE)wireMockBanner();
     $('cmdTabs').addEventListener('click',e=>{const b=e.target.closest('[data-cmd-tab]');if(!b||b.dataset.cmdTab===cmd.tab)return;
-      cmd.tab=b.dataset.cmdTab;if(cmd.tab==='plan')dash.tab='queue';else if(cmd.tab==='user')dash.tab='pool';dash.tabChosen=true;
+      cmd.tab=b.dataset.cmdTab;if(cmd.tab==='user')dash.tab='pool';dash.tabChosen=true;
       $('cmdBody').innerHTML='';render()});
   }
   $('cmdTabs').innerHTML=tabs.map(([k,l])=>'<button data-cmd-tab="'+k+'" class="'+(cmd.tab===k?'on':'')+'">'+l+'</button>').join('');
-  if(cmd.tab!=='console'){renderDashboard(d);return}
-  const body=$('cmdBody'),focused=document.activeElement?.id==='cmdSearch',pos=focused?document.activeElement.selectionStart:0;
-  body.innerHTML=consoleHtml(d,ts)+boardView(d);
+  if(cmd.tab==='user'){renderDashboard(d);return}
+  const body=$('cmdBody');
+  const focused=document.activeElement?.id==='cmdSearch',pos=focused?document.activeElement.selectionStart:0;
+  body.innerHTML=(franchiseLoadError?'<div class="note danger">The league franchise list could not be loaded: '+esc(franchiseLoadError)+'</div>':'')+consoleHtml(d,ts)+boardView(d);
   wireConsole(ts);
   if(focused){const x=$('cmdSearch');if(x){x.focus();x.setSelectionRange(pos,pos)}}
 }
-/* ---- END LOTTERY + BOARD + CONSOLE ---- */
+/* ---- END DRAFT BOARD + COMMISSIONER CONSOLE ---- */
 
 /* ---- DASHBOARD START: per-user draft dashboard (everyone except admins; admins: ?view=dashboard) ---- */
 const DASHVIEW=new URLSearchParams(location.search).get('view')==='dashboard';
-const dash={tab:'pool',f:{q:'',types:[],ability:'',stat:'',statMin:'',statMax:'',minPts:'',maxPts:'',mega:'all',affordable:true,showDrafted:false,queuedOnly:false},sort:'pts-desc',groupBy:'points',limit:60,queue:[],queueLoaded:false,saveMsg:''};
+const dash={tab:'queue',f:{q:'',types:[],ability:'',role:'',stat:'',statMin:'',statMax:'',minPts:'',maxPts:'',mega:'all',affordable:true,showDrafted:false,queuedOnly:false},sort:'pts-desc',groupBy:'points',limit:60,queue:[],queueLoaded:false,saveMsg:'',showAbilities:false};
 let dashSaveT=null,dashSearchT=null;
 dash.queueReady=false;dash.pruneNote='';dash.dragId=null;dash.dropBefore=null;dash.redrawQueue=false;
 dash.sheet={view:'grid',q:'',hideDrafted:false,sort:'row',dir:'asc'};
@@ -574,7 +647,7 @@ function showDashToast(msg){
   if(!t){t=document.createElement('div');t.id='dashToast';t.setAttribute('role','status');t.setAttribute('aria-live','polite');document.body.appendChild(t)}
   t.textContent=msg;t.classList.add('show');clearTimeout(showDashToast.t);showDashToast.t=setTimeout(()=>t.classList.remove('show'),9000);
 }
-function dashBlockLabel(d,t,m){const b=DD().megaBlock?.(d,t,m);return b?(b.code==='mega-max'?'Mega limit reached':'Must pick a Mega'):'Over your limit'}
+function dashBlockLabel(d,t,m){if(!DD().budgetCanAfford(d,t,m))return 'Over your current budget';const b=DD().megaBlock?.(d,t,m);return b?(b.code==='mega-max'?'Mega limit reached':'Mega required for this final slot'):'Over your limit'}
 /* Taken Pokemon (by anyone, including the user's own picks) leave the queue automatically. */
 function pruneTakenQueue(d){
   if(!dash.queueReady||!dash.queue.length)return false;
@@ -726,6 +799,7 @@ body.draft-user-dashboard .dash-card-actions{display:flex;justify-content:center
 body.draft-user-dashboard .dash-card-actions .dash-star{position:static;width:36px;height:36px;border-radius:9px}
 @media(max-width:1050px){body.draft-user-dashboard .dash-filter-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:600px){body.draft-user-dashboard #app{width:calc(100% - 22px);padding:18px 0 36px}body.draft-user-dashboard .dash-head{padding:15px;gap:9px}body.draft-user-dashboard .dash-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}body.draft-user-dashboard .dash-mon-card{min-height:250px;padding:10px 7px}body.draft-user-dashboard .dash-mon-art{height:88px}body.draft-user-dashboard .dash-mon-art .dash-sprite{width:82px!important;height:82px!important}body.draft-user-dashboard .dash-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.draft-coverage{padding:16px 18px;border:1px solid var(--border);border-radius:15px;background:var(--panel);display:grid;gap:13px}.draft-coverage-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.draft-coverage-head h3{margin:3px 0 0;font-size:17px}.draft-coverage-head>span,.draft-coverage-credit{font-size:10px;color:var(--text-dim)}.draft-coverage-block{display:grid;gap:8px}.draft-coverage-block>strong{font-size:11px}.draft-coverage-types,.draft-coverage-roles{display:flex;flex-wrap:wrap;gap:6px}.draft-type-chip,.draft-role-chip{display:inline-flex;align-items:center;gap:7px;padding:5px 8px;border:1px solid var(--border);border-radius:8px;background:var(--panel-alt);font-size:10px;color:var(--text-dim)}.draft-type-chip.covered,.draft-role-chip.covered{border-color:color-mix(in srgb,var(--teal) 55%,var(--border));color:var(--text);background:color-mix(in srgb,var(--teal) 9%,var(--panel))}.draft-type-chip small{font-size:9px}.draft-role-chip b{font-size:11px;color:var(--text)}.draft-coverage-credit a{color:var(--teal)}.role-admin-panel{padding:18px;border:1px solid var(--border);border-radius:15px;background:var(--panel);display:grid;gap:12px}.role-admin-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.role-admin-controls label{display:grid;gap:5px;font-size:11px;color:var(--text-dim)}.role-admin-controls input,.role-admin-controls select{min-width:0;width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--panel-alt);color:var(--text)}.role-admin-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:7px}.role-admin-option{display:flex;align-items:center;gap:8px;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--panel-alt);font-size:12px}.role-admin-option input{accent-color:var(--teal)}.role-admin-status{min-height:18px;font-size:11px;color:var(--text-dim)}@media(max-width:650px){.role-admin-controls{grid-template-columns:1fr}}
 
 .user-board-wrap{display:grid;gap:18px}.user-board-overview{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 18px;padding:20px;border:1px solid var(--border);border-radius:16px;background:var(--panel)}.user-board-overview h2{margin:3px 0;font-size:20px}.user-board-overview p{margin:0;color:var(--text-dim);font-size:12px}.user-board-progress{text-align:right;display:grid;align-content:center}.user-board-progress strong{font-size:25px;line-height:1.1}.user-board-progress span{font-size:10px;color:var(--text-dim)}.user-board-progressbar{grid-column:1/-1;height:7px;border-radius:99px;background:var(--panel-alt);overflow:hidden}.user-board-progressbar i{display:block;height:100%;border-radius:99px;background:var(--teal)}.user-board-clock{grid-column:1/-1;display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--teal);border-radius:10px;background:color-mix(in srgb,var(--teal) 8%,var(--panel))}.user-board-clock span{font-size:9px;font-weight:900;letter-spacing:.12em;color:var(--teal)}.user-board-clock strong{font-size:14px}.user-board-clock small{margin-left:auto;color:var(--text-dim)}.user-board-round{display:grid;gap:9px}.user-board-round>header{display:flex;align-items:center;justify-content:space-between;padding:0 2px}.user-board-round h3{margin:0;font-size:13px;letter-spacing:.08em;text-transform:uppercase}.user-board-round>header span{font-size:10px;color:var(--text-dim)}.user-board-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:9px}.user-board-pick{min-width:0;min-height:155px;padding:11px;border:1px solid var(--border);border-radius:13px;background:var(--panel);display:flex;flex-direction:column;gap:7px}.user-board-pick.mine{border-color:color-mix(in srgb,var(--teal) 75%,var(--border));background:color-mix(in srgb,var(--teal) 5%,var(--panel))}.user-board-pick.clock{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber) inset}.user-board-pick-top{display:flex;align-items:center;justify-content:space-between;gap:6px}.user-board-pick-top b{font-size:11px}.user-board-pick-top span{font-size:8px;font-weight:900;letter-spacing:.08em;color:var(--text-dim)}.user-board-pick.clock .user-board-pick-top span{color:var(--amber)}.user-board-franchise{font-size:12px;font-weight:800;overflow-wrap:anywhere}.user-board-mon{display:grid;grid-template-columns:42px minmax(0,1fr);align-items:center;gap:2px 8px;margin-top:auto}.user-board-mon img{grid-row:span 2;width:42px;height:42px;object-fit:contain}.user-board-mon strong{font-size:11px;overflow-wrap:anywhere}.user-board-mon span{font-size:10px;color:var(--amber)}.user-board-wait{margin-top:auto;padding:10px 0;color:var(--text-dim);font-size:11px}.user-board-pick.pending{background:color-mix(in srgb,var(--panel-alt) 65%,var(--panel))}.user-board-pick.complete .user-board-pick-top span{color:var(--teal)}
 @media(max-width:600px){.user-board-overview{padding:14px}.user-board-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.user-board-pick{min-height:142px;padding:9px}.user-board-franchise{font-size:10px}.user-board-mon{grid-template-columns:34px minmax(0,1fr)}.user-board-mon img{width:34px;height:34px}}
@@ -747,7 +821,7 @@ function drawDashHead(d){
   el.innerHTML=`<div class="dash-head"><div class="dash-team">${esc(t)}</div><div class="dash-pts"><span class="big">${b.left}</span> / ${b.total} pts left</div><div class="dash-bar"><i style="width:${pct}%"></i></div><div class="dash-meta">Picks ${b.picks}/${b.maxPicks} · Megas ${DD().megaInfo(d,t).count}/${DD().MEGA_MAX}${DD().megaInfo(d,t).need?' (need '+DD().megaInfo(d,t).need+' more)':''} · Most you can spend on one pick: <b>${lim}</b> pts${b.need>1?' (keeps enough for your remaining roster)':''}</div><div class="dash-clock${me?' me':''}">${clock}</div></div>`;
 }
 function drawDashTabs(){
-  const el=$('dashTabs');if(!el)return;const dd=state.settings.draft,t=[['pool','Free Agency'],['sheet','Spreadsheet'],['queue','Queue ('+dash.queue.length+')'],['roster','My roster'],['board','Board']].concat(dd.lottery&&dd.lottery.proposed&&dd.lottery.proposed.length>1?[['lottery','Lottery']]:[]);
+  const el=$('dashTabs');if(!el)return;const dd=state.settings.draft,t=[['pool','Free Agency'],['sheet','Spreadsheet'],['queue','Draft Plan ('+dash.queue.length+')'],['roster','My Roster'],['board','Board']];
   el.innerHTML=t.map(([k,l])=>`<button data-act="tab" data-tab="${k}" class="${dash.tab===k?'on':''}">${l}</button>`).join('');
 }
 function dashQueueChanged(){
@@ -758,16 +832,19 @@ function dashQueueChanged(){
   },500);
 }
 function dashCard(d,t,m,opts={}){
-  const aff=DD().canAfford(d,t,m),q=dash.queue.includes(String(m.id));
-  const status=m.drafted?`<span>Taken${m.draftedBy?' by '+esc(m.draftedBy):''}</span>`:(!aff&&t?'<span>'+dashBlockLabel(d,t,m)+'</span>':'');
+  const aff=DD().budgetCanAfford(d,t,m),q=dash.queue.includes(String(m.id));
+  const megaBlock=!m.drafted&&t?DD().megaBlock?.(d,t,m):null;
+  const status=m.drafted?`<span>Taken${m.draftedBy?' by '+esc(m.draftedBy):''}</span>`:(!aff&&t?'<span>'+dashBlockLabel(d,t,m)+'</span>':(megaBlock?'<span>'+dashBlockLabel(d,t,m)+'</span>':''));
   const right=opts.queueTab
     ?(m.drafted?'':`<div class="dash-acts"><button class="dash-mini" data-act="up" data-id="${esc(m.id)}" aria-label="Move up">▲</button><button class="dash-mini" data-act="down" data-id="${esc(m.id)}" aria-label="Move down">▼</button><button class="dash-mini" data-act="rm" data-id="${esc(m.id)}" aria-label="Remove from queue">✕</button></div>`)
     :`<button class="dash-star${q?' on':''}" data-act="q" data-id="${esc(m.id)}" aria-label="${q?'Remove from queue':'Add to queue'}">★</button>`;
-  return `<div class="dash-card${m.drafted?' dr':(!aff&&t?' na':'')}${opts.next?' next':''}${opts.queueTab?' dash-qcard':''}"${opts.queueTab?` draggable="true" data-qid="${esc(m.id)}"`:''}>${opts.queueTab?'<span class="dash-grip" aria-hidden="true" title="Drag to reorder">⋮⋮</span>':''}${dashSprite(m.name)}<div><div class="dash-name">${esc(m.name)}${opts.next?' · next target':''}</div><div class="dash-sub">${dashTypes(m)}<span>${Number(m.points)||0} pts</span>${status}</div></div>${right}</div>`;
+  const abilityLine=opts.queueTab&&dash.showAbilities?`<div class="dash-ability-list">Abilities: ${(m.abilities||[]).length?(m.abilities||[]).map(a=>esc(String(a).replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase()))).join(' · '):'Loading / unavailable'}</div>`:'';
+  return `<div class="dash-card${m.drafted?' dr':(!aff&&t?' na':'')}${opts.next?' next':''}${opts.queueTab?' dash-qcard':''}"${opts.queueTab?` draggable="true" data-qid="${esc(m.id)}"`:''}>${opts.queueTab?'<span class="dash-grip" aria-hidden="true" title="Drag to reorder">⋮⋮</span>':''}${dashSprite(m.name)}<div><div class="dash-name">${esc(displayMonName(m.name))}${opts.next?' · next target':''}</div><div class="dash-sub">${dashTypes(m)}<span>${Number(m.points)||0} pts</span>${status}</div>${abilityLine}</div>${right}</div>`;
 }
 function drawDashList(d){
   const t=myTeam(),list=$('dashList');if(!list)return;
-  const filtered=DD().applyFilters(d,t,dash.f,dash.queue);
+  let filtered=DD().applyFilters(d,t,dash.f,dash.queue);
+  if(dash.f.role)filtered=filtered.filter(m=>rolesFor(m.name).includes(dash.f.role));
   const statKey=dash.f.stat||'atk';
   const statValue=m=>DD().statValue(m,statKey)??-1;
   let res;
@@ -789,15 +866,16 @@ function drawDashList(d){
   }
 }
 function dashBoardCard(d,t,m){
-  const aff=DD().canAfford(d,t,m),q=dash.queue.includes(String(m.id));
+  const aff=DD().budgetCanAfford(d,t,m),q=dash.queue.includes(String(m.id));
   const types=(Array.isArray(m.types)?m.types:[]).map(x=>String(x).toLowerCase()).filter(Boolean);
   const stats=Object.fromEntries(['hp','atk','def','spa','spd','spe'].map(k=>[k,DD().statValue(m,k)]).filter(([,v])=>v!=null));
-  const status=m.drafted?`<div class="dash-status taken">Drafted${m.draftedBy?' by '+esc(m.draftedBy):''}</div>`:(!aff&&t?'<div class="dash-status over">'+dashBlockLabel(d,t,m)+'</div>':'<div class="dash-status available">Available</div>');
+  const megaBlock=!m.drafted&&t?DD().megaBlock?.(d,t,m):null;
+  const status=m.drafted?`<div class="dash-status taken">Drafted${m.draftedBy?' by '+esc(m.draftedBy):''}</div>`:(!aff&&t?'<div class="dash-status over">'+dashBlockLabel(d,t,m)+'</div>':(megaBlock?'<div class="dash-status over">'+dashBlockLabel(d,t,m)+'</div>':'<div class="dash-status available">Available</div>'));
   return `<article class="dash-mon-card${m.drafted?' dr':''}${!aff&&t&&!m.drafted?' na':''}">
     <div class="dash-mon-art">${dashSprite(m.name)}</div>
     <div class="dash-mon-name">${esc(SBL.pokemon.displayNameWithForm?.(m.name)||m.name)}</div>
     <div class="dash-mon-points">${Number(m.points)||0} pts</div>
-    <div class="dash-mon-types">${types.map(x=>`<span class="dash-mon-type type-${esc(x)}">${esc(x)}</span>`).join('')}</div>
+    <div class="dash-mon-types">${types.map(x=>`<span class="dash-mon-type type-${esc(x)}">${esc(x)}</span>`).join('')}</div>${rolesFor(m.name).length?`<div class="dash-mon-abilities">${rolesFor(m.name).map(r=>esc(r)).join(' · ')}</div>`:''}
     <div class="dash-mon-abilities">${(m.abilities||[]).slice(0,2).map(a=>esc(a)).join(' · ')}</div>${Object.keys(stats).length===6?`<div class="dash-stat-strip"><span>HP <b>${stats.hp}</b></span><span>ATK <b>${stats.atk}</b></span><span>DEF <b>${stats.def}</b></span><span>SPA <b>${stats.spa}</b></span><span>SPD <b>${stats.spd}</b></span><span>SPE <b>${stats.spe}</b></span></div>`:'<div class="dash-stat-strip missing">Stats loading…</div>'}
     ${status}
     <div class="dash-card-actions"><button class="dash-star${q?' on':''}" data-act="q" data-id="${esc(m.id)}" aria-label="${q?'Remove from queue':'Add to queue'}" title="${q?'Remove from queue':'Add to queue'}">${q?'★':'☆'}</button></div>
@@ -805,7 +883,7 @@ function dashBoardCard(d,t,m){
 }
 function buildDashPool(d){
   const body=$('dashBody');if(!body)return;const f=dash.f;
-  body.innerHTML=`<section class="dash-filter-panel"><div class="dash-filter-title"><div><span class="dash-kicker">PLAYER TOOLKIT</span><h2>Find your next pick</h2><p>Search, compare stats and narrow the pool before adding Pokémon to your queue.</p></div><span class="dash-save" id="dashSave">${esc(dash.saveMsg)}</span></div><div class="dash-search-row"><input type="search" id="dashQ" placeholder="Search Pokémon by name…" value="${esc(f.q)}" autocomplete="off"></div><div class="dash-filter-grid"><label class="dash-field"><span>Sort results</span><select id="dashSort"><option value="pts-desc">Points · high to low</option><option value="pts-asc">Points · low to high</option><option value="name">Name · A–Z</option><option value="type">Type</option><option value="stat-desc">Selected stat · highest</option></select></label><label class="dash-field"><span>Stat to filter / rank</span><select id="dashStat"><option value="">Select stat to filter…</option><option value="atk">Attack</option><option value="spa">Special Attack</option><option value="def">Defense</option><option value="spd">Special Defense</option><option value="spe">Speed</option><option value="hp">HP</option></select></label><label class="dash-field"><span>Minimum stat</span><input type="number" id="dashStatMin" min="0" max="255" inputmode="numeric" placeholder="No minimum" value="${esc(f.statMin)}"></label><label class="dash-field"><span>Maximum stat</span><input type="number" id="dashStatMax" min="0" max="255" inputmode="numeric" placeholder="No maximum" value="${esc(f.statMax)}"></label><label class="dash-field"><span>Minimum points</span><input type="number" id="dashMin" min="0" inputmode="numeric" placeholder="Any" value="${esc(f.minPts)}"></label><label class="dash-field"><span>Maximum points</span><input type="number" id="dashMax" min="0" inputmode="numeric" placeholder="Any" value="${esc(f.maxPts)}"></label><label class="dash-field"><span>Group results</span><select id="dashGroup"><option value="points">By point tier</option><option value="stat">Overall stat ranking</option></select></label><label class="dash-field"><span>Ability contains</span><input type="search" id="dashAbility" placeholder="Filter by ability…" value="${esc(f.ability)}"></label><label class="dash-field"><span>Pokémon form</span><select id="dashMega"><option value="all" ${f.mega==='all'?'selected':''}>All Pokémon</option><option value="mega" ${f.mega==='mega'?'selected':''}>Mega only</option><option value="standard" ${f.mega==='standard'?'selected':''}>Non-Mega only</option></select></label></div><div class="dash-filter-footer"><div class="dash-chips" id="dashTypes">${DD().allTypes(d.pool).map(x=>`<button data-act="type" data-type="${esc(x)}">${esc(x)}</button>`).join('')}</div><div class="dash-tog"><label><input type="checkbox" id="dashAff" ${f.affordable?'checked':''}> Affordable only</label><label><input type="checkbox" id="dashDr" ${f.showDrafted?'checked':''}> Include drafted</label><label><input type="checkbox" id="dashQo" ${f.queuedOnly?'checked':''}> Queue only</label></div></div><div class="dash-result-line"><span class="note" id="dashCount"></span><button type="button" class="dash-reset" data-act="resetFilters">Reset filters</button></div></section><div class="dash-list" id="dashList"></div>`;
+  body.innerHTML=`<section class="dash-filter-panel"><div class="dash-filter-title"><div><span class="dash-kicker">PLAYER TOOLKIT</span><h2>Find your next pick</h2><p>Search, compare stats and narrow the pool before adding Pokémon to your queue.</p></div><span class="dash-save" id="dashSave">${esc(dash.saveMsg)}</span></div><div class="dash-search-row"><input type="search" id="dashQ" placeholder="Search Pokémon by name…" value="${esc(f.q)}" autocomplete="off"></div><div class="dash-filter-grid"><label class="dash-field"><span>Sort results</span><select id="dashSort"><option value="pts-desc">Points · high to low</option><option value="pts-asc">Points · low to high</option><option value="name">Name · A–Z</option><option value="type">Type</option><option value="stat-desc">Selected stat · highest</option></select></label><label class="dash-field"><span>Stat to filter / rank</span><select id="dashStat"><option value="">Select stat to filter…</option><option value="bst">BST (total)</option><option value="atk">Attack</option><option value="spa">Special Attack</option><option value="def">Defense</option><option value="spd">Special Defense</option><option value="spe">Speed</option><option value="hp">HP</option></select></label><label class="dash-field"><span>Minimum stat</span><input type="number" id="dashStatMin" min="0" max="1200" inputmode="numeric" placeholder="No minimum" value="${esc(f.statMin)}"></label><label class="dash-field"><span>Maximum stat</span><input type="number" id="dashStatMax" min="0" max="1200" inputmode="numeric" placeholder="No maximum" value="${esc(f.statMax)}"></label><label class="dash-field"><span>Minimum points</span><input type="number" id="dashMin" min="0" inputmode="numeric" placeholder="Any" value="${esc(f.minPts)}"></label><label class="dash-field"><span>Maximum points</span><input type="number" id="dashMax" min="0" inputmode="numeric" placeholder="Any" value="${esc(f.maxPts)}"></label><label class="dash-field"><span>Group results</span><select id="dashGroup"><option value="points">By point tier</option><option value="stat">Overall stat ranking</option></select></label><label class="dash-field"><span>Ability contains</span><input type="search" id="dashAbility" placeholder="Filter by ability…" value="${esc(f.ability)}"></label><label class="dash-field"><span>Competitive role</span><select id="dashRole"><option value="">Any role</option>${allAssignedRoles().map(r=>`<option value="${esc(r)}" ${f.role===r?'selected':''}>${esc(r)}</option>`).join('')}</select></label><label class="dash-field"><span>Pokémon form</span><select id="dashMega"><option value="all" ${f.mega==='all'?'selected':''}>All Pokémon</option><option value="mega" ${f.mega==='mega'?'selected':''}>Mega only</option><option value="standard" ${f.mega==='standard'?'selected':''}>Non-Mega only</option></select></label></div><div class="dash-filter-footer"><div class="dash-chips" id="dashTypes">${DD().allTypes(d.pool).map(x=>`<button data-act="type" data-type="${esc(x)}">${esc(x)}</button>`).join('')}</div><div class="dash-tog"><label><input type="checkbox" id="dashAff" ${f.affordable?'checked':''}> Affordable only</label><label><input type="checkbox" id="dashDr" ${f.showDrafted?'checked':''}> Include drafted</label><label><input type="checkbox" id="dashQo" ${f.queuedOnly?'checked':''}> Queue only</label></div></div><div class="dash-result-line"><span class="note" id="dashCount"></span><button type="button" class="dash-reset" data-act="resetFilters">Reset filters</button></div></section><div class="dash-list" id="dashList"></div>`;
   $('dashSort').value=dash.sort;$('dashStat').value=dash.f.stat||'';$('dashGroup').value=dash.groupBy||'points';drawDashList(d);
 }
 function drawDashBody(d,rebuild){
@@ -817,12 +895,20 @@ function drawDashBody(d,rebuild){
     const items=dash.queue.map(dashMon).filter(m=>m&&!m.drafted);
     const nextId=(items.find(m=>DD().canAfford(d,t,m))||{}).id;
     const note=dash.pruneNote?`<div class="dash-prune-note" role="status"><span>${esc(dash.pruneNote)}</span><button type="button" class="dash-mini" data-act="dismissPrune" aria-label="Dismiss">✕</button></div>`:'';
-    body.innerHTML=`<div class="dash-save" id="dashSave">${esc(dash.saveMsg)}</div>${note}`+(items.length?`<div class="dash-queue-hint">Drag a Pokémon (or use ▲ ▼) to change its priority. Taken Pokémon are removed automatically.</div><div class="dash-list" id="dashQueueList">${items.map(m=>dashCard(d,t,m,{queueTab:true,next:String(m.id)===String(nextId)})).join('')}</div>`:'<div class="note">Your queue is empty. Tap ☆ on a Pokémon in Free Agency to plan. Taken Pokémon are removed from your queue automatically.</div>');return}
+    const projection=projectedRosterEntries(t,d),actualCount=projection.filter(m=>m.status==='actual').length,plannedCount=projection.filter(m=>m.status==='planned').length;
+    const analysis=SBL.rosterAnalysis?.render?SBL.rosterAnalysis.render({team:t,heading:'Team Analysis',entries:projection,roles:allAssignedRoles(),showAbilities:dash.showAbilities,sprite:name=>sprite(name)}):'';
+    body.innerHTML=`<div class="dash-save" id="dashSave">${esc(dash.saveMsg)}</div>${note}<section class="draft-plan-queue"><div class="draft-plan-toolbar"><div><span class="dash-kicker">YOUR PRIORITIES</span><h2>Draft Plan</h2><p>Drag Pokémon or use the arrows to change priority. Picks taken by another franchise are removed automatically.</p></div><div class="draft-plan-actions"><label class="draft-ability-toggle"><input type="checkbox" id="dashShowAbilities" ${dash.showAbilities?'checked':''}> Show Abilities</label><button type="button" class="dash-clear-plan" data-act="clearPlan" ${items.length?'':'disabled'}>Clear Draft Plan</button></div></div>${items.length?`<div class="dash-list" id="dashQueueList">${items.map(m=>dashCard(d,t,m,{queueTab:true,next:String(m.id)===String(nextId)})).join('')}</div>`:'<div class="note">Your Draft Plan is empty. Add Pokémon from Free Agency to build your priorities. Taken Pokémon are removed from your queue automatically.</div>'}</section><section class="draft-projected-roster"><div class="draft-projected-head"><div><span class="dash-kicker">CURRENT ROSTER + REMAINING PLAN</span><h2>Projected Roster</h2><p>Your drafted Pokémon plus every available Pokémon in your saved plan. Picks already taken are excluded automatically.</p></div><div class="draft-projection-counts"><span><strong>${actualCount}</strong> Drafted</span><span><strong>${plannedCount}</strong> Planned</span><span><strong>${projection.length}</strong> Projected</span></div></div>${analysis}</section>`;return}
   if(dash.tab==='roster'){
-    const r=Array.isArray(state.settings.rosters?.[t])?state.settings.rosters[t]:[];const tot=r.reduce((n,e)=>n+(Number(e?.points)||0),0);
-    body.innerHTML=r.length?`<div class="dash-list">${r.map(e=>{const nm=typeof e==='string'?e:e.name,pt=typeof e==='string'?0:Number(e.points)||0;return `<div class="dash-card">${dashSprite(nm)}<div><div class="dash-name">${esc(nm)}</div></div><div>${pt} pts</div></div>`}).join('')}</div><div class="note" style="margin-top:8px">${r.length} Pokémon · ${tot} pts</div>`:'<div class="note">Your roster is empty.</div>';return}
+    const combined=projectedRosterEntries(t,d);
+    const actual=combined.filter(m=>m.status==='actual');
+    const planned=combined.filter(m=>m.status==='planned');
+    const tot=actual.reduce((n,e)=>n+(Number(e.points)||0),0);
+    const plannedPoints=planned.reduce((n,e)=>n+(Number(e.points)||0),0);
+    const analysis=SBL.rosterAnalysis?.render?SBL.rosterAnalysis.render({team:t,heading:'Team Analysis',entries:actual,roles:allAssignedRoles(),showAbilities:false,sprite:name=>sprite(name)}):'';
+    const card=(m)=>`<div class="dash-card ${m.status==='planned'?'projected-plan-card':''}">${dashSprite(m.name)}<div><div class="dash-name">${esc(displayMonName(m.name))}</div><div class="dash-sub">${(m.types||[]).map(x=>esc(x)).join(' / ')||'Types unavailable'}</div></div><span class="projected-state ${m.status==='planned'?'planned':'actual'}">${m.status==='planned'?'Planned':'Drafted'}</span><div>${Number(m.points)||0} pts</div></div>`;
+    body.innerHTML=`<section class="draft-projection-summary"><div><span class="ra-kicker">YOUR TEAM PROJECTION</span><h3>Current Roster + Draft Plan</h3><p>Your drafted Pokémon stay fixed. Remaining planned picks are layered on top, and any Pokémon taken by another franchise is removed from the projection.</p></div><div class="draft-projection-counts"><span><strong>${actual.length}</strong> Drafted</span><span><strong>${planned.length}</strong> Planned</span><span><strong>${combined.length}</strong> Projected</span></div></section>${analysis}<section class="draft-projection-roster"><div class="dash-queue-hint">Projected Roster · ${combined.length} Pokémon · ${tot+plannedPoints} pts total planned value (${tot} drafted + ${plannedPoints} planned)</div>${combined.length?`<div class="dash-list">${combined.map(card).join('')}</div>`:'<div class="note">Your roster and draft plan are both empty. Add Pokémon to your Draft Plan to see a projected team here.</div>'}</section>`;
+    return}
   if(dash.tab==='board'){body.innerHTML=dashboardBoardView(d);return}
-  if(dash.tab==='lottery'){body.innerHTML=lotteryView(d);return}
   body.innerHTML='<div class="note">Draft picks are managed by the commissioner. The Board tab shows completed and upcoming picks.</div>';
 }
 function bindDash(){
@@ -832,14 +918,16 @@ function bindDash(){
     if(a==='tab'){dash.tab=b.dataset.tab;dash.tabChosen=true;drawDashTabs();drawDashBody(d,true)}
     else if(a==='type'){const i=dash.f.types.indexOf(b.dataset.type);if(i<0)dash.f.types.push(b.dataset.type);else dash.f.types.splice(i,1);dash.limit=60;drawDashList(d)}
     else if(a==='more'){dash.limit+=60;drawDashList(d)}
-    else if(a==='resetFilters'){dash.f={...dash.f,q:'',types:[],ability:'',stat:'',statMin:'',statMax:'',minPts:'',maxPts:'',mega:'all',affordable:true,showDrafted:false,queuedOnly:false};dash.sort='pts-desc';dash.groupBy='points';dash.limit=60;buildDashPool(d)}
+    else if(a==='resetFilters'){dash.f={...dash.f,q:'',types:[],ability:'',role:'',stat:'',statMin:'',statMax:'',minPts:'',maxPts:'',mega:'all',affordable:true,showDrafted:false,queuedOnly:false};dash.sort='pts-desc';dash.groupBy='points';dash.limit=60;buildDashPool(d)}
     else if(a==='q'){const i=dash.queue.indexOf(String(id));if(i<0)dash.queue.push(String(id));else dash.queue.splice(i,1);b.classList.toggle('on',i<0);dashQueueChanged();if(dash.f.queuedOnly)drawDashList(d);if(dash.tab==='sheet')drawSheet(d)}
     else if(a==='up'||a==='down'){const i=dash.queue.indexOf(String(id)),j=a==='up'?i-1:i+1;if(i>=0&&j>=0&&j<dash.queue.length){[dash.queue[i],dash.queue[j]]=[dash.queue[j],dash.queue[i]];dashQueueChanged();drawDashBody(d,true)}}
     else if(a==='rm'){dash.queue=dash.queue.filter(x=>x!==String(id));dashQueueChanged();drawDashBody(d,true)}
+    else if(a==='clearPlan'){if(!dash.queue.length||!window.confirm('Clear your entire Draft Plan? This removes all planned picks synced with My Team. Your actual drafted Pokémon will not be affected.'))return;dash.queue=[];dashQueueChanged();drawDashBody(d,true)}
     else if(a==='dismissPrune'){dash.pruneNote='';drawDashBody(d,true)}
     else if(a==='sheetView'){dash.sheet.view=b.dataset.view;drawSheet(d)}
     else if(a==='sheetSort'){const c=b.dataset.col;if(dash.sheet.sort===c)dash.sheet.dir=dash.sheet.dir==='asc'?'desc':'asc';else{dash.sheet.sort=c;dash.sheet.dir=(c==='name'||c==='row'||c==='type')?'asc':'desc'}drawSheet(d)}
   });
+  root.addEventListener('change',e=>{if(e.target.matches('#dashShowAbilities')){dash.showAbilities=!!e.target.checked;drawDashBody(state.settings.draft,true);}});
   root.addEventListener('input',e=>{
     const id=e.target.id,d=state.settings.draft;
     if(id==='sheetQ'){clearTimeout(dashSearchT);dashSearchT=setTimeout(()=>{dash.sheet.q=e.target.value;drawSheet(d,true)},120)}
@@ -853,6 +941,7 @@ function bindDash(){
     if(id==='dashSort'){dash.sort=e.target.value;if(dash.sort==='stat-desc'&&!dash.f.stat){dash.f.stat='atk';const stat=$('dashStat');if(stat)stat.value='atk'}drawDashList(d)}
     else if(id==='dashStat'){dash.f.stat=e.target.value;dash.sort=e.target.value?'stat-desc':'pts-desc';drawDashList(d)}
     else if(id==='dashMega'){dash.f.mega=e.target.value;dash.limit=60;drawDashList(d)}
+    else if(id==='dashRole'){dash.f.role=e.target.value;dash.limit=60;drawDashList(d)}
     else if(id==='dashGroup'){dash.groupBy=e.target.value;if(dash.groupBy==='stat'&&!dash.f.stat){dash.f.stat='atk';const stat=$('dashStat');if(stat)stat.value='atk'}dash.sort=e.target.value==='stat'?'stat-desc':'pts-desc';const s=$('dashSort');if(s)s.value=dash.sort;drawDashList(d)}
     else if(id==='dashAff'){dash.f.affordable=e.target.checked;dash.limit=60;drawDashList(d)}
     else if(id==='dashDr'){dash.f.showDrafted=e.target.checked;dash.limit=60;drawDashList(d)}
@@ -880,7 +969,7 @@ function sheetGrid(d,q){
     return `<td class="sheet-cell${dr?' dr':''}${qd?' q':''}${sheetMatch(m,q)?'':' dim'}"${dr?'':` data-act="q" data-id="${esc(m.id)}"`}${dr?teamTint(m.draftedBy):''} title="${esc(title)}"><span class="sheet-name">${esc(sheetDisplay(m))}</span>${mega?`<em>${Number(m.points)||0}</em>`:''}<span class="sheet-types">${types}</span>${dr&&m.draftedBy?`<small>${esc(m.draftedBy)}</small>`:''}${qd?'<b class="sheet-star" aria-label="In your queue">\u2605</b>':''}</td>`;
   };
   let body='';for(let r=0;r<rows;r++)body+=`<tr><th class="sheet-rn" scope="row">${r+1}</th>${cols.map(c=>cell(c.list[r],c.mega)).join('')}</tr>`;
-  return `<div class="sheet-scroll"><table class="sheet-grid"><thead><tr><th class="sheet-corner"></th>${cols.map(c=>`<th scope="col">${esc(c.label)}<small>${c.total.filter(m=>!m.drafted).length} of ${c.total.length} left</small></th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="sheet-scroll" tabindex="0" role="region" aria-label="Scrollable draft spreadsheet"><table class="sheet-grid"><thead><tr><th class="sheet-corner"></th>${cols.map(c=>`<th scope="col">${esc(c.label)}<small>${c.total.filter(m=>!m.drafted).length} of ${c.total.length} left</small></th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 function sheetTable(d,q){
   const sh=dash.sheet,t=myTeam();
@@ -892,12 +981,13 @@ function sheetTable(d,q){
   const head=[['row','#'],['pts','Pts'],['name','Pok\u00e9mon'],['type','Type'],['hp','HP'],['atk','Atk'],['def','Def'],['spa','SpA'],['spd','SpD'],['spe','Spe'],['bst','BST'],['status','Status']];
   const th=head.map(([k,l])=>`<th scope="col" class="${sh.sort===k?'sorted':''}"><button type="button" data-act="sheetSort" data-col="${k}">${l}${sh.sort===k?(sh.dir==='asc'?' \u25B2':' \u25BC'):''}</button></th>`).join('')+'<th scope="col">Abilities</th>';
   const rows=pool.map(({m,i})=>{
-    const dr=!!m.drafted,qd=dash.queue.includes(String(m.id)),aff=!dr&&t?DD().canAfford(d,t,m):true;
+    const dr=!!m.drafted,qd=dash.queue.includes(String(m.id)),aff=!dr&&t?DD().budgetCanAfford(d,t,m):true;
     const nums=['hp','atk','def','spa','spd','spe','bst'].map(k=>`<td class="num${k==='bst'?' bst':''}">${sv(m,k)??'\u2014'}</td>`).join('');
-    const status=dr?`Drafted${m.draftedBy?' \u00b7 '+esc(m.draftedBy):''}`:(!aff?esc(dashBlockLabel(d,t,m)):'Available');
+    const block=!dr&&t?DD().megaBlock?.(d,t,m):null;
+    const status=dr?`Drafted${m.draftedBy?' \u00b7 '+esc(m.draftedBy):''}`:(!aff||block?esc(dashBlockLabel(d,t,m)):'Available');
     return `<tr class="${dr?'dr':''}${!dr&&!aff?' na':''}${qd?' q':''}"${dr?teamTint(m.draftedBy):''}><td class="num rn">${i+1}</td><td class="num">${Number(m.points)||0}</td><td class="nm">${dr?'':`<button type="button" class="sheet-q${qd?' on':''}" data-act="q" data-id="${esc(m.id)}" aria-label="${qd?'Remove from queue':'Add to queue'}">${qd?'\u2605':'\u2606'}</button>`}${dashSprite(m.name)}<span>${esc(sheetDisplay(m))}</span>${DD().isMegaMon(m)?'<em class="sheet-mega">Mega</em>':''}</td><td>${dashTypes(m)}</td>${nums}<td>${status}</td><td class="ab">${(m.abilities||[]).map(esc).join(', ')}</td></tr>`;
   }).join('');
-  return `<div class="sheet-scroll"><table class="sheet-table"><thead><tr>${th}</tr></thead><tbody>${rows||'<tr><td colspan="13" class="note">Nothing matches.</td></tr>'}</tbody></table></div>`;
+  return `<div class="sheet-scroll" tabindex="0" role="region" aria-label="Scrollable draft spreadsheet"><table class="sheet-table"><thead><tr>${th}</tr></thead><tbody>${rows||'<tr><td colspan="13" class="note">Nothing matches.</td></tr>'}</tbody></table></div>`;
 }
 function drawSheet(d){
   const body=$('dashBody');if(!body)return;const sh=dash.sheet;
@@ -913,7 +1003,6 @@ function drawSheet(d){
 function renderDashboard(d){
   document.body.classList.add('draft-user-dashboard');
   dashStyles();
-  if(!dash.tabChosen&&d.lottery&&d.lottery.status==='drawn'&&d.lottery.result&&d.lottery.result.length)dash.tab='lottery';
   const host=$('cmdBody')||content;
   if(!dash.queueLoaded){dash.queueLoaded=true;SBL.draft.queue.load().then(q=>{dash.queue=q;dash.queueReady=true;pruneTakenQueue(state.settings.draft);if($('dashRoot')){drawDashTabs();if(dash.tab!=='pool')drawDashBody(state.settings.draft,true);else drawDashList(state.settings.draft)}}).catch(()=>{})}
   if(!$('dashRoot')){host.innerHTML='<div id="dashRoot" class="dash"><div id="dashHead"></div><div class="dash-tabs" id="dashTabs"></div><div id="dashBody"></div></div>';bindDash();drawDashHead(d);drawDashTabs();drawDashBody(d,true);return}
@@ -939,7 +1028,7 @@ function presentationHeroSprite(name){
   const candidates=pokemon.spriteUrlCandidates(name,'hd').slice();
   if(!candidates.length)return pokemon.spriteMarkup(name,'pr-hero','hd');
   const isAlternate=!!pokemon.hasAlternateForm?.(name);
-  return `<img class="pr-hero${isAlternate?' pr-hero-form':''} sbl-remote-sprite" data-sbl-sprite-style="hd" src="${prEsc(candidates[0])}" alt="${prEsc(name)}" title="${prEsc(name)}" width="475" height="475" decoding="async" fetchpriority="high" data-sbl-sprite-candidates='${prEsc(JSON.stringify(candidates))}' data-sbl-sprite-index="0" onerror="SBL.pokemon.handleSpriteError(this)">`;
+  return `<img class="pr-hero${isAlternate?' pr-hero-form':''} sbl-remote-sprite" data-sbl-sprite-style="hd" src="${prEsc(candidates[0])}" alt="${prEsc(displayMonName(name))}" title="${prEsc(displayMonName(name))}" width="475" height="475" decoding="async" fetchpriority="high" data-sbl-sprite-candidates='${prEsc(JSON.stringify(candidates))}' data-sbl-sprite-index="0" onerror="SBL.pokemon.handleSpriteError(this)">`;
 }
 
 function presentStyles(){if(document.getElementById('presentStyle'))return;const st=document.createElement('style');st.id='presentStyle';st.textContent=`
@@ -987,7 +1076,6 @@ body.present #content{width:100%;min-height:100svh;margin:0;padding:0}
 .pr-stat{padding:7px 10px;border:1px solid #ffffff20;border-radius:10px;background:#ffffff0b;font:700 clamp(11px,1.35vmin,16px)/1.2 ui-monospace,monospace;color:#dce7f7}
 .pr-reveal.out{animation:prOut .45s forwards}
 @keyframes prOut{to{opacity:0}}
-.pr-lottery{width:100%;height:100%;min-height:100dvh;padding:clamp(18px,3vw,48px);display:grid;grid-template-rows:auto minmax(0,1fr);gap:clamp(16px,2.5vh,34px);color:#fff;background:radial-gradient(100vmax 75vmax at 50% 35%,#182848,#05070d 72%);overflow:auto}
 .pr-lot-head{text-align:center}.pr-lot-title{font-size:clamp(30px,5vmin,76px);font-weight:950;letter-spacing:.04em}.pr-lot-sub{font-size:clamp(14px,2vmin,26px);color:#bdc9dc;margin-top:8px}
 .pr-lot-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:clamp(10px,1.5vw,20px);align-content:start;max-width:1800px;width:100%;margin:0 auto}
 .pr-lot-slot{display:flex;align-items:center;gap:14px;min-width:0;padding:clamp(12px,1.5vw,22px);border:1px solid #ffffff20;border-radius:16px;background:#ffffff0b;min-height:88px}
@@ -1012,17 +1100,6 @@ function teamLeft(d,t){const total=Number(keyedValue(d.budgets,t,d.defaultBudget
 function renderPresent(){
   presentStyles();if(revealing)return;
   const d=state.settings.draft;
-  const lot=d?.lottery&&LT().normalize(d.lottery);
-  if(lot&&lot.proposed.length>1&&['setup','drawn'].includes(lot.status)){
-    const isDrawn=lot.result.length>0&&lot.status!=='setup';
-    const k=Math.min(lot.picks,lot.result.length);
-    const vis=isDrawn?LT().visiblePicks(lot):[];
-    const newest=isDrawn&&lot.revealed>0?(lot.revealed<=k?k-lot.revealed:lot.revealed-1):-1;
-    const slots=isDrawn?lot.result:lot.proposed;
-    const cards=slots.map((team,i)=>{const shown=isDrawn?!!vis[i]:false;const name=shown?team:'Waiting to be revealed';const recent=shown&&i===newest;return `<div class="pr-lot-slot ${shown?'shown':'pending'} ${recent?'recent':''}"><span class="num">${i+1}</span><span class="name">${prEsc(name)}</span></div>`}).join('');
-    const status=!isDrawn?'Lottery ready':lot.revealed>=lot.result.length?'Lottery results revealed':`Reveal ${lot.revealed} of ${lot.result.length} · ${lot.result.length-lot.revealed} positions left`;
-    content.innerHTML=`<div class="pr-lottery"><header class="pr-lot-head"><div class="pr-kicker">SBL · Draft Lottery</div><div class="pr-lot-title">${isDrawn?'The Draft Order':'The Road to Pick #1'}</div><div class="pr-lot-sub">${prEsc(status)} · ${lot.proposed.length} franchises</div></header><div class="pr-lot-grid">${cards}</div></div>`;return;
-  }
   let main,hue=220;
   if(!d||d.status==='setup'||d.status==='lobby'){main=`<div class="pr-kicker">Season draft</div><div class="pr-title">${d&&d.status==='lobby'?'Waiting for the draft to begin':'Draft not ready'}</div>`}
   else if(d.status==='complete'||(d.mode==='ordered'&&d.currentPick>=d.order.length)){main='<div class="pr-kicker">Draft complete</div><div class="pr-title">That\'s a wrap</div>'}
@@ -1031,7 +1108,7 @@ function renderPresent(){
     if(d.mode==='ordered'){const t=d.order[d.currentPick];hue=hueOf(t);main=`<div class="pr-kicker">Up next · Round ${round} · Pick ${pickNo}</div><div class="pr-team pr-clock">${prEsc(t)}</div><div class="pr-sub">${teamLeft(d,t)} points available</div>`}
     else main=`<div class="pr-kicker">Round ${round}</div><div class="pr-title">Pick ${pickNo}</div>`;
   }
-  const strip=d?d.picks.slice(-6).reverse().map(p=>`<div class="pr-chip">${SBL.pokemon.spriteMarkup(p.name,'pr-chip-sprite','hd')}<span>#${p.pickNumber} ${prEsc(p.name)} · ${prEsc(p.team)}</span></div>`).join(''):'';
+  const strip=d?d.picks.slice(-6).reverse().map(p=>`<div class="pr-chip">${SBL.pokemon.spriteMarkup(p.name,'pr-chip-sprite','hd')}<span>#${p.pickNumber} ${prEsc(displayMonName(p.name))} · ${prEsc(p.team)}</span></div>`).join(''):'';
   content.innerHTML=`<div class="pr-stage" style="--h:${hue}">${MOCK_DRAFT_MODE?'<div class="pr-mock-label">ADMINISTRATIVE MOCK DRAFT · SIMULATION ONLY</div>':''}<div class="pr-main">${main}</div><div class="pr-strip">${strip}</div></div>`;
 }
 function enqueueReveal(p){if(!PRESENT)return;const key=pickEventKey(p);if(seenPickKeys.has(key))return;seenPickKeys.add(key);revealQueue.push(p);if(!revealing)nextReveal()}
@@ -1048,7 +1125,7 @@ function nextReveal(){
   const o=document.createElement('div');o.className='pr-reveal';o.style.setProperty('--h',hueOf(p.team));
   const statPills=rawStats&&typeof rawStats==='object'?['hp','atk','def','spa','spd','spe'].filter(k=>Number.isFinite(Number(rawStats[k]))).map(k=>`<span class="pr-stat">${k.toUpperCase()} ${Number(rawStats[k])}</span>`).join(''):'';
   const typeLine=types.length?types.join(' / '):'';
-  o.innerHTML=`<div class="pr-wipe"></div><div class="pr-flare"></div><div class="pr-card"><div class="pr-art">${presentationHeroSprite(p.name)}</div><div class="pr-info"><div class="pr-pickno">Round ${round} · Pick ${p.pickNumber||d.picks.length}</div><div class="pr-picked-label">Team picked</div><div class="pr-mon">${prEsc(p.name)}</div>${SBL.pokemon.isMega?.(p.name)?'<div class="pr-badge">MEGA</div>':''}<div class="pr-pts">${Number(p.points??mon.points)||0} points</div><div class="pr-team">${prEsc(p.team)}</div>${typeLine?`<div class="pr-extra">${prEsc(typeLine)}</div>`:''}${statPills?`<div class="pr-stats">${statPills}</div>`:''}</div></div>`;
+  o.innerHTML=`<div class="pr-wipe"></div><div class="pr-flare"></div><div class="pr-card"><div class="pr-art">${presentationHeroSprite(p.name)}</div><div class="pr-info"><div class="pr-pickno">Round ${round} · Pick ${p.pickNumber||d.picks.length}</div><div class="pr-picked-label">Team picked</div><div class="pr-mon">${prEsc(displayMonName(p.name))}</div>${SBL.pokemon.isMega?.(p.name)?'<div class="pr-badge">MEGA</div>':''}<div class="pr-pts">${Number(p.points??mon.points)||0} points</div><div class="pr-team">${prEsc(p.team)}</div>${typeLine?`<div class="pr-extra">${prEsc(typeLine)}</div>`:''}${statPills?`<div class="pr-stats">${statPills}</div>`:''}</div></div>`;
   document.body.appendChild(o);
   let done=false;
   const finish=()=>{if(done)return;done=true;document.removeEventListener('keydown',onKey);o.classList.add('out');setTimeout(()=>{o.remove();nextReveal()},revealQueue.length?120:450)};

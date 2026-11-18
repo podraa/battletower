@@ -29,6 +29,12 @@ function installSeasonPicker(shared){
 
 let settings={rosters:{},freeAgency:{mons:[]}};
 let allRosters={};
+let myFranchiseName='';
+let myFranchiseId='';
+let mulliganState=null;
+let mulliganStateKey='';
+let mulliganStateAt=0;
+let mulliganActionBound=false;
 let draftQueue=[];
 let queueReady=false;
 let queueSaveTimer=null;
@@ -258,21 +264,77 @@ function openSelection(mon){
 
 let lastDataSignature=null;
 
+async function loadMulliganState(){
+  const leagueId=String(SBL.leagueDb?.selectedLeagueId?.()||'').trim();
+  const seasonId=String(SBL.leagueDb?.selectedSeasonId?.()||'').trim();
+  const cacheKey=leagueId+'|'+seasonId;
+  if(!leagueId||!seasonId||(mulliganStateKey===cacheKey&&Date.now()-mulliganStateAt<30000))return;
+  mulliganStateKey=cacheKey;mulliganStateAt=Date.now();
+  try{
+    const userResult=await db.auth.getUser(),userId=userResult.data?.user?.id;
+    if(userResult.error||!userId)throw (userResult.error||new Error('Authentication required.'));
+    const [cfgResult,allowanceResult,eventResult]=await Promise.all([
+      db.from('franchise_mulligan_settings').select('*').eq('league_id',leagueId).eq('season_id',seasonId).maybeSingle(),
+      db.from('franchise_mulligan_allowances').select('allowance_total').eq('league_id',leagueId).eq('season_id',seasonId).eq('franchise_id',myFranchiseId).eq('user_id',userId).maybeSingle(),
+      db.from('franchise_mulligan_events').select('id').eq('league_id',leagueId).eq('season_id',seasonId).eq('franchise_id',myFranchiseId)
+    ]);
+    if(cfgResult.error)throw cfgResult.error;
+    if(allowanceResult.error)throw allowanceResult.error;
+    if(eventResult.error)throw eventResult.error;
+    mulliganState={config:cfgResult.data||null,total:Number(allowanceResult.data?.allowance_total)||1,used:(eventResult.data||[]).length};
+  }catch(error){mulliganState=null;console.warn('Post-draft mulligan state unavailable (apply migration 042):',error);}
+}
+function wireMulliganAction(){
+  if(mulliganActionBound)return;mulliganActionBound=true;
+  document.addEventListener('click',async e=>{
+    const btn=e.target.closest&&e.target.closest('#useMulligan');if(!btn)return;
+    const status=$('mulliganStatus'),outgoing=$('mulliganOutgoing')?.value||'',incoming=$('mulliganIncoming')?.value||'';
+    if(status){status.className='note';status.textContent='';}
+    if(!outgoing||!incoming){if(status){status.className='note danger';status.textContent='Choose one Pokémon from your roster and one available Free Agency Pokémon.';}return;}
+    if(!confirm(`Confirm the 1-for-1 swap?\n\nGive up: ${outgoing}\nReceive: ${incoming}`))return;
+    btn.disabled=true;
+    try{
+      const {data,error}=await db.rpc('sbl_use_mulligan',{p_league_id:SBL.leagueDb.selectedLeagueId(),p_season_id:SBL.leagueDb.selectedSeasonId(),p_outgoing_name:outgoing,p_incoming_name:incoming});
+      if(error)throw error;
+      mulliganStateKey='';mulliganStateAt=0;await loadMulliganState();lastDataSignature=null;await load();
+      const updatedStatus=$('mulliganStatus');if(updatedStatus){updatedStatus.className='note';updatedStatus.textContent=`Swap complete: ${outgoing} has returned to Free Agency and ${incoming} is now on your roster. ${data?.remaining??0} mulligans remaining.`;}
+    }catch(error){const currentStatus=$('mulliganStatus');if(currentStatus){currentStatus.className='note danger';currentStatus.textContent=error.message||String(error);}btn.disabled=false;}
+  });
+}
+
+function mulliganPanelHtml(){
+  const cfg=mulliganState?.config;
+  if(!cfg?.enabled||!cfg.closes_at||new Date(cfg.closes_at).getTime()<Date.now())return '';
+  if(String(settings.draft?.status||'').toLowerCase()!=='complete')return '';
+  const roster=Array.isArray(allRosters[myFranchiseName])?allRosters[myFranchiseName]:[];
+  const available=(settings.freeAgency?.mons||[]).filter(m=>!owner(m.name));
+  const remaining=Math.max(0,(mulliganState.total||1)-(mulliganState.used||0));
+  return `<section class="panel fa-mulligan-panel"><div><h2>Post-draft mulligan</h2><p class="note">Make one free 1-for-1 swap before the commissioner’s window closes. Your outgoing Pokémon returns to Free Agency immediately.</p><div class="note"><strong>${remaining}</strong> of ${mulliganState.total} mulligans remaining · closes ${new Date(cfg.closes_at).toLocaleString()}</div></div><div class="row" style="margin-top:12px;align-items:end"><div><label for="mulliganOutgoing">Your Pokémon to give up</label><select id="mulliganOutgoing"><option value="">Choose from your roster…</option>${roster.map(m=>{const name=typeof m==='string'?m:m.name;return `<option value="${esc(name)}">${esc(name)}</option>`}).join('')}</select></div><div><label for="mulliganIncoming">Free Agency Pokémon to receive</label><select id="mulliganIncoming"><option value="">Choose available Pokémon…</option>${available.map(m=>`<option value="${esc(m.name)}">${esc(m.name)} · ${Number(m.points)||0} pts</option>`).join('')}</select></div><div style="flex:0 0 auto"><button type="button" class="primary" id="useMulligan" ${remaining>0&&roster.length&&available.length?'':'disabled'}>Confirm 1-for-1 swap</button></div></div><div id="mulliganStatus" class="note" role="status"></div></section>`;
+}
+
+function syncMulliganPanel(){
+  const main=$('main');if(!main)return;
+  const html=mulliganPanelHtml(),existing=main.querySelector('.fa-mulligan-panel'),toolbar=main.querySelector('.toolbar');
+  if(existing){if(html)existing.outerHTML=html;else existing.remove();}
+  else if(html&&toolbar)toolbar.insertAdjacentHTML('beforebegin',html);
+}
+
 async function load(){
   try{
     const draftState=await SBL.draft.read();
     const nextPool=draftState?.settings?.draft?.pool||[];
     const nextSignature=JSON.stringify(nextPool);
-    if(nextSignature!==draftPoolSignature){draftPoolIndex=nextPool;draftPoolSignature=nextSignature;statResolver.setSources({pool:draftPoolIndex,dex:dexData});}
+    if(nextSignature!==draftPoolSignature){draftPoolIndex=nextPool;draftPoolSignature=nextSignature;statResolver.setSources({pool:draftPoolIndex,dex:dexData});filterMemo.clear();}
   }catch(_){}
   const result=await SBL.freeAgency.load(db);
   settings=result.settings||settings;
   allRosters=result.rosters||{};
+  await loadMulliganState();
   const mons=result.pool||[];
 
   // Skip the (expensive, focus-stealing) re-render on the periodic 5s poll
   // unless the pool or rosters actually changed since last time.
-  const signature=JSON.stringify({mons,allRosters,draftPoolSignature});
+  const signature=JSON.stringify({mons,allRosters,draftPoolSignature,mulliganState});
   const changed=signature!==lastDataSignature;
   lastDataSignature=signature;
   statResolver.setSources({pool:draftPoolIndex,dex:dexData});
@@ -303,9 +365,12 @@ function hasMove(name, needle){
 function hasAbility(name, needle){
   if(!needle) return true;
   const mk='a|'+key(name)+'|'+key(needle); if(filterMemo.has(mk)) return filterMemo.get(mk);
-  const q=String(needle).trim().toLowerCase();
+  const q=key(needle);
+  const poolEntry=statResolver.poolEntry(name);
+  const stored=Array.isArray(poolEntry?.abilities)?poolEntry.abilities:[];
   const e=getDexEntry(name);
-  const out=Object.values(e?.abilities||{}).some(a=>String(a).toLowerCase().includes(q)); filterMemo.set(mk,out); return out;
+  const values=[...stored,...Object.values(e?.abilities||{})];
+  const out=values.some(a=>key(a).includes(q)); filterMemo.set(mk,out); return out;
 }
 function meetsStat(name, stat, min, max){
   return statResolver.matches(name,stat,min,max);
@@ -441,6 +506,7 @@ function syncFilterControls(){
   if(pMin&&document.activeElement!==pMin) pMin.value=String(filterPtsMin);
   if(pMax&&document.activeElement!==pMax) pMax.value=String(filterPtsMax);
   const pLabel=$('ptsRangeLabel'); if(pLabel) pLabel.textContent=ptsRangeText();
+  const fill=$('pointsSliderFill');if(fill){const lo=(filterPtsMin-PTS_MIN)/(PTS_MAX-PTS_MIN)*100,hi=(filterPtsMax-PTS_MIN)/(PTS_MAX-PTS_MIN)*100;fill.style.left=lo+'%';fill.style.width=(hi-lo)+'%';}
   const mega=$('filterMega'); if(mega && mega.value!==filterMega) mega.value=filterMega;
   const stat=$('filterStat'); if(stat && stat.value!==filterStat) stat.value=filterStat;
   const sortSel=$('filterSort'); if(sortSel && sortSel.value!==filterSort) sortSel.value=filterSort;
@@ -458,6 +524,7 @@ function ptsRangeText(){
 function render(){
   const allMons=Array.isArray(settings.freeAgency?.mons)?settings.freeAgency.mons:[];
   if($('results') && $('searchName') && $('filterMove') && $('filterAbility')){
+    syncMulliganPanel();
     renderResults();
     syncFilterControls();
     return;
@@ -466,10 +533,11 @@ function render(){
   const pointValues=[...new Set(allMons.map(m=>Number(m.points)||0))].sort((a,b)=>b-a);
 
   $('main').innerHTML=`
+    ${mulliganPanelHtml()}
     <div class="toolbar">
       <div class="toolbar-wide"><label>Search by name</label><input type="text" id="searchName" value="${esc(filterName)}" placeholder="e.g. Landorus, Cinderace…" autocomplete="off"></div>
       <div><label for="filterMega">Pokémon form</label><select class="filter-select" id="filterMega"><option value="all" ${filterMega==='all'?'selected':''}>All Pokémon</option><option value="mega" ${filterMega==='mega'?'selected':''}>Mega only</option><option value="standard" ${filterMega==='standard'?'selected':''}>Non-Mega only</option></select></div>
-      <div class="points-filter points-range-select"><label>Points range <span class="pts-range-label" id="ptsRangeLabel">${esc(ptsRangeText())}</span></label><div class="points-select-pair"><label for="filterPtsMin"><span>Min</span><select id="filterPtsMin" aria-label="Minimum points">${Array.from({length:PTS_MAX-PTS_MIN+1},(_,i)=>i+PTS_MIN).map(v=>`<option value="${v}" ${filterPtsMin===v?'selected':''}>${v===PTS_MIN?'Any':v}</option>`).join('')}</select></label><span class="points-range-dash" aria-hidden="true">–</span><label for="filterPtsMax"><span>Max</span><select id="filterPtsMax" aria-label="Maximum points">${Array.from({length:PTS_MAX-PTS_MIN+1},(_,i)=>i+PTS_MIN).map(v=>`<option value="${v}" ${filterPtsMax===v?'selected':''}>${v===PTS_MAX?'Any':v}</option>`).join('')}</select></label></div></div>
+      <div class="points-filter points-slider"><label>Points range <span class="pts-range-label" id="ptsRangeLabel">${esc(ptsRangeText())}</span></label><div class="points-dual-slider"><div class="points-slider-track"><i id="pointsSliderFill"></i></div><input type="range" id="filterPtsMin" min="${PTS_MIN}" max="${PTS_MAX}" step="1" value="${filterPtsMin}" aria-label="Minimum points"><input type="range" id="filterPtsMax" min="${PTS_MIN}" max="${PTS_MAX}" step="1" value="${filterPtsMax}" aria-label="Maximum points"></div><div class="points-slider-ends"><span>${PTS_MIN} · Any</span><span>${PTS_MAX} · Any</span></div></div>
       <div><label>Availability</label><div class="avail-toggle"><button class="avail-btn ${filterAvail==='all'?'active':''}" data-avail="all">All</button><button class="avail-btn ${filterAvail==='available'?'active':''}" data-avail="available">Available</button><button class="avail-btn ${filterAvail==='taken'?'active':''}" data-avail="taken">Taken</button></div></div>
       <div class="toolbar-wide"><label>Move</label><input type="text" id="filterMove" value="${esc(filterMove)}" placeholder="e.g. Earthquake, Knock Off…" autocomplete="off"></div>
       <div class="toolbar-wide"><label>Ability</label><input type="text" id="filterAbility" value="${esc(filterAbility)}" placeholder="e.g. Intimidate, Levitate…" autocomplete="off"></div>
@@ -491,8 +559,8 @@ function render(){
   $('filterAbility').oninput=e=>{filterAbility=e.target.value;schedule();};
   $('filterStatMin').oninput=e=>{filterStatMin=e.target.value;if(e.target.value&&!filterStat){filterStat='atk';$('filterStat').value='atk';}schedule();};
   $('filterStatMax').oninput=e=>{filterStatMax=e.target.value;if(e.target.value&&!filterStat){filterStat='atk';$('filterStat').value='atk';}schedule();};
-  $('filterPtsMin').onchange=e=>{filterPtsMin=Number(e.target.value);if(filterPtsMin>filterPtsMax)filterPtsMax=filterPtsMin;renderResults();syncFilterControls();};
-  $('filterPtsMax').onchange=e=>{filterPtsMax=Number(e.target.value);if(filterPtsMax<filterPtsMin)filterPtsMin=filterPtsMax;renderResults();syncFilterControls();};
+  $('filterPtsMin').oninput=e=>{filterPtsMin=Math.min(Number(e.target.value),filterPtsMax);renderResults();syncFilterControls();};
+  $('filterPtsMax').oninput=e=>{filterPtsMax=Math.max(Number(e.target.value),filterPtsMin);renderResults();syncFilterControls();};
   $('filterMega').onchange=e=>{filterMega=e.target.value;renderResults();syncFilterControls();};
   $('filterStat').onchange=e=>{filterStat=e.target.value;if(!filterStat)filterSort='';renderResults();syncFilterControls();};
   $('filterSort').onchange=e=>{filterSort=e.target.value;if(filterSort&&!filterStat){filterStat='atk';$('filterStat').value='atk';}renderResults();syncFilterControls();};
@@ -503,6 +571,7 @@ function render(){
     filterTypes.has(t)?filterTypes.delete(t):filterTypes.add(t);
     renderResults();syncFilterControls();
   });
+  wireMulliganAction();
 
   renderResults();
 }

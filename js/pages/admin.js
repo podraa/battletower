@@ -103,6 +103,7 @@
 
   function normalizeDraftState(draft){
     const d = Object.assign(defaultDraftState(), draft || {});
+    delete d.lottery; // CP4.66: legacy lottery state is no longer supported.
     d.budgets = d.budgets && typeof d.budgets === 'object' ? d.budgets : {};
     d.authorizedPickerIds = Array.isArray(d.authorizedPickerIds) ? [...new Set(d.authorizedPickerIds.map(String))] : [];
     d.pool = Array.isArray(d.pool) ? d.pool.map(m => ({
@@ -2100,6 +2101,7 @@ Choose Cancel to keep draft status unchanged.`);
   let ACTIVE_MEMBER_FRANCHISES = [];
   let ACTIVE_LEAGUE_FRANCHISES = [];
   let ACTIVE_SEASON_SITOUT_USERS = new Set();
+  let ACTIVE_MEMBER_PROFILES = [];
   let ACTIVE_MEMBER_FRANCHISES_LOADED = false;
   // Draft picks are commissioner-managed; user-side authorised pickers are disabled.
 
@@ -2108,8 +2110,8 @@ Choose Cancel to keep draft status unchanged.`);
   }
 
   function draftFranchises(){
-    // Lottery/draft eligibility is exactly the current active player membership
-    // + franchise assignment set. Never use stale saved lottery names or maps.
+    // Draft eligibility is exactly the current active player membership
+    // + franchise assignment set. Never use stale saved draft-order names or maps.
     if(!ACTIVE_MEMBER_FRANCHISES_LOADED) return [];
     return [...new Set(ACTIVE_MEMBER_FRANCHISES.filter(f=>!ACTIVE_SEASON_SITOUT_USERS.has(String(f.userId||''))).map(f=>String(f.name||'').trim()).filter(Boolean))]
       .sort((a,b)=>a.localeCompare(b, undefined, {sensitivity:'base'}));
@@ -2550,192 +2552,6 @@ Choose Cancel to keep draft status unchanged.`);
   }
 
 
-  // ---------- Draft lottery (CP4.1) ----------
-  // The proposed order + odds can be published ahead of time; the draw and the
-  // pick-by-pick reveal are live, and every open Draft Room follows along
-  // because the lottery lives in the shared draft state.
-  let LOTTERY_WORK = null;                 // unsaved edits while status is 'setup'
-  const LOTTERY_UI = { rounds:'', snake:true, paste:'', err:'' };
-
-  function lotteryWork(d, franchises){
-    if(!LOTTERY_WORK){
-      const L=SBL.draftLottery;
-      const saved=L.normalize(d.lottery,franchises);
-      const active=(franchises||[]).map(String);
-      const activeKey=new Set(active.map(x=>x.toLowerCase()));
-      const oldWeights=new Map((saved.proposed||[]).map((name,i)=>[String(name).toLowerCase(),Number(saved.weights?.[i])||1]));
-      const proposed=(saved.proposed||[]).filter(name=>activeKey.has(String(name).toLowerCase()));
-      const present=new Set(proposed.map(x=>x.toLowerCase()));
-      active.forEach(name=>{if(!present.has(name.toLowerCase()))proposed.push(name);});
-      const weights=proposed.map(name=>oldWeights.get(name.toLowerCase())||1);
-      const picks=Math.min(Math.max(1,Number(saved.picks)||proposed.length),proposed.length);
-      LOTTERY_WORK=Object.assign({},saved,{proposed,weights,picks});
-    }
-    return LOTTERY_WORK;
-  }
-  const lotEsc = v => SBL.pokemon.escapeHtml(v);
-  const pctText = x => x >= 0.9995 ? '100%' : x < 0.0005 ? '–' : (x * 100).toFixed(1) + '%';
-
-  function lotteryOddsTable(l){
-    const o = SBL.draftLottery.odds(l), cols = l.proposed.length;
-    return `<div style="overflow-x:auto"><table class="lottery-odds"><thead><tr><th>#</th><th>Franchise (worst record first)</th><th>Weight</th>
-      ${Array.from({length:cols},(_,i)=>`<th>Pick ${i+1}</th>`).join('')}</tr></thead><tbody>
-      ${l.proposed.map((t,i)=>`<tr><td>${i+1}</td><td>${lotEsc(t)}</td><td>${l.weights[i]}</td>
-        ${o[i].slice(0,cols).map((x,p)=>`<td class="${x>=0.2?'hot':''}">${pctText(x)}${p < l.picks ? '' : ''}</td>`).join('')}</tr>`).join('')}
-      </tbody></table></div>`;
-  }
-
-  function lotteryPanelHtml(d, franchises){
-    const L = SBL.draftLottery, locked = !(d.status === 'setup' || d.status === 'lobby');
-    const saved = d.lottery ? L.normalize(d.lottery, franchises) : null;
-    const st = saved ? saved.status : 'setup';
-    const badge = locked && st !== 'applied' ? 'LOCKED' : st.toUpperCase();
-    let body = '';
-
-    if(st === 'setup' && !locked){
-      const w = lotteryWork(d, franchises), n = w.proposed.length;
-      body = `
-        <div class="note">Enter last season's finishing order, <strong>worst record first</strong> (slot 1 gets the best odds). Users can see the proposed order and odds as soon as you publish them.</div>
-        <div class="row" style="align-items:flex-end">
-          <div style="flex:2"><label>Paste order (one franchise per line)</label>
-            <textarea id="lotPaste" rows="4" placeholder="Worst record first…">${lotEsc(LOTTERY_UI.paste)}</textarea></div>
-          <div style="flex:0"><button class="ghost" id="lotUsePaste">Use pasted order</button></div>
-        </div>
-        <div id="lotList" class="lottery-slots">
-          ${w.proposed.map((t,i)=>`<div class="lottery-slot"><span class="n">${i+1}</span><span class="t">${lotEsc(t)}</span>
-            <input type="number" min="1" step="1" value="${w.weights[i]}" data-lot-weight="${i}" title="Weight (odds are relative)">
-            <button class="ghost small" data-lot-move="${i}" data-dir="-1" ${i===0?'disabled':''}>▲</button>
-            <button class="ghost small" data-lot-move="${i}" data-dir="1" ${i===n-1?'disabled':''}>▼</button></div>`).join('')}
-        </div>
-        <div class="row" style="align-items:flex-end;margin-top:10px">
-          <div><label>Odds preset</label><select id="lotPreset">
-            ${Object.entries(L.PRESETS).map(([k,v])=>`<option value="${k}" ${w.preset===k?'selected':''}>${lotEsc(v.label)}</option>`).join('')}
-            <option value="custom" ${w.preset==='custom'?'selected':''}>Custom (edit weights above)</option></select></div>
-          <div><label>Lottery picks drawn (1–${n})</label><input type="number" id="lotPicks" min="1" max="${n}" value="${w.picks}"></div>
-        </div>
-        <div class="note">Picks after the drawn ones keep the proposed order. Exact odds:</div>
-        ${n >= 2 ? lotteryOddsTable(w) : ''}
-        <div class="foot-actions">
-          <button class="ghost" id="lotPublish">Publish order &amp; odds to users</button>
-          <button class="primary" id="lotRun">Run the lottery</button>
-        </div>`;
-    } else if(saved && (st === 'drawn' || st === 'applied')){
-      const K = Math.min(saved.picks, saved.result.length), total = saved.result.length, left = total - saved.revealed;
-      const full = saved.revealed >= total;
-      const ok = L.verify(saved);
-      body = `
-        <div class="note">Seed <code>${lotEsc(saved.seed)}</code> · ${ok ? '✓ re-running this seed reproduces the result' : '⚠ result does not match its seed'}</div>
-        <ol class="lottery-result">
-          ${saved.result.map((t,i)=>{
-            const shown = L.visiblePicks(saved)[i];
-            return `<li class="${shown?'shown':'hidden'}"><span class="n">${i+1}</span> ${lotEsc(t)}
-              <span class="note" style="margin:0 0 0 8px">${shown ? '' : '(not revealed yet — you can see it)'}${shown && i < K ? ` · was slot ${saved.proposed.indexOf(t)+1}` : ''}</span></li>`; }).join('')}
-        </ol>
-        ${st === 'drawn' && !locked ? `
-          <div class="foot-actions">
-            ${full ? '' : `<button class="primary" id="lotRevealNext">Reveal next position (${left} left)</button><button class="ghost" id="lotRevealAll">Reveal all positions</button>`}
-            <button class="ghost danger-btn" id="lotReset">Discard &amp; redo</button>
-          </div>
-          ${full ? `<div class="row" style="align-items:flex-end;margin-top:10px">
-            <div><label>Rounds</label><input type="number" id="lotRounds" min="1" value="${lotEsc(LOTTERY_UI.rounds || d.maxPicks)}"></div>
-            <div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px"><input type="checkbox" id="lotSnake" ${LOTTERY_UI.snake?'checked':''}> Snake</label></div>
-            <div style="flex:0"><button class="primary" id="lotApply">Lock lottery &amp; set draft order</button></div></div>` : ''}`
-        : ''}
-        ${st === 'applied' ? `<div class="note">Applied on ${lotEsc(new Date(saved.appliedAt).toLocaleString())}. The draft order below was generated from this result.</div>
-          ${!locked ? '<div class="foot-actions"><button class="ghost danger-btn" id="lotReset">Reset lottery &amp; clear draft order</button></div>' : ''}` : ''}`;
-    } else {
-      body = `<div class="note">The lottery was not run before the draft started.</div>`;
-    }
-    return `<div class="panel" id="lotteryPanel"><h2>Draft lottery <span class="badge">${badge}</span></h2>${body}
-      <div class="note danger" id="lotErr">${lotEsc(LOTTERY_UI.err)}</div></div>`;
-  }
-
-  function wireLottery(franchises){
-    const L = SBL.draftLottery, $ = id => document.getElementById(id);
-    const cur = () => STATE.settings.draft;
-    const fail = e => { LOTTERY_UI.err = e.message || String(e); const el = $('lotErr'); if(el) el.textContent = LOTTERY_UI.err; };
-    const persist = async (lot, action, msg) => {
-      LOTTERY_UI.err = '';
-      cur().lottery = lot; LOTTERY_WORK = null;
-      await saveDraft();
-      await logAdminAction(action, msg, {status:lot.status, seed:lot.seed||null});
-      drawDraft();
-    };
-    const work = () => LOTTERY_WORK;
-
-    $('lotUsePaste')?.addEventListener('click', () => {
-      const raw = $('lotPaste').value; LOTTERY_UI.paste = raw;
-      const byKey = new Map(franchises.map(f => [f.toLowerCase(), f]));
-      const names = raw.split(/\r?\n/).map(x => x.replace(/^\s*\d+[.)\s-]+/, '').trim()).filter(Boolean);
-      const unknown = names.filter(n => !byKey.has(n.toLowerCase()));
-      if(unknown.length) return fail(new Error('Not recognised as franchises: ' + unknown.join(', ')));
-      const order = names.map(n => byKey.get(n.toLowerCase()));
-      const missing = franchises.filter(f => !order.includes(f));
-      if(missing.length) return fail(new Error('Missing from your list: ' + missing.join(', ')));
-      const w = work(); w.proposed = order;
-      if(w.preset !== 'custom') w.weights = L.presetWeights(w.preset, order.length);
-      LOTTERY_UI.err = ''; drawDraft();
-    });
-    contentEl.querySelectorAll('[data-lot-move]').forEach(b => b.addEventListener('click', () => {
-      const w = work(), i = Number(b.dataset.lotMove), j = i + Number(b.dataset.dir);
-      if(j < 0 || j >= w.proposed.length) return;
-      [w.proposed[i], w.proposed[j]] = [w.proposed[j], w.proposed[i]];
-      if(w.preset === 'custom') [w.weights[i], w.weights[j]] = [w.weights[j], w.weights[i]];
-      drawDraft();
-    }));
-    contentEl.querySelectorAll('[data-lot-weight]').forEach(inp => inp.addEventListener('change', () => {
-      const w = work(); w.weights[Number(inp.dataset.lotWeight)] = Number(inp.value) || 0; w.preset = 'custom'; drawDraft();
-    }));
-    $('lotPreset')?.addEventListener('change', e => {
-      const w = work(); w.preset = e.target.value;
-      if(w.preset !== 'custom') w.weights = L.presetWeights(w.preset, w.proposed.length);
-      drawDraft();
-    });
-    $('lotPicks')?.addEventListener('change', e => { work().picks = Math.max(1, Math.min(work().proposed.length, Number(e.target.value) || 1)); drawDraft(); });
-
-    $('lotPublish')?.addEventListener('click', async () => {
-      try{
-        const w = work(), errs = L.validate(w, franchises); if(errs.length) return fail(new Error(errs[0]));
-        await persist(Object.assign({}, w, {status:'setup'}), 'publish_draft_lottery_order', 'Published the proposed lottery order and odds.');
-      }catch(e){ fail(e); }
-    });
-    $('lotRun')?.addEventListener('click', async () => {
-      try{
-        const w = work(), errs = L.validate(w, franchises); if(errs.length) return fail(new Error(errs[0]));
-        const summary = w.proposed.map((t,i) => (i+1) + '. ' + t).join('\n');
-        if(!confirm('Run the lottery with this proposed order (worst record first)?\n\n' + summary)) return;
-        await persist(L.run(w), 'run_draft_lottery', 'Ran the draft lottery.');
-      }catch(e){ fail(e); }
-    });
-    const reveal = async count => {
-      try{
-        const l = Object.assign({}, cur().lottery), total = l.result.length;
-        l.revealed = Math.min(total, count);
-        await persist(l, 'reveal_draft_lottery', 'Revealed lottery positions (' + l.revealed + '/' + total + ').');
-      }catch(e){ fail(e); }
-    };
-    $('lotRevealNext')?.addEventListener('click', () => reveal((cur().lottery.revealed || 0) + 1));
-    $('lotRevealAll')?.addEventListener('click', () => reveal(Infinity));
-    $('lotApply')?.addEventListener('click', async () => {
-      try{
-        const d = cur(), rounds = Number($('lotRounds').value), snake = $('lotSnake').checked;
-        if(!Number.isFinite(rounds) || rounds < 1) return fail(new Error('Enter a valid number of rounds.'));
-        LOTTERY_UI.rounds = rounds; LOTTERY_UI.snake = snake;
-        const l = Object.assign({}, d.lottery, {status:'applied', appliedAt:new Date().toISOString()});
-        d.order = L.buildOrder(l.result, rounds, snake); d.mode = 'ordered'; DRAFT_ROUND_BUILDER = l.result.slice();
-        await persist(l, 'apply_draft_lottery', `Applied the lottery result as a ${rounds}-round ${snake ? 'snake' : 'straight'} draft order.`);
-      }catch(e){ fail(e); }
-    });
-    $('lotReset')?.addEventListener('click', async () => {
-      if(!confirm('Discard this lottery result' + (cur().lottery?.status === 'applied' ? ' and clear the draft order generated from it' : '') + '?')) return;
-      try{
-        const d = cur(), l = Object.assign({}, d.lottery, {status:'setup', result:[], revealed:0, seed:'', drawnAt:null, appliedAt:null});
-        if(d.lottery?.status === 'applied') d.order = [];
-        await persist(l, 'reset_draft_lottery', 'Reset the draft lottery.');
-      }catch(e){ fail(e); }
-    });
-  }
-
 function renderDraft(){ return drawDraft(); }
 
   function draftRoomUrl(view){
@@ -2825,14 +2641,12 @@ function renderDraft(){ return drawDraft(); }
     if(editable){
       const eligible=new Set(franchises.map(x=>String(x).trim().toLowerCase()));
       d.order=(d.order||[]).filter(team=>eligible.has(String(team||'').trim().toLowerCase()));
-      if(d.lottery && typeof d.lottery==='object'){
-        ['proposed','result'].forEach(key=>{if(Array.isArray(d.lottery[key]))d.lottery[key]=d.lottery[key].filter(team=>eligible.has(String(team||'').trim().toLowerCase()));});
-      }
       DRAFT_ROUND_BUILDER=(DRAFT_ROUND_BUILDER||[]).filter(team=>eligible.has(String(team||'').trim().toLowerCase()));
     }
     const draftedCount = d.pool.filter(m => m.drafted).length;
 
     contentEl.innerHTML = `
+      ${roleSettingsPanelHtml()}
       <div class="panel">
         <h2>Draft status</h2>
         <div class="row" style="align-items:center">
@@ -2978,8 +2792,12 @@ function renderDraft(){ return drawDraft(); }
           </label>
         </div>
         ${d.mode === 'ordered' ? `
-        <div class="note">Build one round of pick order below, then generate the full order across all rounds.</div>
+        <div class="note">Enter the exact pick order below, or use the franchise selector to build a repeating round. You can enter franchise names or account usernames, one per line. Usernames are matched case-insensitively and converted to their assigned franchise.</div>
         ${editable ? `
+        <div class="row" style="align-items:flex-end">
+          <div style="flex:1 1 420px"><label for="draftOrderPaste">Exact draft order (one username or franchise per line)</label><textarea id="draftOrderPaste" rows="6" placeholder="username_one\nusername_two\nFranchise Three">${SBL.pokemon.escapeHtml((d.order||[]).join('\n'))}</textarea></div>
+          <div style="flex:0"><button class="primary" id="saveExactDraftOrderBtn">Save exact order</button></div>
+        </div>
         <div class="row" style="align-items:flex-end">
           <div><label>Add franchise to round order</label>
             <select id="orderRoundSelect">
@@ -3003,9 +2821,7 @@ function renderDraft(){ return drawDraft(); }
         <div class="note danger" id="draftOrderErr"></div>
       </div>
     `;
-    // Commissioner owns lottery setup/run/reveal. The presentation window is display-only.
-    contentEl.insertAdjacentHTML('beforeend', lotteryPanelHtml(d, franchises));
-    wireLottery(franchises);
+    wireRoleSettings();
     contentEl.insertAdjacentHTML('beforeend', mockDraftHtml(d,franchises));
     wireMockDraft(d,franchises);
     // -- status panel --
@@ -3042,7 +2858,7 @@ function renderDraft(){ return drawDraft(); }
           return;
         }
       }
-      if(d.mode === 'ordered' && !d.order.length){ err.textContent = 'Generate a draft order first, or switch to manual mode.'; return; }
+      if(d.mode === 'ordered' && !d.order.length){ err.textContent = 'Enter and save a draft order first, or switch to manual mode.'; return; }
       try{
         const result = await SBL.draft.startDraft();
         if(result?.state){
@@ -3290,6 +3106,37 @@ function renderDraft(){ return drawDraft(); }
         drawDraft();
       }catch(e2){ err.textContent = e2.message; }
     });
+    document.getElementById('saveExactDraftOrderBtn')?.addEventListener('click', async () => {
+      const err = document.getElementById('draftOrderErr');
+      const raw = document.getElementById('draftOrderPaste')?.value || '';
+      const entries = raw.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+      if(!entries.length){ err.textContent='Enter at least one username or franchise.'; return; }
+      const franchiseByKey = new Map(franchises.map(team=>[String(team).normalize('NFKC').trim().toLocaleLowerCase().replace(/\s+/g,' '),team]));
+      const usernameToFranchise = new Map();
+      const activeIds = new Set(ACTIVE_MEMBER_FRANCHISES.filter(f=>!ACTIVE_SEASON_SITOUT_USERS.has(String(f.userId||''))).map(f=>String(f.userId)));
+      (ACTIVE_MEMBER_FRANCHISES||[]).filter(f=>activeIds.has(String(f.userId))).forEach(f=>{
+        const profile=(ACTIVE_MEMBER_PROFILES||[]).find(x=>String(x.id)===String(f.userId));
+        const username=String(profile?.username||'').trim();
+        if(username) usernameToFranchise.set(username.normalize('NFKC').toLocaleLowerCase(),f.name);
+      });
+      const resolved=[], unknown=[];
+      entries.forEach(entry=>{
+        const key=entry.normalize('NFKC').trim().toLocaleLowerCase().replace(/\s+/g,' ');
+        const team=franchiseByKey.get(key)||usernameToFranchise.get(entry.normalize('NFKC').trim().toLocaleLowerCase());
+        if(team) resolved.push(team); else unknown.push(entry);
+      });
+      if(unknown.length){err.textContent='Could not match these usernames/franchises to a participating franchise: '+unknown.join(', ')+'. Check spelling and ensure those players are not sitting out.';return;}
+      const counts=new Map(franchises.map(team=>[team,0]));
+      resolved.forEach(team=>counts.set(team,(counts.get(team)||0)+1));
+      const invalid=[...counts].filter(([,count])=>count<d.minPicks||count>d.maxPicks);
+      if(invalid.length){err.textContent='Each participating franchise must appear '+d.minPicks+'–'+d.maxPicks+' times. '+invalid.map(([team,count])=>`${team}: ${count}`).join('; ');return;}
+      try{
+        d.order=resolved; d.mode='ordered'; DRAFT_ROUND_BUILDER=[...new Set(resolved)];
+        await saveDraft();
+        await logAdminAction('save_manual_draft_order','Saved an exact manually entered draft order.',{order:resolved,entryCount:resolved.length});
+        drawDraft();
+      }catch(e){err.textContent=e.message||String(e);}
+    });
     document.getElementById('addToRoundBtn')?.addEventListener('click', () => {
       const sel = document.getElementById('orderRoundSelect');
       if(sel && sel.value && !DRAFT_ROUND_BUILDER.includes(sel.value)) DRAFT_ROUND_BUILDER.push(sel.value);
@@ -3473,8 +3320,129 @@ function renderDraft(){ return drawDraft(); }
     if(!mons.length) throw new Error('Free Agency pool is empty.');
     STATE.settings=STATE.settings||{};
     STATE.settings.freeAgency={mons,source:String(sourceName||'Workbook'),updatedAt:new Date().toISOString()};
+    ROLE_EDITOR_POKEMON='';ROLE_STATUS_MESSAGE='';
     await saveSharedState();
     await logAdminAction('publish_free_agency', `Published Free Agency with ${mons.length} Pokémon from ${String(sourceName||'Workbook')}.`, {count:mons.length, source:String(sourceName||'Workbook')});
+  }
+
+  const ROLE_FORMAT_FALLBACKS=[
+    {format_id:'gen9ou',label:'Gen 9 OU'},
+    {format_id:'gen9uu',label:'Gen 9 UU'},
+    {format_id:'gen9ubers',label:'Gen 9 Ubers'},
+    {format_id:'gen9nationaldex',label:'Gen 9 National Dex'},
+    {format_id:'gen9doublesou',label:'Gen 9 Doubles OU'},
+    {format_id:'gen9vgc',label:'Gen 9 VGC'}
+  ];
+  let ROLE_FORMATS=ROLE_FORMAT_FALLBACKS.slice();
+  let ROLE_META_CACHE=null;
+  let ROLE_EDITOR_POKEMON='';
+  let ROLE_STATUS_MESSAGE='';
+  const roleKey=name=>String(name||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/♀/g,'-f').replace(/♂/g,'-m').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  const roleAssignments=()=>STATE.settings?.pokemonRoleAssignments&&typeof STATE.settings.pokemonRoleAssignments==='object'?STATE.settings.pokemonRoleAssignments:{};
+  const roleManual=()=>STATE.settings?.pokemonRoleManual&&typeof STATE.settings.pokemonRoleManual==='object'?STATE.settings.pokemonRoleManual:{};
+  const roleAuto=()=>STATE.settings?.pokemonRoleAuto&&typeof STATE.settings.pokemonRoleAuto==='object'?STATE.settings.pokemonRoleAuto:{};
+  const rolesForAdmin=name=>{const v=roleAssignments()[roleKey(name)];return Array.isArray(v)?v:[];};
+  function roleApiCandidates(name){
+    const raw=String(name||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[’']/g,'').replace(/[♀]/g,'-f').replace(/[♂]/g,'-m').replace(/[._]/g,'-').replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'').replace(/-+/g,'-').replace(/^-|-$/g,'');
+    const out=[raw];
+    const mega=raw.match(/^mega-(.+?)(?:-([xyz]))?$/)||raw.match(/^(.+?)-mega-([xyz])$/);
+    if(mega)out.push(`${mega[1]}-mega${mega[2]?'-'+mega[2]:''}`);
+    const shared=SBL.pokemon?.draftStatsApiCandidates?.(name)||[];out.push(...shared);
+    return [...new Set(out.map(roleKey).filter(Boolean))];
+  }
+  async function requestRoleApi(payload){
+    if(!SBL.pokemonRoles?.request)throw new Error('Pokékipe proxy client is not loaded. Refresh the Admin Dashboard.');
+    return SBL.pokemonRoles.request(payload);
+  }
+  function roleSettingsPanelHtml(){
+    const selected=String(STATE.settings?.pokemonRoleFormat||'gen9ou');
+    const options=ROLE_FORMATS.some(x=>x.format_id===selected)?ROLE_FORMATS:ROLE_FORMATS.concat([{format_id:selected,label:selected}]);
+    return `<section class="panel" id="pokemonRoleSettingsPanel"><div class="section-head-row"><div><div class="admin-dashboard-kicker">ADMIN CONFIGURATION</div><h2>Competitive role data</h2><p class="note">Choose the Pokékipe format used for role suggestions and automatic assignment. This setting only controls suggestions; saved Pokémon role assignments remain global and are not replaced when the format changes.</p></div><span class="badge">ADMIN ONLY</span></div><div class="row" style="align-items:flex-end;margin-top:12px"><div><label for="pokemonRoleFormat">Suggestion format</label><select id="pokemonRoleFormat">${options.map(x=>`<option value="${SBL.pokemon.escapeHtml(x.format_id)}" ${x.format_id===selected?'selected':''}>${SBL.pokemon.escapeHtml(x.label||x.format_id)}</option>`).join('')}</select></div><div style="flex:0"><button type="button" class="ghost" id="loadPokemonRoleFormats">Load formats / test API</button></div><div style="flex:0"><button type="button" class="primary" id="savePokemonRoleFormat">Save format</button></div></div><div class="note" id="pokemonRoleFormatStatus" role="status"></div><div class="note">Role source: <a href="https://pokekipe.com/api" target="_blank" rel="noopener">Pokékipe public API</a> · CC BY 4.0 attribution to Pokékipe and upstream Smogon data is shown in the Draft Planner and Draft Room. Use Admin → Free Agency to load the role catalogue, bulk-assign roles, or make manual assignments.</div></section>`;
+  }
+  function wireRoleSettings(){
+    const status=document.getElementById('pokemonRoleFormatStatus');
+    document.getElementById('loadPokemonRoleFormats')?.addEventListener('click',async e=>{
+      const button=e.currentTarget;button.disabled=true;button.textContent='Connecting…';if(status)status.textContent='Contacting Pokékipe through the SBL API proxy…';
+      try{
+        const rows=await requestRoleApi({action:'formats'});
+        if(!Array.isArray(rows)||!rows.length)throw new Error('Pokékipe returned an empty format catalogue.');
+        ROLE_FORMATS=rows.filter(x=>x?.format_id).map(x=>({format_id:String(x.format_id),label:String(x.label||x.nom_affiche||x.format_id)})).sort((a,b)=>a.format_id.localeCompare(b.format_id));
+        const select=document.getElementById('pokemonRoleFormat'),selected=String(STATE.settings?.pokemonRoleFormat||'gen9ou');
+        if(select){select.innerHTML=ROLE_FORMATS.map(x=>`<option value="${SBL.pokemon.escapeHtml(x.format_id)}">${SBL.pokemon.escapeHtml(x.label)}</option>`).join('');select.value=ROLE_FORMATS.some(x=>x.format_id===selected)?selected:(ROLE_FORMATS[0]?.format_id||'');}
+        if(status)status.textContent=`Connected successfully. Loaded ${ROLE_FORMATS.length} available competitive formats.`;
+      }catch(error){if(status)status.textContent=error.message||String(error);}
+      finally{button.disabled=false;button.textContent='Load formats / test API';}
+    });
+    document.getElementById('savePokemonRoleFormat')?.addEventListener('click',async e=>{
+      const button=e.currentTarget;const format=document.getElementById('pokemonRoleFormat')?.value;if(!format)return;
+      button.disabled=true;try{STATE.settings.pokemonRoleFormat=format;await saveSettings();await logAdminAction('set_pokemon_role_format',`Set Pokékipe role suggestion format to ${format}.`,{format});if(status)status.textContent=`Saved ${ROLE_FORMATS.find(x=>x.format_id===format)?.label||format}.`;}catch(error){if(status)status.textContent='Could not save: '+(error.message||String(error));}finally{button.disabled=false;}
+    });
+  }
+  async function loadRoleMeta(){
+    const format=String(STATE.settings?.pokemonRoleFormat||'gen9ou');
+    if(ROLE_META_CACHE?.format===format)return ROLE_META_CACHE;
+    const payload=await requestRoleApi({action:'meta',formatId:format});
+    const rows=Array.isArray(payload?.pokemon)?payload.pokemon:(Array.isArray(payload?.results)?payload.results:[]);
+    const index=new Map(),catalogue=new Set();
+    rows.forEach(row=>{
+      const name=String(row?.pokemon_name||row?.name||'').trim();if(!name)return;
+      const roles=Array.isArray(row?.roles)?[...new Set(row.roles.filter(x=>typeof x==='string'&&x.trim()).map(x=>x.trim()))]:[];
+      roleApiCandidates(name).forEach(k=>index.set(k,roles));roles.forEach(r=>catalogue.add(r));
+    });
+    ROLE_META_CACHE={format,rows,index,catalogue:[...catalogue].sort((a,b)=>a.localeCompare(b))};
+    return ROLE_META_CACHE;
+  }
+  function rolesForApiName(meta,name){for(const candidate of roleApiCandidates(name)){if(meta.index.has(candidate))return meta.index.get(candidate)||[];}return null;}
+  function renderRoleAssignmentPanel(current){
+    const mons=current.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+    const selected=mons.find(m=>roleKey(m.name)===roleKey(ROLE_EDITOR_POKEMON))||mons[0];
+    if(selected)ROLE_EDITOR_POKEMON=selected.name;
+    const key=selected?roleKey(selected.name):'';
+    const assigned=selected?rolesForAdmin(selected.name):[];
+    const catalog=ROLE_META_CACHE?.catalogue||[];
+    const options=[...new Set([...catalog,...assigned])].sort((a,b)=>a.localeCompare(b));
+    const manual=!!(key&&roleManual()[key]);
+    const autoFormat=key?roleAuto()[key]:'';
+    return `<section class="panel" id="pokemonRoleAssignmentPanel"><div class="section-head-row"><div><div class="admin-dashboard-kicker">FREE AGENCY ROLE MANAGEMENT</div><h2>Pokémon role assignments</h2><p class="note">Assignments are global across all franchises. A Pokémon can have multiple roles. Automatic assignment uses every role returned for each Pokémon in the selected format; manual edits are protected from future bulk refreshes.</p></div><span class="badge">ADMIN ONLY</span></div><div class="row" style="align-items:flex-end;margin:12px 0"><div><strong>Suggestion format:</strong> ${SBL.pokemon.escapeHtml(STATE.settings?.pokemonRoleFormat||'gen9ou')}</div><div style="flex:0"><button type="button" class="ghost" id="loadRoleCatalogueBtn">Load role catalogue</button></div><div style="flex:0"><button type="button" class="primary" id="autoAssignFreeAgencyRolesBtn">Auto-assign from Free Agency board</button></div></div><div class="note" id="freeAgencyRoleStatus" role="status">${SBL.pokemon.escapeHtml(ROLE_STATUS_MESSAGE)}</div><div class="row" style="align-items:flex-end;margin-top:14px"><div><label for="roleAssignmentPokemon">Pokémon</label><select id="roleAssignmentPokemon">${mons.map(m=>`<option value="${SBL.pokemon.escapeHtml(m.name)}" ${selected&&roleKey(m.name)===key?'selected':''}>${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(m.name)||m.name)}</option>`).join('')}</select></div><div style="flex:0"><button type="button" class="ghost" id="resetRoleAssignmentBtn" ${selected?'':'disabled'}>Reset to automatic</button></div><div style="flex:0"><button type="button" class="primary" id="saveRoleAssignmentBtn" ${selected?'':'disabled'}>Save manual roles</button></div></div>${selected?`<div class="note">${manual?'Manual assignment · protected from automatic updates':autoFormat?`Automatically assigned from ${SBL.pokemon.escapeHtml(autoFormat)}`:'Not yet automatically assigned'}</div>`:''}<div class="role-admin-options" id="roleAssignmentOptions">${options.length?options.map(r=>`<label class="role-admin-option"><input type="checkbox" value="${SBL.pokemon.escapeHtml(r)}" ${assigned.includes(r)?'checked':''}>${SBL.pokemon.escapeHtml(r)}</label>`).join(''):'<div class="note">Load the role catalogue to see all classifications available in this format.</div>'}</div><div class="note" style="margin-top:14px"><strong>Free Agency board coverage:</strong> ${mons.filter(m=>rolesForAdmin(m.name).length).length} of ${mons.length} Pokémon currently have roles assigned · ${Object.keys(roleManual()).filter(k=>roleManual()[k]).length} manual overrides.</div><div style="max-height:420px;overflow:auto;margin-top:12px"><table><thead><tr><th>Pokémon</th><th>Points</th><th>Assigned roles</th><th>Assignment source</th><th></th></tr></thead><tbody>${mons.map(m=>{const k=roleKey(m.name),rs=rolesForAdmin(m.name),source=roleManual()[k]?'Manual':roleAuto()[k]?`Auto · ${roleAuto()[k]}`:'Unassigned';return `<tr><td>${SBL.pokemon.spriteMarkup(m.name,'sprite')} ${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(m.name)||m.name)}</td><td class="num">${Number(m.points)||0}</td><td>${rs.length?rs.map(SBL.pokemon.escapeHtml).join(' · '):'<span class="note">—</span>'}</td><td>${SBL.pokemon.escapeHtml(source)}</td><td><button type="button" class="ghost small" data-edit-pokemon-roles="${SBL.pokemon.escapeHtml(m.name)}">Edit</button></td></tr>`;}).join('')||'<tr><td colspan="5" class="note">Publish a Free Agency board first.</td></tr>'}</tbody></table></div></section>`;
+  }
+  async function wireRoleAssignmentPanel(current){
+    const status=document.getElementById('freeAgencyRoleStatus');
+    const refresh=()=>renderFreeAgency();
+    document.getElementById('roleAssignmentPokemon')?.addEventListener('change',e=>{ROLE_EDITOR_POKEMON=e.target.value;refresh();});
+    document.querySelectorAll('[data-edit-pokemon-roles]').forEach(btn=>btn.addEventListener('click',()=>{ROLE_EDITOR_POKEMON=btn.dataset.editPokemonRoles;refresh();}));
+    document.getElementById('loadRoleCatalogueBtn')?.addEventListener('click',async e=>{
+      const b=e.currentTarget;b.disabled=true;b.textContent='Loading…';if(status)status.textContent='Loading the selected format’s competitive role catalogue…';
+      try{const meta=await loadRoleMeta();STATE.settings.pokemonRoleCatalog=meta.catalogue;await saveSettings();ROLE_STATUS_MESSAGE=`Loaded ${meta.catalogue.length} role classifications across ${meta.rows.length} Pokémon. You can now assign multiple roles manually.`;refresh();}catch(error){if(status)status.textContent=error.message||String(error);}finally{b.disabled=false;}
+    });
+    document.getElementById('autoAssignFreeAgencyRolesBtn')?.addEventListener('click',async e=>{
+      const b=e.currentTarget;b.disabled=true;b.textContent='Assigning…';if(status)status.textContent='Fetching one format-wide dataset and matching it against the published Free Agency board…';
+      try{
+        const meta=await loadRoleMeta(),next={...roleAssignments()},manual={...roleManual()},auto={...roleAuto()};let assigned=0,missing=0,protectedCount=0;
+        current.forEach(mon=>{
+          const k=roleKey(mon.name);const hasLegacyAssignment=Array.isArray(next[k])&&!Object.prototype.hasOwnProperty.call(auto,k)&&!Object.prototype.hasOwnProperty.call(manual,k);
+          if(manual[k]||hasLegacyAssignment){if(hasLegacyAssignment)manual[k]=true;protectedCount++;return;}
+          const roles=rolesForApiName(meta,mon.name);
+          if(roles&&roles.length){next[k]=roles;auto[k]=meta.format;assigned++;}
+          else{delete next[k];delete auto[k];missing++;}
+        });
+        STATE.settings.pokemonRoleAssignments=next;STATE.settings.pokemonRoleManual=manual;STATE.settings.pokemonRoleAuto=auto;STATE.settings.pokemonRoleCatalog=meta.catalogue;
+        await saveSettings();await logAdminAction('auto_assign_pokemon_roles',`Automatically assigned Pokékipe roles to ${assigned} Free Agency Pokémon using ${meta.format}; ${protectedCount} manual assignments were preserved and ${missing} had no API data.`,{format:meta.format,assigned,protectedCount,missing,total:current.length});
+        ROLE_STATUS_MESSAGE=`Finished: ${assigned} automatically assigned, ${protectedCount} manual assignments preserved, ${missing} Pokémon had no role data in ${meta.format}.`;
+        refresh();
+      }catch(error){if(status)status.textContent=error.message||String(error);}finally{b.disabled=false;b.textContent='Auto-assign from Free Agency board';}
+    });
+    document.getElementById('saveRoleAssignmentBtn')?.addEventListener('click',async e=>{
+      const b=e.currentTarget,mon=current.find(m=>roleKey(m.name)===roleKey(ROLE_EDITOR_POKEMON));if(!mon)return;
+      const selected=[...document.querySelectorAll('#roleAssignmentOptions input[type="checkbox"]:checked')].map(x=>x.value);
+      const k=roleKey(mon.name),next={...roleAssignments()},manual={...roleManual()},auto={...roleAuto()};
+      if(selected.length)next[k]=selected;else delete next[k];manual[k]=true;delete auto[k];
+      b.disabled=true;try{STATE.settings.pokemonRoleAssignments=next;STATE.settings.pokemonRoleManual=manual;STATE.settings.pokemonRoleAuto=auto;await saveSettings();await logAdminAction('set_pokemon_roles',`Manually assigned ${selected.length} competitive roles to ${mon.name}.`,{pokemon:mon.name,roles:selected});ROLE_STATUS_MESSAGE=`Saved ${selected.length} role${selected.length===1?'':'s'} for ${mon.name}. This global manual assignment is protected from automatic updates.`;refresh();}catch(error){if(status)status.textContent='Could not save: '+(error.message||String(error));}finally{b.disabled=false;}
+    });
+    document.getElementById('resetRoleAssignmentBtn')?.addEventListener('click',async e=>{
+      const mon=current.find(m=>roleKey(m.name)===roleKey(ROLE_EDITOR_POKEMON));if(!mon)return;
+      const k=roleKey(mon.name),next={...roleAssignments()},manual={...roleManual()},auto={...roleAuto()};delete next[k];delete manual[k];delete auto[k];
+      const b=e.currentTarget;b.disabled=true;try{STATE.settings.pokemonRoleAssignments=next;STATE.settings.pokemonRoleManual=manual;STATE.settings.pokemonRoleAuto=auto;await saveSettings();await logAdminAction('reset_pokemon_roles_to_auto',`Reset ${mon.name} role assignment to automatic.`,{pokemon:mon.name});ROLE_STATUS_MESSAGE=`${mon.name} is ready for the next automatic assignment.`;refresh();}catch(error){if(status)status.textContent='Could not reset: '+(error.message||String(error));}finally{b.disabled=false;}
+    });
   }
 
   function renderFreeAgency(){
@@ -3495,8 +3463,9 @@ function renderDraft(){ return drawDraft(); }
       </div>
       <div class="panel">
         <h2>Published Free Agency <span class="badge">${current.length} Pokémon</span></h2>
-        ${current.length?`<div class="note">${SBL.pokemon.escapeHtml(STATE.settings?.freeAgency?.source||'Workbook')}</div>`:'<div class="empty-state">No Free Agency pool published yet.</div>'}
-      </div>`;
+        ${current.length?`<div class="note">${SBL.pokemon.escapeHtml(STATE.settings?.freeAgency?.source||'Workbook')} · ${tiers.length} point tiers</div><div style="max-height:380px;overflow:auto;margin-top:12px"><table><thead><tr><th>Pokémon</th><th>Points</th><th>Roles</th></tr></thead><tbody>${current.map(m=>`<tr><td>${SBL.pokemon.spriteMarkup(m.name,'sprite')} ${SBL.pokemon.escapeHtml(m.name)}</td><td class="num">${Number(m.points)||0}</td><td>${rolesForAdmin(m.name).map(SBL.pokemon.escapeHtml).join(' · ')||'<span class="note">Unassigned</span>'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">No Free Agency pool published yet.</div>'}
+      </div>
+      ${renderRoleAssignmentPanel(current)}`;
 
     document.getElementById('importFreeAgency').onclick=async()=>{
       const file=document.getElementById('freeAgencyFile').files?.[0];
@@ -3512,6 +3481,7 @@ function renderDraft(){ return drawDraft(); }
       }catch(e){status.innerHTML='<div class="note danger">'+SBL.pokemon.escapeHtml(e.message)+'</div>'}
       finally{btn.disabled=false}
     };
+    wireRoleAssignmentPanel(current);
   }
 
   // ---------- Commissioner: team-claim approvals + trade oversight ----------
@@ -3526,16 +3496,34 @@ function renderDraft(){ return drawDraft(); }
   let ADMIN_TRADE_SEASON = new Date().getFullYear();
 
   let COMM_TRADE_LIMITS = [];
+  let COMM_MULLIGAN_SETTINGS = null;
+  let COMM_MULLIGAN_ALLOWANCES = [];
+  let COMM_MULLIGAN_EVENTS = [];
+  let COMM_ADMIN_ROSTER_TRANSACTIONS = [];
+  let COMM_ADMIN_ROSTER_UI = { primary:'', secondary:'', mode:'freeagency', removePrimary:[], removeSecondary:[], addPool:[], reason:'' };
+  let COMM_TRADE_TIMING_SETTINGS = { cutoff_day:5, cutoff_hour:23, cutoff_minute:59, weekday_weeks_ahead:1, after_cutoff_weeks_ahead:2 };
 
   async function loadCommissionerData(){
+    // Season participation is authoritative for every season-scoped admin list,
+    // including mulligan allowances. Refresh it before rendering those lists.
+    try { await loadActiveMemberFranchiseList(); }
+    catch(error) {
+      console.warn('Could not refresh season participation before loading commissioner controls:',error);
+      ACTIVE_SEASON_SITOUT_USERS = new Set((ACTIVE_MEMBER_FRANCHISES||[]).map(f=>String(f.userId||'')));
+    }
     // Trade management must not be blocked by an unrelated trade-limit/profile
     // query. Load each admin data source independently so the trade ledger still
     // renders when franchise_trade_limits is missing/empty or profiles fail.
     const currentLeagueId = String(SBL.leagueDb?.selectedLeagueId?.() || STATE.settings.activeLeagueId || '').trim();
-    const [profilesResult, tradeResult, limitResult] = await Promise.allSettled([
+    const currentSeasonId = String(SBL.leagueDb?.selectedSeasonId?.() || '').trim();
+    const [profilesResult, tradeResult, limitResult, mulliganSettingsResult, mulliganAllowancesResult, mulliganEventsResult, rosterTransactionsResult] = await Promise.allSettled([
       currentLeagueId ? supabase.rpc('sbl_admin_list_league_users',{p_league_id:currentLeagueId}) : Promise.resolve({data:[],error:null}),
       SBL.trades.load(supabase,{force:true}),
-      supabase.from('franchise_trade_limits').select('*').eq('season', ADMIN_TRADE_SEASON).eq('league_id', currentLeagueId).order('team_name')
+      supabase.from('franchise_trade_limits').select('*').eq('season', ADMIN_TRADE_SEASON).eq('league_id', currentLeagueId).order('team_name'),
+      currentLeagueId && currentSeasonId ? supabase.from('franchise_mulligan_settings').select('*').eq('league_id',currentLeagueId).eq('season_id',currentSeasonId).maybeSingle() : Promise.resolve({data:null,error:null}),
+      currentLeagueId && currentSeasonId ? supabase.from('franchise_mulligan_allowances').select('*').eq('league_id',currentLeagueId).eq('season_id',currentSeasonId) : Promise.resolve({data:[],error:null}),
+      currentLeagueId && currentSeasonId ? supabase.from('franchise_mulligan_events').select('franchise_id,user_id,outgoing_name,incoming_name,created_at').eq('league_id',currentLeagueId).eq('season_id',currentSeasonId).order('created_at',{ascending:false}) : Promise.resolve({data:[],error:null}),
+      currentLeagueId && currentSeasonId ? supabase.from('admin_roster_transactions').select('*').eq('league_id',currentLeagueId).eq('season_id',currentSeasonId).order('created_at',{ascending:false}).limit(25) : Promise.resolve({data:[],error:null})
     ]);
 
     if(profilesResult.status === 'fulfilled' && !profilesResult.value?.error) COMM_PROFILES = profilesResult.value?.data || [];
@@ -3551,6 +3539,7 @@ function renderDraft(){ return drawDraft(); }
     if(tradeResult.status === 'rejected') throw tradeResult.reason;
     if(tradeResult.value?.error) throw tradeResult.value.error;
     COMM_TRADES = Array.isArray(tradeResult.value?.data) ? tradeResult.value.data : [];
+    COMM_TRADE_TIMING_SETTINGS = SBL.trades?.timingSettings?.() || COMM_TRADE_TIMING_SETTINGS;
 
     if(limitResult.status === 'fulfilled' && !limitResult.value?.error){
       COMM_TRADE_LIMITS = Array.isArray(limitResult.value.data) ? limitResult.value.data : [];
@@ -3558,6 +3547,11 @@ function renderDraft(){ return drawDraft(); }
       COMM_TRADE_LIMITS = [];
       console.warn('Franchise trade limits unavailable; trade ledger will still load.', limitResult.reason || limitResult.value?.error);
     }
+    COMM_MULLIGAN_SETTINGS = mulliganSettingsResult.status==='fulfilled' && !mulliganSettingsResult.value?.error ? (mulliganSettingsResult.value?.data||null) : null;
+    COMM_MULLIGAN_ALLOWANCES = mulliganAllowancesResult.status==='fulfilled' && !mulliganAllowancesResult.value?.error ? (mulliganAllowancesResult.value?.data||[]) : [];
+    COMM_MULLIGAN_EVENTS = mulliganEventsResult.status==='fulfilled' && !mulliganEventsResult.value?.error ? (mulliganEventsResult.value?.data||[]).filter(ev=>!ACTIVE_SEASON_SITOUT_USERS.has(String(ev.user_id||''))) : [];
+    COMM_ADMIN_ROSTER_TRANSACTIONS = rosterTransactionsResult.status==='fulfilled' && !rosterTransactionsResult.value?.error ? (rosterTransactionsResult.value?.data||[]) : [];
+    if(rosterTransactionsResult.status!=='fulfilled' || rosterTransactionsResult.value?.error) console.warn('Admin roster transaction audit is unavailable; apply migration 044 if this is a new deployment.',rosterTransactionsResult.reason || rosterTransactionsResult.value?.error);
   }
 
   async function loadFranchiseRequests(){
@@ -3781,7 +3775,7 @@ function renderDraft(){ return drawDraft(); }
   }
 
   function activePlayerProfiles(){
-    return (COMM_PROFILES||[]).filter(p=>String(p.membership_status||'').toLowerCase()==='active' && String(p.member_type||'player')==='player');
+    return (COMM_PROFILES||[]).filter(p=>String(p.membership_status||'').toLowerCase()==='active' && String(p.member_type||'player')==='player' && !ACTIVE_SEASON_SITOUT_USERS.has(String(p.id||'')));
   }
   function activeFranchiseNameForUser(userId){
     const row=(COMM_MEMBER_FRANCHISES||[]).find(x=>String(x.userId)===String(userId));
@@ -3824,38 +3818,113 @@ function renderDraft(){ return drawDraft(); }
     const season = new Date().getFullYear();
     const teams = [...new Set((COMM_MEMBER_FRANCHISES||[]).map(x=>x.franchise?.name).filter(Boolean))].sort();
     const rows = teams.map(team=>{
-      const row = COMM_TRADE_LIMITS.find(x=>x.team_name===team) || {team_name:team, team_trade_limit:8, free_agency_trade_limit:8};
-      const teamUsed = COMM_TRADES.filter(t=>t.status==='accepted').filter(t=>(t.target_team != null && String(t.target_team).trim() !== '') && (t.proposer_team===team || t.target_team===team) && new Date(t.created_at).getFullYear()===season).length;
-      const faUsed = COMM_TRADES.filter(t=>t.status==='accepted').filter(t=>t.target_team===null && t.proposer_team===team && new Date(t.created_at).getFullYear()===season).length;
+      const row = COMM_TRADE_LIMITS.find(x=>x.team_name===team) || {team_trade_limit:8, free_agency_trade_limit:8};
+      const accepted = COMM_TRADES.filter(t=>t.status==='accepted' && new Date(t.created_at).getFullYear()===season);
+      const teamUsed = accepted.filter(t=>(t.target_team != null && String(t.target_team).trim() !== '') && (t.proposer_team===team || t.target_team===team)).length;
+      const faUsed = accepted.filter(t=>t.target_team===null && t.proposer_team===team).length;
       const teamLimit = Math.max(0, Number(row.team_trade_limit) || 0);
       const faLimit = Math.max(0, Number(row.free_agency_trade_limit) || 0);
       return `<tr>
         <td><strong>${SBL.pokemon.escapeHtml(team)}</strong><div class="note">${SBL.pokemon.escapeHtml(displayNameForUser((COMM_MEMBER_FRANCHISES||[]).find(x=>x.franchise?.name===team)?.userId))}</div></td>
-        <td class="num"><span>${teamUsed} used</span></td>
-        <td class="num"><input class="trade-limit-input" type="number" min="0" step="1" id="teamRemaining-${encodeURIComponent(team)}" value="${Math.max(0,teamLimit-teamUsed)}" aria-label="${SBL.pokemon.escapeHtml(team)} team trades remaining"></td>
-        <td class="num"><span>${faUsed} used</span></td>
-        <td class="num"><input class="trade-limit-input" type="number" min="0" step="1" id="faRemaining-${encodeURIComponent(team)}" value="${Math.max(0,faLimit-faUsed)}" aria-label="${SBL.pokemon.escapeHtml(team)} Free Agency trades remaining"></td>
-        <td><button class="primary small" data-save-trade-limits="${SBL.pokemon.escapeHtml(team)}">Save</button><div class="note danger" id="tradeLimitErr-${encodeURIComponent(team)}"></div></td>
+        <td class="num">${teamUsed} / ${teamLimit}</td>
+        <td class="num">${Math.max(0,teamLimit-teamUsed)} remaining</td>
+        <td class="num">${faUsed} / ${faLimit}</td>
+        <td class="num">${Math.max(0,faLimit-faUsed)} remaining</td>
       </tr>`;
     }).join('');
     return `<div class="panel">
-      <h2>Team Trade Limits</h2>
-      <div class="note">Each franchise has <strong>two separate allowances</strong>: 8 team-to-team trades and 8 Free Agency trades by default. Edit the <strong>trades remaining</strong> directly below for each player/franchise; the underlying total allowance is adjusted automatically to preserve that remaining number after trades already used.</div>
+      <h2>Trade limits overview</h2>
+      <div class="note">Read-only usage of the existing team-to-team and Free Agency limits for ${season}. Use manual trade credits below when a player needs additional allowance; there is no separate limit editor here.</div>
       <div style="overflow:auto;margin-top:14px;">
-        ${rows ? `<table><thead><tr><th>Player / Franchise</th><th class="num">Team trades used</th><th class="num">Team trades remaining</th><th class="num">FA trades used</th><th class="num">FA trades remaining</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty-state">No approved franchises yet.</div>'}
+        ${rows ? `<table><thead><tr><th>Player / Franchise</th><th class="num">Team trades</th><th class="num">Team remaining</th><th class="num">Free Agency trades</th><th class="num">Free Agency remaining</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty-state">No approved franchises yet.</div>'}
       </div>
     </div>`;
   }
 
+  function drawTradeAllowancesView(){
+    return `${tradeManagerRows()}<div style="margin-top:14px">${drawManualTradeCredits()}</div>`;
+  }
 
+
+  function drawMulliganManager(){
+    const leagueId=String(SBL.leagueDb?.selectedLeagueId?.()||'').trim();
+    const seasonId=String(SBL.leagueDb?.selectedSeasonId?.()||'').trim();
+    const cfg=COMM_MULLIGAN_SETTINGS||{};
+    const closeDate=cfg.closes_at?new Date(cfg.closes_at):null;
+    const localClose=closeDate?new Date(closeDate.getTime()-closeDate.getTimezoneOffset()*60000).toISOString().slice(0,16):'';
+    const players=activePlayerProfiles();
+    const rows=players.map(p=>{
+      const teamRow=(COMM_MEMBER_FRANCHISES||[]).find(x=>String(x.userId)===String(p.id));
+      const team=teamRow?.franchise?.name||'';
+      const franchiseId=String(teamRow?.assignment?.franchise_id||'');
+      const allowance=COMM_MULLIGAN_ALLOWANCES.find(x=>String(x.user_id)===String(p.id)&&String(x.franchise_id)===franchiseId);
+      const total=Number(allowance?.allowance_total)||1;
+      const used=COMM_MULLIGAN_EVENTS.filter(x=>String(x.franchise_id)===franchiseId).length;
+      return `<tr><td><strong>${SBL.pokemon.escapeHtml(displayNameForUser(p.id))}</strong></td><td>${SBL.pokemon.escapeHtml(team||'—')}</td><td>${used} used</td><td><select id="mulliganAllowance-${SBL.pokemon.escapeHtml(p.id)}"><option value="1" ${total===1?'selected':''}>1 total</option><option value="3" ${total===3?'selected':''}>3 total</option></select></td><td><button type="button" class="primary small" data-save-mulligan-user="${SBL.pokemon.escapeHtml(p.id)}" ${team?'':'disabled'}>Save allowance</button></td></tr>`;
+    }).join('');
+    return `<div class="panel"><h2>Post-draft Mulligans</h2><p class="note">A mulligan is one atomic 1-for-1 swap: one Pokémon from the franchise roster for one currently available Free Agency Pokémon. Default allowance is one per franchise. Set selected players to three total if they did not draft themselves. This window is season-scoped and only works after the draft is complete.</p>
+      <div class="row" style="align-items:end;margin-top:14px"><div style="max-width:180px"><label for="mulliganEnabled">Mulligans enabled</label><select id="mulliganEnabled"><option value="false" ${cfg.enabled?'':'selected'}>Off</option><option value="true" ${cfg.enabled?'selected':''}>On</option></select></div><div><label for="mulliganClosesAt">Window closes (local time)</label><input id="mulliganClosesAt" type="datetime-local" value="${localClose}" style="width:100%"></div><div style="flex:0 0 auto"><button type="button" class="primary" id="saveMulliganWindow" ${leagueId&&seasonId?'':'disabled'}>Save window</button></div></div><div id="mulliganWindowStatus" class="note"></div>
+      <h3 style="margin:18px 0 8px">Player allowances</h3><div class="note">Changing a player to 3 means three mulligans total, not three additional mulligans. Allowance changes do not erase the audit history.</div>
+      <div style="overflow:auto;margin-top:10px"><table><thead><tr><th>Player</th><th>Franchise</th><th>Used</th><th>Allowance</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5">No active player accounts found.</td></tr>'}</tbody></table></div><div id="mulliganAllowanceStatus" class="note"></div>
+      <div style="margin-top:14px"><h3>Recent mulligan audit</h3>${COMM_MULLIGAN_EVENTS.length?`<table><thead><tr><th>Player</th><th>Outgoing</th><th>Incoming</th><th>When</th></tr></thead><tbody>${COMM_MULLIGAN_EVENTS.slice(0,20).map(ev=>`<tr><td>${SBL.pokemon.escapeHtml(displayNameForUser(ev.user_id))}</td><td>${SBL.pokemon.escapeHtml(ev.outgoing_name||'—')}</td><td>${SBL.pokemon.escapeHtml(ev.incoming_name||'—')}</td><td>${ev.created_at?new Date(ev.created_at).toLocaleString():'—'}</td></tr>`).join('')}</tbody></table>`:'<div class="note">No mulligans have been used in this season.</div>'}</div></div>`;
+  }
+
+  function adminRosterMonName(mon){
+    return String(typeof mon === 'string' ? mon : (mon?.name || '')).trim();
+  }
+
+  function drawAdminRosterEditor(){
+    const rosters = STATE.settings?.rosters && typeof STATE.settings.rosters === 'object' ? STATE.settings.rosters : {};
+    const configured = STATE.settings?.franchises && typeof STATE.settings.franchises === 'object' ? Object.keys(STATE.settings.franchises) : [];
+    const sitoutFranchises=new Set((ACTIVE_MEMBER_FRANCHISES||[]).filter(f=>ACTIVE_SEASON_SITOUT_USERS.has(String(f.userId||''))).map(f=>String(f.name||'').trim().toLocaleLowerCase()));
+    const teams = [...new Set([...Object.keys(rosters), ...configured])].filter(team=>team && !sitoutFranchises.has(String(team).trim().toLocaleLowerCase())).sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}));
+    if(!teams.includes(COMM_ADMIN_ROSTER_UI.primary)) COMM_ADMIN_ROSTER_UI.primary=teams[0]||'';
+    if(!teams.includes(COMM_ADMIN_ROSTER_UI.secondary) || COMM_ADMIN_ROSTER_UI.secondary===COMM_ADMIN_ROSTER_UI.primary) COMM_ADMIN_ROSTER_UI.secondary=teams.find(t=>t!==COMM_ADMIN_ROSTER_UI.primary)||'';
+    const primary=COMM_ADMIN_ROSTER_UI.primary, secondary=COMM_ADMIN_ROSTER_UI.secondary, mode=COMM_ADMIN_ROSTER_UI.mode;
+    const pool=Array.isArray(STATE.settings?.freeAgency?.mons)?STATE.settings.freeAgency.mons:[];
+    const monName=adminRosterMonName;
+    const buttonList=(items,attr,selected)=>items.map(mon=>{
+      const name=monName(mon); if(!name) return '';
+      const active=selected.includes(name);
+      return `<button type="button" class="admin-mon-choice ${active?'selected':''}" data-${attr}="${SBL.pokemon.escapeHtml(name)}" aria-pressed="${active}">${SBL.pokemon.escapeHtml(name)}</button>`;
+    }).join('') || '<div class="note">No Pokémon available in this list.</div>';
+    const primaryMons=Array.isArray(rosters[primary])?rosters[primary]:[];
+    const secondaryMons=Array.isArray(rosters[secondary])?rosters[secondary]:[];
+    const tradeMode=mode==='trade';
+    const mulliganMode=mode==='mulligan';
+    const selectedCount=COMM_ADMIN_ROSTER_UI.removePrimary.length+COMM_ADMIN_ROSTER_UI.removeSecondary.length+COMM_ADMIN_ROSTER_UI.addPool.length;
+    const leagueName=String(STATE.settings?.activeLeagueName||'').trim();
+    const seasonName=String(STATE.settings?.activeSeason||DEFAULT_SEASON);
+    return `<div class="panel">
+      <div class="section-head-row"><div><h2>Admin roster &amp; trade editor</h2><div class="note">Choose the franchise or franchises involved, then click Pokémon to build one atomic transaction. No Pokémon names need to be typed.</div></div><span class="badge">ADMIN ONLY</span></div>
+      <div class="note"><strong>Exclusive ownership is enforced.</strong> A Pokémon already owned by another franchise can only move when its current owner and receiving franchise are included in this same save. All changes commit together or none do.</div>
+      <div class="note">Active season: <strong>${SBL.pokemon.escapeHtml(seasonName)}</strong>${leagueName?` · ${SBL.pokemon.escapeHtml(leagueName)}`:''}. Admin transactions bypass player trade windows and allowances, but do not bypass ownership validation.</div>
+      <div class="admin-roster-controls">
+        <div><label for="adminRosterPrimary">${tradeMode?'Franchise 1':'Franchise'}</label><select id="adminRosterPrimary">${teams.map(t=>`<option value="${SBL.pokemon.escapeHtml(t)}" ${t===primary?'selected':''}>${SBL.pokemon.escapeHtml(t)}</option>`).join('')}</select></div>
+        <div><label for="adminRosterMode">Action</label><select id="adminRosterMode"><option value="freeagency" ${mode==='freeagency'?'selected':''}>Free Agency pickup / release</option><option value="mulligan" ${mulliganMode?'selected':''}>Mulligan (1-for-1)</option><option value="trade" ${tradeMode?'selected':''}>Trade between two franchises</option></select></div>
+        ${tradeMode?`<div><label for="adminRosterSecondary">Franchise 2</label><select id="adminRosterSecondary">${teams.filter(t=>t!==primary).map(t=>`<option value="${SBL.pokemon.escapeHtml(t)}" ${t===secondary?'selected':''}>${SBL.pokemon.escapeHtml(t)}</option>`).join('')}</select></div>`:''}
+      </div>
+      ${tradeMode?`<div class="admin-roster-pick-grid"><section class="admin-roster-pick-panel"><h3>${SBL.pokemon.escapeHtml(primary)} roster</h3><p class="note">Click Pokémon moving from this franchise to ${SBL.pokemon.escapeHtml(secondary)}.</p><div class="admin-mon-choice-list">${buttonList(primaryMons,'admin-pick-primary',COMM_ADMIN_ROSTER_UI.removePrimary)}</div></section><section class="admin-roster-pick-panel"><h3>${SBL.pokemon.escapeHtml(secondary)} roster</h3><p class="note">Click Pokémon moving from this franchise to ${SBL.pokemon.escapeHtml(primary)}.</p><div class="admin-mon-choice-list">${buttonList(secondaryMons,'admin-pick-secondary',COMM_ADMIN_ROSTER_UI.removeSecondary)}</div></section></div>`:`<div class="admin-roster-pick-grid"><section class="admin-roster-pick-panel"><h3>${SBL.pokemon.escapeHtml(primary)} roster</h3><p class="note">${mulliganMode?'Choose exactly one outgoing Pokémon.':'Click any Pokémon to release it to Free Agency.'}</p><div class="admin-mon-choice-list">${buttonList(primaryMons,'admin-pick-primary',COMM_ADMIN_ROSTER_UI.removePrimary)}</div></section><section class="admin-roster-pick-panel"><h3>Available Free Agency Pokémon</h3><p class="note">${mulliganMode?'Choose exactly one incoming Pokémon.':'Click Pokémon to add them to the selected franchise.'}</p><div class="admin-mon-choice-list">${buttonList(pool,'admin-pick-pool',COMM_ADMIN_ROSTER_UI.addPool)}</div></section></div>`}
+      <div class="admin-roster-selection-summary"><strong>Selected:</strong> ${tradeMode?`${COMM_ADMIN_ROSTER_UI.removePrimary.length} moving ${SBL.pokemon.escapeHtml(primary)} → ${SBL.pokemon.escapeHtml(secondary)}; ${COMM_ADMIN_ROSTER_UI.removeSecondary.length} moving ${SBL.pokemon.escapeHtml(secondary)} → ${SBL.pokemon.escapeHtml(primary)}`:`${COMM_ADMIN_ROSTER_UI.removePrimary.length} outgoing; ${COMM_ADMIN_ROSTER_UI.addPool.length} incoming`}</div>
+      <label for="adminRosterTransactionReason">Reason / note (optional)</label><input id="adminRosterTransactionReason" type="text" maxlength="500" placeholder="e.g. Manual trade, roster correction" value="${SBL.pokemon.escapeHtml(COMM_ADMIN_ROSTER_UI.reason||'')}" style="width:100%">
+      ${mulliganMode?'<div class="note">A mulligan must contain exactly one outgoing roster Pokémon and exactly one incoming Free Agency Pokémon. This is an administrator roster override, recorded in the admin transaction audit; it does not consume a player allowance.</div>':''}
+      <div class="foot-actions"><button type="button" class="primary" id="applyAdminRosterTransaction" ${teams.length&&selectedCount?'':'disabled'}>Review &amp; apply transaction</button><button type="button" class="secondary" id="clearAdminRosterSelection" ${selectedCount?'':'disabled'}>Clear selection</button></div>
+      <div id="adminRosterTransactionStatus" class="note" aria-live="polite"></div>
+    </div>
+    <div class="panel" style="margin-top:14px"><h3>Recent administrator roster transactions</h3>
+      ${COMM_ADMIN_ROSTER_TRANSACTIONS.length ? `<div style="overflow:auto"><table><thead><tr><th>When</th><th>Type</th><th>Administrator</th><th>Changes</th><th>Reason</th></tr></thead><tbody>${COMM_ADMIN_ROSTER_TRANSACTIONS.map(tx=>{const changes=Array.isArray(tx.operations)?tx.operations.map(op=>`${op.franchise}: ${[...(op.remove||[]).map(name=>`− ${name}`),...(op.add||[]).map(name=>`+ ${name}`)].join(', ')}`).join(' · '):'—';return `<tr><td>${tx.created_at?new Date(tx.created_at).toLocaleString():'—'}</td><td>${tx.transaction_type==='manual_trade'?'Manual trade':'Roster edit'}</td><td>${SBL.pokemon.escapeHtml(tx.actor_username||displayNameForUser(tx.actor_id))}</td><td>${SBL.pokemon.escapeHtml(changes)}</td><td>${SBL.pokemon.escapeHtml(tx.reason||'—')}</td></tr>`;}).join('')}</tbody></table></div>` : '<div class="note">No administrator roster transactions have been recorded for this season yet.</div>'}
+    </div>`;
+  }
 
   function tradeSubNav(){
     const pendingCount = COMM_TRADES.filter(t=>t.status==='pending').length;
     const views = [
       {id:'pending', label:'Pending', count:pendingCount},
       {id:'history', label:'History', count:null},
-      {id:'limits', label:'Team Limits', count:null},
-      {id:'credits', label:'Manual Credits', count:null}
+      {id:'limits', label:'Limits & Credits', count:null},
+      {id:'timing', label:'Trade Timing', count:null},
+      {id:'mulligans', label:'Post-draft Mulligans', count:null},
+      {id:'roster-editor', label:'Admin Roster Editor', count:null}
     ];
     return `<div class="trade-subnav" role="tablist" aria-label="Trades view">
       ${views.map(v=>`<button type="button" class="trade-subnav-item ${COMM_TRADES_VIEW===v.id?'active':''}" data-trade-view="${v.id}" role="tab" aria-selected="${COMM_TRADES_VIEW===v.id}">
@@ -3893,11 +3962,57 @@ function renderDraft(){ return drawDraft(); }
         ${history.length ? history.map(commTradeRow).join('') : '<div class="empty-state">No trade history yet.</div>'}
       </div>
     </div>`;
-  }  function drawTrades(){
+  }
+
+  // Admin-facing explanation of the same effective-date rule enforced by
+  // SBL.trades.effectiveAt(). Keep calculations in the browser's local league
+  // timezone, matching the timestamps used by the trade service.
+  function tradeTimingSummary(now = new Date(), cfg = COMM_TRADE_TIMING_SETTINGS){
+    const current=new Date(now), monday=new Date(current); monday.setHours(0,0,0,0); monday.setDate(monday.getDate()-((monday.getDay()+6)%7));
+    const cutoffDay=Math.max(1,Math.min(5,Number(cfg.cutoff_day)||5));
+    const cutoff=new Date(monday); cutoff.setDate(cutoff.getDate()+cutoffDay-1); cutoff.setHours(Number(cfg.cutoff_hour)||0,Number(cfg.cutoff_minute)||0,59,999);
+    if(current.getTime()>cutoff.getTime()) cutoff.setDate(cutoff.getDate()+7);
+    const weekBase=new Date(monday); weekBase.setDate(weekBase.getDate()+cutoffDay-1); weekBase.setHours(Number(cfg.cutoff_hour)||0,Number(cfg.cutoff_minute)||0,59,999);
+    const beforeCutoff=current.getTime()<=weekBase.getTime();
+    const weeks=beforeCutoff?Math.max(1,Number(cfg.weekday_weeks_ahead)||1):Math.max(1,Number(cfg.after_cutoff_weeks_ahead)||2);
+    const effectMonday=new Date(monday); effectMonday.setDate(effectMonday.getDate()+weeks*7);
+    const fmt=date=>date.toLocaleString(undefined,{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+    const dayNames=['Monday','Tuesday','Wednesday','Thursday','Friday'];
+    const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||'local time';
+    return {cutoff,effectMonday,fmt,timezone,cutoffDayName:dayNames[cutoffDay-1],cutoffTime:`${String(Number(cfg.cutoff_hour)||0).padStart(2,'0')}:${String(Number(cfg.cutoff_minute)||0).padStart(2,'0')}`};
+  }
+
+  function drawTradeTimingPanel(){
+    const cfg=COMM_TRADE_TIMING_SETTINGS||{cutoff_day:5,cutoff_hour:23,cutoff_minute:59,weekday_weeks_ahead:1,after_cutoff_weeks_ahead:2};
+    const info=tradeTimingSummary(new Date(),cfg);
+    const acceptedCount=COMM_TRADES.filter(t=>t.status==='accepted').length;
+    const scheduledCount=COMM_TRADES.filter(t=>SBL.trades?.isScheduled?.(t)).length;
+    const dayOptions=['Monday','Tuesday','Wednesday','Thursday','Friday'].map((name,i)=>`<option value="${i+1}" ${Number(cfg.cutoff_day)===i+1?'selected':''}>${name}</option>`).join('');
+    const weekOptions=(selected)=>[1,2,3,4].map(n=>`<option value="${n}" ${Number(selected)===n?'selected':''}>${n} Monday${n===1?'':'s'} after acceptance</option>`).join('');
+    return `<section class="panel trade-timing-panel" aria-label="Trade timing rules">
+      <div class="section-head-row"><div><h3>Trade timing &amp; weekly cutoff</h3><div class="note">These saved league settings control the effective-date calculation for accepted player trades. Times are interpreted in ${SBL.pokemon.escapeHtml(info.timezone)}.</div></div><span class="badge">RULES ACTIVE</span></div>
+      <div class="trade-timing-grid">
+        <div class="trade-timing-stat"><span class="trade-timing-label">Next weekly cutoff</span><strong>${info.fmt(info.cutoff)} · ${info.cutoffTime}</strong><small>Displayed in ${SBL.pokemon.escapeHtml(info.timezone)}.</small></div>
+        <div class="trade-timing-stat"><span class="trade-timing-label">If accepted right now</span><strong>${info.fmt(info.effectMonday)}</strong><small>Calculated using the saved cutoff and effective-week rules.</small></div>
+        <div class="trade-timing-stat"><span class="trade-timing-label">Accepted trades</span><strong>${acceptedCount}</strong><small>${scheduledCount} accepted trade${scheduledCount===1?'':'s'} still waiting for its effective date.</small></div>
+      </div>
+      <div class="trade-timing-rules"><strong>How the schedule works</strong><ul><li>Accepted on or before the cutoff: effective after ${Number(cfg.weekday_weeks_ahead)||1} Monday${Number(cfg.weekday_weeks_ahead)===1?'':'s'}.</li><li>Accepted after the cutoff: effective after ${Number(cfg.after_cutoff_weeks_ahead)||2} Mondays.</li><li>Pending trades do not change rosters. Admin roster transactions remain an explicit override.</li></ul></div>
+      <div class="trade-timing-editor"><h4>Edit league trade cutoff rules</h4><div class="admin-roster-controls">
+        <div><label for="tradeCutoffDay">Weekly cutoff day</label><select id="tradeCutoffDay">${dayOptions}</select></div>
+        <div><label for="tradeCutoffTime">Cutoff time (local)</label><input id="tradeCutoffTime" type="time" value="${info.cutoffTime}"></div>
+        <div><label for="tradeBeforeCutoffWeeks">Accepted by cutoff</label><select id="tradeBeforeCutoffWeeks">${weekOptions(cfg.weekday_weeks_ahead)}</select></div>
+        <div><label for="tradeAfterCutoffWeeks">Accepted after cutoff</label><select id="tradeAfterCutoffWeeks">${weekOptions(cfg.after_cutoff_weeks_ahead)}</select></div>
+      </div><button type="button" class="primary" id="saveTradeTimingSettings">Save trade timing rules</button><span id="tradeTimingSaveStatus" class="note" aria-live="polite"></span></div>
+    </section>`;
+  }
+
+  function drawTrades(){
     let body;
     if(COMM_TRADES_VIEW === 'history') body = drawTradesHistoryView();
-    else if(COMM_TRADES_VIEW === 'limits') body = tradeManagerRows();
-    else if(COMM_TRADES_VIEW === 'credits') body = drawManualTradeCredits();
+    else if(COMM_TRADES_VIEW === 'limits') body = drawTradeAllowancesView();
+    else if(COMM_TRADES_VIEW === 'timing') body = drawTradeTimingPanel();
+    else if(COMM_TRADES_VIEW === 'mulligans') body = drawMulliganManager();
+    else if(COMM_TRADES_VIEW === 'roster-editor') body = drawAdminRosterEditor();
     else body = drawTradesPendingView();
 
     contentEl.innerHTML = `
@@ -3913,6 +4028,99 @@ function renderDraft(){ return drawDraft(); }
         drawTrades();
       });
     });
+    document.getElementById('saveTradeTimingSettings')?.addEventListener('click',async()=>{
+      const btn=document.getElementById('saveTradeTimingSettings'),status=document.getElementById('tradeTimingSaveStatus');
+      const leagueId=String(SBL.leagueDb?.selectedLeagueId?.()||'').trim();
+      const day=Number(document.getElementById('tradeCutoffDay')?.value||5);
+      const time=String(document.getElementById('tradeCutoffTime')?.value||'23:59');
+      const [hour,minute]=time.split(':').map(Number);
+      const weekdayWeeks=Number(document.getElementById('tradeBeforeCutoffWeeks')?.value||1);
+      const afterWeeks=Number(document.getElementById('tradeAfterCutoffWeeks')?.value||2);
+      if(!leagueId||!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)){status.className='note danger';status.textContent='Select a league and enter a valid cutoff time.';return;}
+      btn.disabled=true;status.className='note';status.textContent='Saving rules…';
+      try{
+        const {data,error}=await supabase.rpc('sbl_admin_set_trade_timing_settings',{p_league_id:leagueId,p_cutoff_day:day,p_cutoff_hour:hour,p_cutoff_minute:minute,p_weekday_weeks_ahead:weekdayWeeks,p_after_cutoff_weeks_ahead:afterWeeks});
+        if(error)throw error;
+        COMM_TRADE_TIMING_SETTINGS=data||{cutoff_day:day,cutoff_hour:hour,cutoff_minute:minute,weekday_weeks_ahead:weekdayWeeks,after_cutoff_weeks_ahead:afterWeeks};
+        await SBL.trades.loadTimingSettings(supabase);
+        COMM_TRADE_TIMING_SETTINGS=SBL.trades.timingSettings?.()||COMM_TRADE_TIMING_SETTINGS;
+        try{await logAdminAction('set_trade_timing_rules',`Updated league trade cutoff to ${['Monday','Tuesday','Wednesday','Thursday','Friday'][day-1]} ${time}; effective offsets ${weekdayWeeks}/${afterWeeks} Mondays.`,{...COMM_TRADE_TIMING_SETTINGS});}catch(logError){console.warn('Trade timing audit log failed; saved settings remain active.',logError);}
+        drawTrades();
+        const refreshedStatus=document.getElementById('tradeTimingSaveStatus');if(refreshedStatus){refreshedStatus.className='note';refreshedStatus.textContent='Trade timing rules saved. New acceptances will use these settings.';}
+      }catch(error){status.className='note danger';status.textContent=error?.message||String(error);btn.disabled=false;}
+    });
+
+    const rosterStatus=()=>document.getElementById('adminRosterTransactionStatus');
+    document.getElementById('adminRosterMode')?.addEventListener('change',e=>{COMM_ADMIN_ROSTER_UI.mode=e.target.value;COMM_ADMIN_ROSTER_UI.removePrimary=[];COMM_ADMIN_ROSTER_UI.removeSecondary=[];COMM_ADMIN_ROSTER_UI.addPool=[];drawTrades();});
+    document.getElementById('adminRosterPrimary')?.addEventListener('change',e=>{COMM_ADMIN_ROSTER_UI.primary=e.target.value;COMM_ADMIN_ROSTER_UI.removePrimary=[];COMM_ADMIN_ROSTER_UI.removeSecondary=[];COMM_ADMIN_ROSTER_UI.addPool=[];drawTrades();});
+    document.getElementById('adminRosterSecondary')?.addEventListener('change',e=>{COMM_ADMIN_ROSTER_UI.secondary=e.target.value;COMM_ADMIN_ROSTER_UI.removePrimary=[];COMM_ADMIN_ROSTER_UI.removeSecondary=[];drawTrades();});
+    contentEl.querySelectorAll('[data-admin-pick-primary],[data-admin-pick-secondary],[data-admin-pick-pool]').forEach(btn=>btn.addEventListener('click',()=>{
+      const attr=btn.hasAttribute('data-admin-pick-primary')?'removePrimary':btn.hasAttribute('data-admin-pick-secondary')?'removeSecondary':'addPool';
+      const name=btn.getAttribute(`data-admin-pick-${attr==='removePrimary'?'primary':attr==='removeSecondary'?'secondary':'pool'}`);
+      const list=COMM_ADMIN_ROSTER_UI[attr];
+      const index=list.indexOf(name); if(index>=0) list.splice(index,1); else list.push(name);
+      const selected=list.includes(name);btn.classList.toggle('selected',selected);btn.setAttribute('aria-pressed',String(selected));
+      const ui=COMM_ADMIN_ROSTER_UI,trade=ui.mode==='trade';
+      const summary=document.querySelector('.admin-roster-selection-summary');
+      if(summary) summary.textContent=trade?`Selected: ${ui.removePrimary.length} moving ${ui.primary} → ${ui.secondary}; ${ui.removeSecondary.length} moving ${ui.secondary} → ${ui.primary}`:`Selected: ${ui.removePrimary.length} outgoing; ${ui.addPool.length} incoming`;
+      const count=ui.removePrimary.length+ui.removeSecondary.length+ui.addPool.length;
+      const apply=document.getElementById('applyAdminRosterTransaction'),clear=document.getElementById('clearAdminRosterSelection');
+      if(apply) apply.disabled=count===0;if(clear) clear.disabled=count===0;
+    }));
+    document.getElementById('adminRosterTransactionReason')?.addEventListener('input',e=>{COMM_ADMIN_ROSTER_UI.reason=e.target.value;});
+    document.getElementById('clearAdminRosterSelection')?.addEventListener('click',()=>{COMM_ADMIN_ROSTER_UI.removePrimary=[];COMM_ADMIN_ROSTER_UI.removeSecondary=[];COMM_ADMIN_ROSTER_UI.addPool=[];drawTrades();});
+    document.getElementById('applyAdminRosterTransaction')?.addEventListener('click', async()=>{
+      const button=document.getElementById('applyAdminRosterTransaction');
+      const status=rosterStatus();
+      const leagueId=String(SBL.leagueDb?.selectedLeagueId?.()||'').trim();
+      const seasonId=String(SBL.leagueDb?.selectedSeasonId?.()||'').trim();
+      const ui=COMM_ADMIN_ROSTER_UI;
+      let operations=[];
+      if(ui.mode==='trade'){
+        if(!ui.secondary||ui.primary===ui.secondary){status.className='note danger';status.textContent='Select two different franchises for a trade.';return;}
+        if(!ui.removePrimary.length&&!ui.removeSecondary.length){status.className='note danger';status.textContent='Click at least one Pokémon to move between the two franchises.';return;}
+        operations=[{franchise:ui.primary,remove:ui.removePrimary,add:ui.removeSecondary},{franchise:ui.secondary,remove:ui.removeSecondary,add:ui.removePrimary}].filter(op=>op.remove.length||op.add.length);
+      }else{
+        if(ui.mode==='mulligan'&&(ui.removePrimary.length!==1||ui.addPool.length!==1)){status.className='note danger';status.textContent='A mulligan requires exactly one outgoing Pokémon and one incoming Free Agency Pokémon.';return;}
+        if(!ui.removePrimary.length&&!ui.addPool.length){status.className='note danger';status.textContent='Click Pokémon in the roster or Free Agency list to build the transaction.';return;}
+        operations=[{franchise:ui.primary,remove:ui.removePrimary,add:ui.addPool}];
+      }
+      if(!leagueId||!seasonId){status.className='note danger';status.textContent='Select a league and active season before applying roster changes.';return;}
+      const summary=operations.map(op=>`${op.franchise}: ${op.remove.length?`remove ${op.remove.join(', ')}`:'no removals'}; ${op.add.length?`add ${op.add.join(', ')}`:'no additions'}`).join('\n');
+      if(!confirm(`Apply this complete ${ui.mode==='trade'?'manual trade':ui.mode==='mulligan'?'1-for-1 mulligan':'Free Agency roster transaction'}?\n\n${summary}\n\nAll changes are committed together. Ownership validation prevents duplicates or unpaired transfers.`)) return;
+      button.disabled=true;status.className='note';status.textContent='Applying transaction…';
+      try{
+        const enteredReason=String(document.getElementById('adminRosterTransactionReason')?.value||COMM_ADMIN_ROSTER_UI.reason||'').trim();
+        const reason=enteredReason||(ui.mode==='mulligan'?'Admin 1-for-1 mulligan override':ui.mode==='trade'?'Admin-entered manual trade':'Admin Free Agency roster adjustment');
+        const {data,error}=await supabase.rpc('sbl_admin_apply_roster_transaction',{p_league_id:leagueId,p_season_id:seasonId,p_operations:operations,p_reason:reason});
+        if(error) throw error;
+        try{await logAdminAction('admin_roster_transaction',`Applied an administrator ${ui.mode} transaction: ${data?.removed_count||0} removed, ${data?.added_count||0} added, ${data?.transfers||0} transferred.`,{seasonId,operations,reason,transactionResult:data});}catch(logError){console.warn('Secondary admin log entry failed; database transaction audit is retained.',logError);}
+        COMM_ADMIN_ROSTER_UI.removePrimary=[];COMM_ADMIN_ROSTER_UI.removeSecondary=[];COMM_ADMIN_ROSTER_UI.addPool=[];COMM_ADMIN_ROSTER_UI.reason='';
+        status.className='note';status.textContent=`Transaction committed. ${data?.removed_count||0} removed, ${data?.added_count||0} added, ${data?.transfers||0} transferred. Refreshing…`;
+        window.setTimeout(()=>window.location.reload(),900);
+      }catch(error){status.className='note danger';status.textContent=`Transaction was not applied: ${error?.message||String(error)}`;button.disabled=false;}
+    });
+
+    document.getElementById('saveMulliganWindow')?.addEventListener('click',async()=>{
+      const status=document.getElementById('mulliganWindowStatus'),btn=document.getElementById('saveMulliganWindow');
+      if(status){status.className='note';status.textContent='';}
+      const leagueId=String(SBL.leagueDb?.selectedLeagueId?.()||'').trim(),seasonId=String(SBL.leagueDb?.selectedSeasonId?.()||'').trim();
+      const enabled=document.getElementById('mulliganEnabled')?.value==='true';
+      const raw=document.getElementById('mulliganClosesAt')?.value||'';
+      const closesAt=raw?new Date(raw).toISOString():null;
+      if(enabled&&!closesAt){if(status){status.className='note danger';status.textContent='Set a closing date and time before enabling mulligans.';}return;}
+      btn.disabled=true;
+      try{const {error}=await supabase.rpc('sbl_admin_configure_mulligans',{p_league_id:leagueId,p_season_id:seasonId,p_enabled:enabled,p_closes_at:closesAt});if(error)throw error;try{await logAdminAction('configure_post_draft_mulligans',`${enabled?'Enabled':'Disabled'} post-draft mulligans for the selected season${closesAt?' until '+closesAt:''}.`,{enabled,closesAt,seasonId});}catch(logError){console.warn('Mulligan configuration audit log failed:',logError);}await loadCommissionerData();if(status){status.className='note';status.textContent=enabled?'Post-draft mulligans are enabled until the selected closing time.':'Post-draft mulligans are disabled.';}drawTrades();}
+      catch(e){if(status){status.className='note danger';status.textContent=e.message||String(e);}btn.disabled=false;}
+    });
+    contentEl.querySelectorAll('button[data-save-mulligan-user]').forEach(btn=>btn.addEventListener('click',async()=>{
+      const status=document.getElementById('mulliganAllowanceStatus'),userId=btn.dataset.saveMulliganUser;
+      const value=Number(document.getElementById(`mulliganAllowance-${userId}`)?.value||1);
+      const leagueId=String(SBL.leagueDb?.selectedLeagueId?.()||'').trim(),seasonId=String(SBL.leagueDb?.selectedSeasonId?.()||'').trim();
+      if(status){status.className='note';status.textContent='';}btn.disabled=true;
+      try{const {error}=await supabase.rpc('sbl_admin_set_mulligan_allowance',{p_league_id:leagueId,p_season_id:seasonId,p_user_id:userId,p_allowance_total:value});if(error)throw error;try{await logAdminAction('set_post_draft_mulligan_allowance',`Set ${displayNameForUser(userId)} to ${value} total post-draft mulligan${value===1?'':'s'}.`,{userId,allowanceTotal:value,seasonId});}catch(logError){console.warn('Mulligan allowance audit log failed:',logError);}await loadCommissionerData();if(status){status.className='note';status.textContent=`Saved ${value} total mulligan${value===1?'':'s'} for ${displayNameForUser(userId)}.`;}drawTrades();}
+      catch(e){if(status){status.className='note danger';status.textContent=e.message||String(e);}btn.disabled=false;}
+    }));
 
     document.getElementById('creditManualTrades')?.addEventListener('click', async ()=>{
       const playerId = document.getElementById('manualTradePlayer')?.value;
@@ -3940,39 +4148,6 @@ function renderDraft(){ return drawDraft(); }
       }finally{
         const b=document.getElementById('creditManualTrades'); if(b) b.disabled=false;
       }
-    });
-
-    contentEl.querySelectorAll('button[data-save-trade-limits]').forEach(btn=>{
-      btn.addEventListener('click', async ()=>{
-        const team = btn.dataset.saveTradeLimits;
-        const key = encodeURIComponent(team);
-        const teamRemaining = Number(document.getElementById(`teamRemaining-${key}`)?.value);
-        const faRemaining = Number(document.getElementById(`faRemaining-${key}`)?.value);
-        const teamUsed = COMM_TRADES.filter(t=>
-          t.status==='accepted' &&
-          (t.target_team != null && String(t.target_team).trim() !== '') &&
-          (t.proposer_team===team || t.target_team===team) &&
-          new Date(t.created_at).getFullYear()===new Date().getFullYear()
-        ).length;
-        const faUsed = COMM_TRADES.filter(t=>
-          t.status==='accepted' &&
-          t.target_team===null &&
-          t.proposer_team===team &&
-          new Date(t.created_at).getFullYear()===new Date().getFullYear()
-        ).length;
-        const teamLimit = teamUsed + teamRemaining;
-        const faLimit = faUsed + faRemaining;
-        const errEl = document.getElementById(`tradeLimitErr-${key}`);
-        if(errEl){errEl.textContent='';errEl.className='note danger';}
-        if(!Number.isInteger(teamRemaining)||teamRemaining<0||!Number.isInteger(faRemaining)||faRemaining<0){if(errEl)errEl.textContent='Enter whole numbers 0 or greater for trades remaining.';return;}
-        btn.disabled=true;
-        try{
-          await SBL.trades.setLimits(team, teamLimit, faLimit, supabase);
-          await logAdminAction('set_trade_limits', `Set trade limits for ${team}: ${teamLimit} team trades, ${faLimit} Free Agency trades.`, {team, teamLimit, freeAgencyLimit:faLimit});
-          await loadCommissionerData();
-          if(activeTab==='trades') drawTrades();
-        }catch(e){if(errEl)errEl.textContent=e.message;btn.disabled=false;}
-      });
     });
 
     contentEl.querySelectorAll('button[data-trade-action]').forEach(btn=>{
@@ -4396,7 +4571,7 @@ function renderDraft(){ return drawDraft(); }
     // Build the automatic seed order for the initial editor. Once Finals exist,
     // the saved seed order becomes the editor's starting point instead.
     const autoStandings=finalsStandings();
-    const autoSeeds=SBL.finals.makeSeedList(autoStandings.a.slice(0,6),autoStandings.b.slice(0,6));
+    const autoSeeds=SBL.finals.makeSeedList(autoStandings.a,autoStandings.b,Number(STATE.settings.qualificationPlaces)||6);
     const seedSource=finals.seeds.length ? finals.seeds : autoSeeds;
     const selected=new Map(seedSource.map(s=>[Number(s.seed),String(s.team||'')]));
 
@@ -4418,7 +4593,7 @@ function renderDraft(){ return drawDraft(); }
     const isGenerated=finals.status!=='inactive' && finals.rounds.length>0;
     const seedNote=isGenerated
       ? 'Edit any autogenerated seed below, then use Regenerate Finals to rebuild the bracket with the new order. You do not need to re-enter all 12 teams.'
-      : 'Seeds are autogenerated from the top 6 in each conference using the Finals seeding rules. You can edit any seed before generating the bracket.';
+      : `Seeds are autogenerated from the top 6 in each conference, then ranked together by overall standings (wins, differential, damage dealt, team name). Conference winners receive no protected seed. You can edit any seed before generating the bracket.`;
 
     return `<div class="panel" id="finalsAdminPanel"><h2>Finals Mode</h2><div class="note">${seedNote} Seeds 1–4 receive quarterfinal byes. Seeds 5–12 play the single-round play-in: 5v12, 6v11, 7v10, 8v9. After all four play-ins are decided, the lowest-seeded winner plays #1, the next-lowest plays #2, then #3 and #4. Every round runs Monday–Sunday.</div><div class="row finals-admin-start-row"><div><label>Finals start Monday</label><input type="date" id="finalsStartMonday" value="${monday}"></div><button class="primary" id="generateFinalsBtn">${isGenerated?'Regenerate Finals':'Generate Finals'}</button>${isGenerated?`<button class="ghost danger-btn" id="clearFinalsBtn">Clear Finals</button>`:''}</div><div id="finalsAdminStatus" class="note"></div><div class="finals-seed-editor"><div class="finals-seed-editor-head"><div><h3 class="finals-admin-round-head">Finals Seeds</h3><div class="note">${currentSeedCount}/12 seeds selected. Pick each team once.</div></div><span class="badge">${isGenerated?'Editable bracket seeds':'Auto-generated seeds'}</span></div>${seedEditor}</div>${isGenerated?`<div class="finals-admin-results-head"><div><h3 class="finals-admin-round-head">Finals Results</h3><div class="note finals-admin-results-note">Enter scores in the matchup popup or choose the winner directly here. Winner selection is admin-only; saving resolves the bracket immediately.</div></div><button class="primary" id="saveFinalsResultsBtn">Save Results</button></div><div id="finalsResultsStatus" class="note"></div>${matchRows}${finals.champion?`<div class="panel finals-admin-champion"><strong>Champion:</strong> ${SBL.pokemon.escapeHtml(finals.champion)}</div>`:''}`:''}</div>`;
   }
@@ -4452,6 +4627,20 @@ function renderDraft(){ return drawDraft(); }
       console.warn('Could not load season sit-out statuses for setup lists:', error);
       ACTIVE_SEASON_SITOUT_USERS = new Set(ACTIVE_MEMBER_FRANCHISES.map(f=>String(f.userId||'')));
     }
+    try {
+      const ids=(ACTIVE_MEMBER_FRANCHISES||[]).filter(f=>!ACTIVE_SEASON_SITOUT_USERS.has(String(f.userId||''))).map(f=>String(f.userId||'')).filter(Boolean);
+      let profiles=[];
+      if(ids.length){
+        const {data,error}=await supabase.rpc('sbl_admin_list_league_users',{p_league_id:leagueId});
+        if(error) throw error;
+        profiles=Array.isArray(data)?data:[];
+        if(!profiles.length && SBL.profiles?.list) profiles=await SBL.profiles.list({userIds:ids,fields:'id,username'});
+      }
+      ACTIVE_MEMBER_PROFILES=profiles.filter(profile=>ids.includes(String(profile.id||'')));
+    } catch(error) {
+      ACTIVE_MEMBER_PROFILES=[];
+      console.warn('Could not load usernames for manual draft order matching:',error);
+    }
     ACTIVE_MEMBER_FRANCHISES_LOADED=true;
   }
 
@@ -4461,7 +4650,8 @@ function renderDraft(){ return drawDraft(); }
     const definitions = STATE.settings.franchiseDefinitions && typeof STATE.settings.franchiseDefinitions === 'object'
       ? STATE.settings.franchiseDefinitions : {};
     if(ACTIVE_MEMBER_FRANCHISES_LOADED){
-      return ACTIVE_LEAGUE_FRANCHISES.slice().sort((a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:'base'}))
+      const sitoutFranchiseIds=new Set(ACTIVE_MEMBER_FRANCHISES.filter(f=>ACTIVE_SEASON_SITOUT_USERS.has(String(f.userId||''))).map(f=>String(f.franchiseId||'')));
+      return ACTIVE_LEAGUE_FRANCHISES.filter(f=>!sitoutFranchiseIds.has(String(f.franchiseId||''))).slice().sort((a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:'base'}))
         .map(f=>({name:f.name,franchiseId:f.franchiseId,conference:f.conference||configured[f.name]||definitions[f.name]?.conference||''}));
     }
     // Fail closed before normalized franchise rows load. Never derive a live
@@ -5945,8 +6135,7 @@ function renderDraft(){ return drawDraft(); }
     STATE.settings.seasonArchives = STATE.settings.seasonArchives || {};
     STATE.settings.franchiseDefinitions = STATE.settings.franchiseDefinitions || {};
     if(SBL.leagueDb?.setSelectedLeagueId) SBL.leagueDb.setSelectedLeagueId(nextId);
-    ACTIVE_MEMBER_FRANCHISES=[]; ACTIVE_LEAGUE_FRANCHISES=[]; ACTIVE_SEASON_SITOUT_USERS=new Set(); ACTIVE_MEMBER_FRANCHISES_LOADED=false;
-    LOTTERY_WORK=null;
+    ACTIVE_MEMBER_FRANCHISES=[]; ACTIVE_LEAGUE_FRANCHISES=[]; ACTIVE_SEASON_SITOUT_USERS=new Set(); ACTIVE_MEMBER_PROFILES=[]; ACTIVE_MEMBER_FRANCHISES_LOADED=false;
     await loadActiveMemberFranchiseList();
     await deleteAllRemote();
     await saveReplays();
