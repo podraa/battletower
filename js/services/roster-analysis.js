@@ -34,7 +34,7 @@
       return `<article class="ra-mon ${m.status==='planned'?'is-planned':'is-actual'}" data-name="${name.toLowerCase()}" data-types="${esc(types.join('|'))}" data-roles="${esc(rs.join('|').toLowerCase())}">
         <div class="ra-mon-sprite">${opts.sprite?opts.sprite(m.name):''}</div>
         <div class="ra-mon-main"><div class="ra-mon-title"><strong>${name}</strong><span class="ra-status ${m.status==='planned'?'planned':'actual'}">${status}</span></div><div class="ra-mon-tags">${m.types.map(t=>`<span class="type-badge type-${esc(String(t).toLowerCase())}">${esc(t)}</span>`).join('')||'<span class="ra-muted">Types unavailable</span>'}</div>
-        <div class="ra-role-tags">${rs.map(r=>`<span class="ra-role-tag">${esc(roleLabel(r))}</span>`).join('')||'<span class="ra-muted">No role assigned</span>'}</div>${abilities}</div></div></article>`;
+        <div class="ra-role-tags">${rs.map(r=>`<span class="ra-role-tag">${esc(roleLabel(r))}</span>`).join('')||'<span class="ra-muted">No role assigned</span>'}</div>${abilities}</div></article>`;
     }).join('');
     const rolesMarkup=roles.length?roles.map(r=>`<div class="ra-role-row ${roleCounts[r]?'':'is-missing'}"><span title="${esc(roleLabel(r))}">${esc(roleLabel(r))}</span><div class="ra-role-bar"><i style="width:${entries.length?Math.min(100,roleCounts[r]/entries.length*100):0}%"></i></div><strong>${roleCounts[r]}</strong></div>`).join(''):'<p class="ra-muted">No competitive roles have been assigned by the commissioner yet.</p>';
     const sourceLabel=plannedCount?`${actualCount} drafted + ${plannedCount} planned`:`${actualCount} drafted`;
