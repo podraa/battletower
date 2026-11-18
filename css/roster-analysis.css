@@ -116,3 +116,70 @@
 /* CP4.88: Team Analysis is a first-class section on My Team > Draft Planner. */
 .my-team-planner-analysis{margin-top:22px;min-width:0}
 .my-team-planner-analysis .roster-analysis{display:block}
+
+/* CP4.90 — My Team Draft Planner projected roster visual refresh. */
+.my-team-planner-analysis{margin:26px 0 0;padding:0;min-width:0}
+.my-team-planner-analysis>.roster-analysis{margin:0;padding:clamp(16px,2.4vw,26px);border-radius:18px;border:1px solid color-mix(in srgb,var(--amber) 30%,var(--border));background:linear-gradient(155deg,color-mix(in srgb,var(--panel) 92%,var(--amber) 8%) 0%,var(--panel) 42%);box-shadow:0 12px 34px rgba(0,0,0,.12)}
+.my-team-planner-analysis .ra-head{align-items:center;padding:0 0 18px;border-bottom:1px solid color-mix(in srgb,var(--amber) 24%,var(--border))}
+.my-team-planner-analysis .ra-head h2{font-size:clamp(22px,2.4vw,30px);margin:5px 0 6px}
+.my-team-planner-analysis .ra-head p{font-size:12px;line-height:1.5}
+.my-team-planner-analysis .ra-kicker{font-size:9px;letter-spacing:.17em}
+.my-team-planner-analysis .ra-score{min-width:104px;padding:13px 16px;border-radius:14px;border-color:color-mix(in srgb,var(--teal) 35%,var(--border));background:color-mix(in srgb,var(--teal) 8%,var(--panel))}
+.my-team-planner-analysis .ra-score strong{font-size:30px}
+.my-team-planner-analysis .ra-projection-key{gap:14px;padding:13px 0 3px;font-size:11px}
+.my-team-planner-analysis .ra-key-dot{width:9px;height:9px;box-shadow:0 0 0 3px color-mix(in srgb,var(--teal) 14%,transparent)}
+.my-team-planner-analysis .ra-key-dot.planned{box-shadow:0 0 0 3px color-mix(in srgb,var(--amber) 15%,transparent)}
+.my-team-planner-analysis .ra-projection-note{margin-left:auto;font-size:10px}
+.my-team-planner-analysis .ra-metrics{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:16px 0}
+.my-team-planner-analysis .ra-metric{padding:15px;border-radius:13px;background:color-mix(in srgb,var(--panel-alt) 88%,var(--panel));box-shadow:inset 0 1px rgba(255,255,255,.035)}
+.my-team-planner-analysis .ra-metric>span{font-size:10px;letter-spacing:.09em}
+.my-team-planner-analysis .ra-metric>strong{font-size:24px;margin:6px 0 10px}
+.my-team-planner-analysis .ra-track,.my-team-planner-analysis .ra-role-bar{height:8px}
+.my-team-planner-analysis .ra-depth-dots{gap:5px}
+.my-team-planner-analysis .ra-depth-dots i{width:15px;height:7px;border-radius:4px}
+.my-team-planner-analysis .ra-columns{gap:14px}
+.my-team-planner-analysis .ra-block,.my-team-planner-analysis .ra-roster{padding:16px;border-radius:14px;border-color:var(--border);background:color-mix(in srgb,var(--panel-alt) 78%,var(--panel))}
+.my-team-planner-analysis .ra-block-head{margin-bottom:14px}
+.my-team-planner-analysis .ra-block-head h3{font-size:17px}
+.my-team-planner-analysis .ra-type-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.my-team-planner-analysis .ra-type{padding:8px 9px;border-radius:9px}
+.my-team-planner-analysis .ra-type .type-badge{font-size:9px;padding:4px 6px}
+.my-team-planner-analysis .ra-type>strong{font-size:15px}
+.my-team-planner-analysis .ra-type>small{font-size:9px}
+.my-team-planner-analysis .ra-insight{padding:11px 12px;border-radius:10px;font-size:11px}
+.my-team-planner-analysis .ra-insight strong{font-size:12px}
+.my-team-planner-analysis .ra-insight span{line-height:1.5}
+.my-team-planner-analysis .ra-insight-grid{gap:12px;margin-top:14px}
+.my-team-planner-analysis .ra-roster{margin-top:14px}
+.my-team-planner-analysis .ra-roster .ra-block-head{align-items:center;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.my-team-planner-analysis .ra-filters{grid-template-columns:minmax(180px,1.6fr) repeat(3,minmax(115px,1fr)) auto;gap:9px;margin-bottom:13px}
+.my-team-planner-analysis .ra-filters input,.my-team-planner-analysis .ra-filters select{min-height:40px;border-radius:10px;background:var(--panel);font-size:11px}
+.my-team-planner-analysis .ra-mon-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.my-team-planner-analysis .ra-mon{gap:11px;padding:10px 12px;border-radius:12px;transition:border-color .15s ease,transform .15s ease,background .15s ease}
+.my-team-planner-analysis .ra-mon:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--teal) 45%,var(--border))}
+.my-team-planner-analysis .ra-mon-sprite{flex-basis:54px;width:54px;height:54px;border-radius:10px;background:color-mix(in srgb,var(--panel-alt) 80%,var(--panel))}
+.my-team-planner-analysis .ra-mon-sprite .sprite{width:50px;height:50px}
+.my-team-planner-analysis .ra-mon-main>strong{font-size:13px}
+.my-team-planner-analysis .ra-status{font-size:9px;padding:4px 8px}
+.my-team-planner-analysis .ra-mon-tags,.my-team-planner-analysis .ra-role-tags{gap:5px;margin-top:6px}
+.my-team-planner-analysis .ra-role-tag{padding:3px 7px;font-size:9px}
+.my-team-planner-analysis .ra-ability-tags{padding-top:5px;border-top:1px solid var(--border);font-size:10px}
+.my-team-planner-analysis .ra-credit{margin-top:14px;padding-top:10px;border-top:1px solid var(--border);font-size:9px}
+@media(max-width:850px){.my-team-planner-analysis .ra-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.my-team-planner-analysis .ra-search{grid-column:1/-1}.my-team-planner-analysis .ra-filter-count{grid-column:1/-1}}
+@media(max-width:620px){.my-team-planner-analysis>.roster-analysis{padding:14px;border-radius:14px}.my-team-planner-analysis .ra-head{align-items:flex-start}.my-team-planner-analysis .ra-score{min-width:78px;padding:9px 10px}.my-team-planner-analysis .ra-score strong{font-size:24px}.my-team-planner-analysis .ra-projection-note{width:100%;margin-left:0}.my-team-planner-analysis .ra-metrics{grid-template-columns:1fr;gap:8px}.my-team-planner-analysis .ra-metric{padding:12px}.my-team-planner-analysis .ra-metric>strong{font-size:21px}.my-team-planner-analysis .ra-mon-grid{grid-template-columns:1fr}.my-team-planner-analysis .ra-block,.my-team-planner-analysis .ra-roster{padding:12px}}
+@media(max-width:420px){.my-team-planner-analysis .ra-filters{grid-template-columns:1fr}.my-team-planner-analysis .ra-search,.my-team-planner-analysis .ra-filter-count{grid-column:auto}.my-team-planner-analysis .ra-head h2{font-size:21px}}
+
+
+/* CP4.92 — Projected Roster card layout and markup correction. */
+.my-team-planner-analysis .ra-mon-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));align-items:stretch;gap:10px}
+.my-team-planner-analysis .ra-mon{width:100%;min-height:78px;box-sizing:border-box;align-items:center;padding:11px 13px;border:1px solid var(--border);border-radius:12px;background:var(--panel);box-shadow:0 2px 8px rgba(0,0,0,.07)}
+.my-team-planner-analysis .ra-mon.is-planned{border-style:solid;border-color:color-mix(in srgb,var(--amber) 38%,var(--border));background:color-mix(in srgb,var(--panel) 94%,var(--amber) 6%)}
+.my-team-planner-analysis .ra-mon.is-actual{border-color:color-mix(in srgb,var(--teal) 28%,var(--border))}
+.my-team-planner-analysis .ra-mon-sprite{flex:0 0 56px;width:56px;height:56px;border-radius:11px;background:var(--panel-alt)}
+.my-team-planner-analysis .ra-mon-main{display:grid;gap:2px}
+.my-team-planner-analysis .ra-mon-title{align-items:center;justify-content:space-between;gap:10px}
+.my-team-planner-analysis .ra-mon-title>strong{font-size:13px;line-height:1.3;letter-spacing:-.01em}
+.my-team-planner-analysis .ra-status{flex:0 0 auto;padding:4px 8px;border-radius:7px;font-size:9px;letter-spacing:.01em}
+.my-team-planner-analysis .ra-mon-tags,.my-team-planner-analysis .ra-role-tags{margin-top:4px;gap:5px}
+.my-team-planner-analysis .ra-role-tag{background:var(--panel-alt);border-color:var(--border)}
+@media(max-width:560px){.my-team-planner-analysis .ra-mon-grid{grid-template-columns:minmax(0,1fr)}.my-team-planner-analysis .ra-mon{padding:10px}.my-team-planner-analysis .ra-mon-title{align-items:flex-start;flex-direction:column;gap:5px}}
