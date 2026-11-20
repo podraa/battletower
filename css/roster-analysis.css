@@ -244,3 +244,158 @@
 .draft-projection-roster .dash-card:not(.projected-plan-card){border-left:3px solid var(--ra-drafted)!important}
 .draft-plan-queue .dash-qcard{grid-template-columns:18px 48px minmax(0,1fr) auto;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:11px;background:var(--panel-alt)}
 @media(max-width:700px){.draft-projection-roster .dash-list{grid-template-columns:1fr}}
+
+/* CP4.115: unified draft-planning workspace controls */
+.planner-workspace-tabs{display:flex;gap:8px;overflow-x:auto;scrollbar-width:thin;margin:18px 0 14px;padding:5px;border:1px solid var(--border);border-radius:13px;background:var(--panel-alt)}
+.planner-workspace-tabs button{flex:1 0 auto;min-height:40px;padding:9px 16px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--text-dim);font:inherit;font-size:12px;font-weight:750;cursor:pointer;white-space:nowrap}
+.planner-workspace-tabs button.is-active{background:color-mix(in srgb,var(--teal) 13%,var(--panel));border-color:color-mix(in srgb,var(--teal) 40%,var(--border));color:var(--text)}
+.planner-workspace-tabs button:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+[data-planner-view-panel][hidden]{display:none!important}
+.pre-draft-layout{align-items:start}
+.pre-draft-panel{min-width:0}
+.pre-draft-projected-budget{margin:14px 0}
+@media(max-width:650px){.planner-workspace-tabs{gap:4px}.planner-workspace-tabs button{font-size:11px;padding:8px 12px}.pre-draft-layout{grid-template-columns:minmax(0,1fr)!important}}
+
+/* CP4.116 — responsive planning cards, candidate comparison, and shared matchup explorer */
+.pre-draft-layout{display:grid!important;grid-template-columns:minmax(0,1.3fr) minmax(300px,1fr)!important;align-items:start;gap:16px}
+.pre-draft-panel{min-width:0}
+.pre-draft-mon{display:flex;align-items:center;gap:10px;padding:11px 12px!important;border-radius:13px!important;min-width:0}
+.pre-draft-mon-art{flex:0 0 62px;display:grid;place-items:center}
+.pre-draft-mon-art .sprite{width:60px;height:60px;object-fit:contain}
+.pre-draft-mon-info{min-width:0;flex:1}
+.pre-draft-mon-info>strong{font-size:13px}
+.pre-draft-candidate-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.pre-draft-compare,.planner-compare-title button{padding:7px 10px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--text);font:inherit;font-size:11px;cursor:pointer}
+.pre-draft-compare.is-selected{border-color:var(--teal);background:color-mix(in srgb,var(--teal) 16%,var(--panel))}
+.planner-comparison{margin-top:16px;padding:17px;border:1px solid var(--border);border-radius:15px;background:var(--panel)}
+.planner-comparison[hidden]{display:none!important}
+.planner-compare-title{display:flex;align-items:start;justify-content:space-between;gap:12px}
+.planner-compare-title h3{margin:0 0 4px;font-size:18px}
+.planner-compare-title p{margin:0 0 12px;font-size:12px;color:var(--text-dim)}
+.planner-compare-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.planner-compare-card{min-width:0;padding:13px;border:1px solid var(--border);border-radius:12px;background:var(--panel-alt)}
+.planner-compare-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.planner-compare-head>div:last-child{display:grid;gap:4px;min-width:0}
+.planner-compare-head strong{font-size:14px;overflow-wrap:anywhere}
+.planner-compare-head span{font-size:11px;color:var(--text-dim)}
+.planner-compare-art{flex:0 0 64px}.planner-compare-art .sprite{width:64px;height:64px;object-fit:contain}
+.planner-compare-fact{display:flex;justify-content:space-between;gap:12px;border-top:1px solid var(--border);padding:9px 0;font-size:11px}
+.planner-compare-fact>span{color:var(--text-dim)}.planner-compare-fact strong{text-align:right;overflow-wrap:anywhere}.planner-compare-fact .is-over{color:var(--amber)}
+.planner-compare-roles{display:flex;flex-wrap:wrap;gap:5px}.planner-compare-roles span{border-radius:99px;padding:4px 7px;background:color-mix(in srgb,var(--teal) 12%,var(--panel));font-size:10px}
+.planner-compare-empty{padding:16px;border:1px dashed var(--border);border-radius:10px;color:var(--text-dim);font-size:12px}
+.ra-matchup-section{margin:14px 0;padding:15px;border:1px solid var(--border);border-radius:13px;background:var(--panel-alt)}
+.ra-matchup-section p{margin:0 0 12px;color:var(--text-dim);font-size:11px}
+.ra-matchup-types{display:flex;flex-wrap:wrap;gap:6px}
+.ra-matchup-button{border:1px solid var(--border);border-radius:8px;padding:6px 9px;background:var(--panel);color:var(--text);font-size:11px;cursor:pointer}
+.ra-matchup-button.is-selected{border-color:var(--teal);box-shadow:inset 0 0 0 1px var(--teal);background:color-mix(in srgb,var(--teal) 15%,var(--panel))}
+.ra-matchup-results{margin-top:12px;color:var(--text-dim);font-size:11px}
+.ra-matchup-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.ra-matchup-group{min-width:0;border:1px solid var(--border);border-radius:10px;padding:9px;background:var(--panel)}
+.ra-matchup-group>strong{display:flex;justify-content:space-between;gap:5px;color:var(--text);margin-bottom:8px}
+.ra-matchup-group>div{display:flex;flex-wrap:wrap;gap:5px}
+.ra-matchup-group>div>span{border-radius:6px;padding:4px 6px;background:var(--panel-alt);color:var(--text);overflow-wrap:anywhere}
+.ra-matchup-group small{color:var(--text-dim)}
+@media(max-width:900px){.pre-draft-layout{grid-template-columns:1fr!important}.ra-matchup-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.planner-compare-grid{grid-template-columns:1fr}.ra-matchup-grid{grid-template-columns:1fr 1fr}.pre-draft-mon{flex-wrap:wrap}.pre-draft-candidate-actions{width:100%}}
+/* CP4.117: data-first Team Analysis; replaces legacy bar and spread presentation. */
+.ra-redesign{display:block;max-width:100%;overflow:hidden}
+.ra-new-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap;margin-bottom:18px}
+.ra-new-heading h2{margin:3px 0 5px}.ra-new-heading p,.ra-new-hint{color:var(--text-dim);font-size:13px;line-height:1.55}
+.ra-new-summary{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding:16px 18px;background:rgba(132,120,200,.08);border:1px solid var(--border);border-radius:14px;margin-bottom:18px}
+.ra-new-summary strong{font-size:20px}.ra-new-summary span{font-size:13px;color:var(--text-dim)}
+.ra-matrix-tabs{display:flex;gap:8px;border-bottom:1px solid var(--border);margin-bottom:14px;padding-bottom:9px}
+.ra-matrix-tabs button{padding:9px 14px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--text-dim);cursor:pointer;font:inherit}
+.ra-matrix-tabs button.is-active{background:rgba(147,131,235,.17);border-color:rgba(167,151,244,.5);color:var(--text)}
+.ra-matrix-scroll{max-width:100%;overflow:auto;border:1px solid var(--border);border-radius:12px}
+.ra-matrix{width:100%;border-collapse:separate;border-spacing:0;font-size:12px;white-space:nowrap}
+.ra-matrix th,.ra-matrix td{padding:10px 12px;border-bottom:1px solid var(--border);text-align:center}
+.ra-matrix thead th{background:rgba(129,119,175,.12);font-weight:600;position:sticky;top:0}
+.ra-matrix th:first-child{position:sticky;left:0;z-index:1;background:var(--panel);text-align:left;min-width:160px}
+.ra-matrix thead th:first-child{z-index:2;background:var(--panel)}
+.ra-matrix td.ra-cell-yes{background:rgba(91,190,153,.13);color:#83dfbd;font-weight:700}
+.ra-matrix-name{display:flex;align-items:center;gap:9px}.ra-matrix-name img{width:38px;height:38px;object-fit:contain}.ra-matrix-name small{display:block;font-size:10px;opacity:.65;margin-top:3px}
+.ra-matrix tfoot td,.ra-matrix tfoot th{font-weight:700;background:rgba(129,119,175,.12)}
+.ra-weakness-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:10px}
+.ra-weakness-item{padding:13px;border:1px solid var(--border);border-radius:12px;background:rgba(130,122,180,.06)}
+.ra-weakness-top{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px}
+.ra-weakness-people{display:grid;gap:6px;margin-top:10px;color:var(--text-dim);font-size:12px;line-height:1.5}
+.ra-redesign [hidden]{display:none!important}
+.planner-comparison{position:sticky;bottom:10px;z-index:12;box-shadow:0 12px 36px rgba(0,0,0,.32);border-color:rgba(167,151,244,.5);max-height:55vh;overflow:auto}
+.planner-comparison .planner-compare-empty{padding:10px 0}
+@media(max-width:720px){.ra-matrix th,.ra-matrix td{padding:8px}.planner-comparison{bottom:0;max-height:48vh}.ra-new-heading{display:block}}
+
+/* CP4.118 compact team analysis and three-zone planning workspace */
+.ra-compact{padding:12px!important;min-width:0}
+.ra-compact-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
+.ra-compact-heading h2{font-size:16px;margin:0}.ra-compact-heading span{font-size:11px;color:var(--text-dim)}
+.ra-compact .ra-matrix-tabs{margin:0 0 9px;padding-bottom:5px;gap:5px}
+.ra-compact .ra-matrix-tabs button{padding:6px 11px;font-size:11px}
+.ra-compact .ra-matrix-scroll{border-radius:8px}
+.ra-compact .ra-matrix{font-size:10px;table-layout:auto;width:max-content;min-width:100%}
+.ra-compact .ra-matrix th,.ra-compact .ra-matrix td{padding:4px 6px;line-height:1.15}
+.ra-compact .ra-matrix th:first-child{min-width:116px;max-width:160px}
+.ra-compact .ra-matrix-name{gap:5px}.ra-compact .ra-matrix-name img{width:25px;height:25px}
+.ra-compact .ra-matrix-name span{font-size:10px}
+.ra-compact .ra-role-column{display:block;max-width:64px;white-space:normal;line-height:1.1;font-size:9px}
+.ra-type-legend{display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:11px;margin-bottom:9px}
+.ra-type-legend small{color:var(--text-dim)}
+.ra-type-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
+.ra-type-tile{border:1px solid var(--border);border-radius:8px;padding:7px;min-width:0;background:var(--panel-alt)}
+.ra-type-tile .type-badge{font-size:10px;max-width:100%;display:inline-block}
+.ra-type-counts{display:flex;justify-content:space-between;gap:4px;margin-top:6px;font-size:11px;font-weight:700}
+.ra-type-weak{color:#f29b9b}.ra-type-resist{color:#91d9b5}.ra-type-immune{color:#a7b9f5}
+.pre-draft-layout{grid-template-columns:minmax(0,1.1fr) minmax(0,1.1fr) minmax(280px,.95fr)!important;gap:12px!important}
+.pre-draft-layout>.pre-draft-panel,.pre-draft-layout>.planner-comparison{min-width:0}
+.pre-draft-layout>.planner-comparison{position:static;max-height:none;overflow:visible;margin:0;box-shadow:none;padding:13px}
+.pre-draft-layout .planner-compare-grid{grid-template-columns:1fr}
+.pre-draft-layout .planner-compare-title h3{font-size:15px}
+.planner-compare-head>div:last-child{display:flex;flex-direction:column;align-items:flex-start;gap:5px}
+.planner-compare-head .planner-compare-roles{display:flex;gap:4px;flex-wrap:wrap}
+.planner-compare-head .planner-compare-roles span{font-size:9px;padding:3px 6px}
+@media(max-width:1250px){.pre-draft-layout{grid-template-columns:repeat(2,minmax(0,1fr))!important}.pre-draft-layout>.planner-comparison{grid-column:1/-1}.pre-draft-layout .planner-compare-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:800px){.ra-type-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.pre-draft-layout{grid-template-columns:1fr!important}.pre-draft-layout>.planner-comparison{grid-column:auto}.pre-draft-layout .planner-compare-grid{grid-template-columns:1fr}}
+
+/* CP4.119: two-column planner, simple roster type representation */
+.pre-draft-layout{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:16px!important}
+.ra-type-summary{font-size:12px;color:var(--text-dim);margin:0 0 10px}
+.ra-type-tile{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.ra-type-tile.is-covered{border-color:color-mix(in srgb,var(--teal) 35%,var(--border));background:color-mix(in srgb,var(--teal) 7%,var(--panel-alt))}
+.ra-type-tile.is-missing{opacity:.52}
+.ra-type-coverage-count{font-size:10px;white-space:nowrap;color:var(--text-dim)}
+@media(max-width:800px){.pre-draft-layout{grid-template-columns:1fr!important}}
+@media(max-width:520px){.ra-type-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* CP4.120: show roster members as sprites inside each represented type. */
+.ra-type-tile{align-items:flex-start;flex-direction:column;justify-content:flex-start;min-width:0}
+.ra-type-members{display:flex;flex-wrap:wrap;align-items:center;gap:3px;min-height:30px;width:100%}
+.ra-type-member{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;flex:none;border-radius:7px;background:color-mix(in srgb,var(--panel-alt) 75%,transparent)}
+.ra-type-member img,.ra-type-member .sprite{max-width:34px;max-height:34px;width:auto;height:auto;object-fit:contain}
+.ra-type-member-name{font-size:9px;overflow:hidden;text-overflow:ellipsis;max-width:36px}
+.ra-type-tile.is-missing .ra-type-members{min-height:24px}
+@media(max-width:520px){.ra-type-member{width:30px;height:30px}.ra-type-member img,.ra-type-member .sprite{max-width:29px;max-height:29px}}
+
+/* CP4.121 — stack the two Draft Plan & Search workspaces as full-width horizontal panels.
+   Keep this after earlier responsive and legacy grid rules to avoid competing columns. */
+.pre-draft-layout{
+  display:grid!important;
+  grid-template-columns:minmax(0,1fr)!important;
+  gap:18px!important;
+  align-items:stretch;
+}
+.pre-draft-layout > .pre-draft-panel{
+  width:100%;
+  min-width:0;
+  box-sizing:border-box;
+}
+.pre-draft-layout > .pre-draft-panel .pre-draft-list{
+  max-height:440px;
+  overflow-y:auto;
+}
+@media(max-width:700px){
+  .pre-draft-layout{gap:12px!important}
+  .pre-draft-layout > .pre-draft-panel .pre-draft-list{max-height:380px}
+}
+
+/* CP4.122: Draft pool Mega visibility control */
+.pre-draft-mega-toggle{display:inline-flex;align-items:center;gap:.45rem;white-space:nowrap;font-size:.88rem;cursor:pointer;padding:.5rem .7rem;border:1px solid rgba(160,169,205,.25);border-radius:9px;background:rgba(120,130,180,.08)}
+.pre-draft-mega-toggle input{accent-color:#b39bff}

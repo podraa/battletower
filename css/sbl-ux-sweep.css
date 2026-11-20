@@ -1,0 +1,171 @@
+/* CP4.109 — restrained, theme-aware UI sweep. Presentation only; no workflow changes. */
+:root{
+  --sbl-ui-radius:12px;
+  --sbl-ui-gap:12px;
+  --sbl-ui-border:color-mix(in srgb,var(--border) 82%,transparent);
+  --sbl-ui-surface:color-mix(in srgb,var(--panel) 96%,var(--accent, var(--amber)) 4%);
+  --sbl-ui-muted:color-mix(in srgb,var(--text-dim) 92%,transparent);
+}
+/* Reduce competing decoration and standardise the basic hierarchy. */
+.panel,.card,.account-card,.ra-block,.ra-roster,.roster-analysis,.toolbar,.trade-card{
+  border-color:var(--sbl-ui-border);
+  box-shadow:0 5px 18px rgba(0,0,0,.075);
+}
+.panel + .panel,.account-card + .account-card{margin-top:12px}
+#app > header, #app > .page-header{margin-bottom:16px}
+#app > header h1,#app > .page-header h1{letter-spacing:-.035em}
+.sub,.note,.panel-desc{line-height:1.5}
+/* Quiet secondary actions; preserve primary/action colours. */
+button.ghost,.btn-ghost,.secondary{box-shadow:none}
+button.ghost:hover,.btn-ghost:hover,.secondary:hover{transform:translateY(-1px)}
+/* Consistent section headings and compact metadata. */
+.section-head-row,.myteam-section-head,.trade-tab-head,.ra-block-head{gap:10px}
+.section-head-row h2,.myteam-section-head h2{letter-spacing:-.02em}
+.badge,.status-pill,.ra-count{letter-spacing:0}
+/* Team Analysis: overview first, details remain available in the same view. */
+.roster-analysis{padding:clamp(12px,1.7vw,18px);border-radius:14px;background:linear-gradient(145deg,color-mix(in srgb,var(--panel) 98%,var(--sbl-theme-accent) 2%),var(--panel))}
+.ra-head{padding-bottom:12px}
+.ra-metrics{gap:8px;padding:12px 0}
+.ra-metric{padding:10px 11px;border-radius:10px;background:color-mix(in srgb,var(--panel-alt) 94%,var(--sbl-theme-accent) 6%)}
+.ra-metric>strong{font-size:19px}
+.ra-columns{gap:10px}
+.ra-block,.ra-roster{padding:12px;border-radius:11px}
+.ra-insight{box-shadow:none}
+.ra-mon-grid{gap:7px}
+.ra-mon{border-radius:9px}
+/* Status colours use softened, theme-aware blends rather than high-saturation fills. */
+.roster-analysis{--ra-drafted:color-mix(in srgb,#36b88d 72%,var(--sbl-theme-accent) 28%);--ra-planned:color-mix(in srgb,#d69a43 72%,var(--sbl-theme-accent) 28%)}
+.roster-analysis[data-drafted-colour=rose]{--ra-drafted:color-mix(in srgb,#d9799e 76%,var(--sbl-theme-accent) 24%)}
+.roster-analysis[data-drafted-colour=blue]{--ra-drafted:color-mix(in srgb,#6e9fd7 76%,var(--sbl-theme-accent) 24%)}
+.roster-analysis[data-drafted-colour=green]{--ra-drafted:color-mix(in srgb,#69ad75 76%,var(--sbl-theme-accent) 24%)}
+.roster-analysis[data-drafted-colour=purple]{--ra-drafted:color-mix(in srgb,#9a83c9 76%,var(--sbl-theme-accent) 24%)}
+.roster-analysis[data-drafted-colour=orange]{--ra-drafted:color-mix(in srgb,#d78a4b 76%,var(--sbl-theme-accent) 24%)}
+.roster-analysis[data-drafted-colour=teal]{--ra-drafted:color-mix(in srgb,#48aa9c 76%,var(--sbl-theme-accent) 24%)}
+.roster-analysis[data-planned-colour=rose]{--ra-planned:color-mix(in srgb,#d9799e 76%,var(--sbl-theme-accent) 24%)}
+.roster-analysis[data-planned-colour=blue]{--ra-planned:color-mix(in srgb,#6e9fd7 76%,var(--sbl-theme-accent) 24%)}
+.roster-analysis[data-planned-colour=green]{--ra-planned:color-mix(in srgb,#69ad75 76%,var(--sbl-theme-accent) 24%)}
+.roster-analysis[data-planned-colour=purple]{--ra-planned:color-mix(in srgb,#9a83c9 76%,var(--sbl-theme-accent) 24%)}
+.roster-analysis[data-planned-colour=orange]{--ra-planned:color-mix(in srgb,#d78a4b 76%,var(--sbl-theme-accent) 24%)}
+.roster-analysis[data-planned-colour=teal]{--ra-planned:color-mix(in srgb,#48aa9c 76%,var(--sbl-theme-accent) 24%)}
+.ra-mon.is-actual,.ra-mon.is-planned{background:color-mix(in srgb,var(--panel-alt) 94%,var(--ra-drafted) 6%);box-shadow:inset 3px 0 var(--ra-drafted)}
+.ra-mon.is-planned{background:color-mix(in srgb,var(--panel-alt) 94%,var(--ra-planned) 6%);box-shadow:inset 3px 0 var(--ra-planned)}
+.ra-status.actual{color:var(--ra-drafted);background:color-mix(in srgb,var(--ra-drafted) 12%,var(--panel));border-color:color-mix(in srgb,var(--ra-drafted) 34%,var(--border))}
+.ra-status.planned{color:var(--ra-planned);background:color-mix(in srgb,var(--ra-planned) 12%,var(--panel));border-color:color-mix(in srgb,var(--ra-planned) 34%,var(--border))}
+.ra-colour-picker{backdrop-filter:blur(12px);box-shadow:0 12px 28px rgba(0,0,0,.2)}
+/* Draft Room: calmer roster cards and less ornamental chrome. */
+.draft-projected-roster .dash-card,.draft-projection-roster .dash-card{box-shadow:none!important;border-radius:10px}
+.pre-draft-projection-head,.draft-projection-summary{padding:12px 14px;border-radius:12px}
+.pre-draft-projection-counts span,.draft-projection-counts span{border-radius:9px}
+/* Free Agency: visually group filters and results without removing any controls. */
+body:has(#searchName) .toolbar{padding:13px 14px;gap:9px;border-radius:12px;box-shadow:none}
+body:has(#searchName) .stat{padding:8px 12px;min-width:96px;border-radius:9px}
+body:has(#searchName) .grid{gap:8px}
+body:has(#searchName) .mon{min-height:170px;padding:10px 8px;border-radius:10px;box-shadow:none}
+body:has(#searchName) .mon:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.08)}
+/* Admin: keep dense tools readable while reducing card nesting. */
+.admin-layout .panel,.admin-content .panel{border-radius:11px;box-shadow:none}
+/* Mobile: compact metrics without shrinking tap targets. */
+@media(max-width:700px){
+  .roster-analysis{margin-top:12px;padding:11px}
+  .ra-metrics{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .ra-metric{padding:8px}
+  .ra-metric>span{font-size:9px}
+  .ra-metric>strong{font-size:17px}
+  .ra-metric small{font-size:9px}
+  .ra-columns{gap:8px}
+  .ra-block,.ra-roster{padding:10px}
+}
+@media(max-width:480px){.ra-metrics{grid-template-columns:1fr}.ra-metric{padding:9px 10px}}
+@media(prefers-reduced-motion:reduce){.panel,.card,.mon,button{transition:none!important}}
+
+/* CP4.110 — visible workflow redesign: clearer summaries, progressive disclosure and page-specific hierarchy. */
+.roster-analysis{display:grid;gap:12px}
+.ra-detail-group{border:1px solid var(--sbl-ui-border);border-radius:12px;background:color-mix(in srgb,var(--panel) 96%,var(--sbl-theme-accent) 4%);overflow:clip}
+.ra-detail-group>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;list-style:none;cursor:pointer;padding:13px 15px;font-weight:750;color:var(--text)}
+.ra-detail-group>summary::-webkit-details-marker{display:none}
+.ra-detail-group>summary:after{content:'+';font-size:19px;color:var(--sbl-theme-accent);line-height:1}
+.ra-detail-group[open]>summary:after{content:'−'}
+.ra-detail-group>summary small{margin-left:auto;color:var(--text-dim);font-size:11px;font-weight:500;text-align:right}
+.ra-detail-group[open]>summary{border-bottom:1px solid var(--border)}
+.ra-detail-group>.ra-columns,.ra-detail-group>.ra-insight-grid{margin:12px}
+.ra-roster-detail .ra-roster{margin:12px;border:0;padding:0;background:transparent}
+.ra-roster-detail .ra-roster .ra-block-head{padding:0 0 10px}
+.ra-detail-group:not([open]){box-shadow:none}
+.pre-draft-hero{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:clamp(16px,2.5vw,24px);border:1px solid var(--border);border-radius:16px;background:linear-gradient(120deg,color-mix(in srgb,var(--panel) 94%,var(--sbl-theme-accent) 6%),var(--panel));box-shadow:0 8px 24px rgba(0,0,0,.07)}
+.pre-draft-hero h2{margin:4px 0 7px;font-size:clamp(24px,3vw,32px);letter-spacing:-.04em}
+.pre-draft-hero p{max-width:720px;margin:0;color:var(--text-dim);line-height:1.5}
+.pre-draft-hero-stat{min-width:150px;padding:13px 16px;border:1px solid var(--border);border-radius:12px;background:var(--panel-alt);text-align:center}
+.pre-draft-hero-stat strong{display:block;font-size:22px}
+.pre-draft-hero-stat span{display:block;margin-top:4px;color:var(--text-dim);font-size:11px}
+.my-team-planner-analysis{margin:14px 0}
+.pre-draft-projected-budget{margin:12px 0 16px}
+.pre-draft-layout{align-items:start;gap:14px}
+.pre-draft-panel{border-radius:14px;box-shadow:0 5px 18px rgba(0,0,0,.06)}
+.pre-draft-panel-head{align-items:flex-start;gap:12px}
+.pre-draft-panel-head h3{font-size:17px;letter-spacing:-.02em}
+.draft-plan-queue,.draft-projected-roster{border:1px solid var(--border);border-radius:14px;padding:clamp(13px,2vw,18px);background:var(--panel)}
+.draft-plan-toolbar,.draft-projected-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+.draft-plan-toolbar p,.draft-projected-head p{max-width:680px;color:var(--text-dim);line-height:1.5}
+.draft-projection-counts{display:flex;gap:8px;flex-wrap:wrap}
+.draft-projection-counts span{padding:8px 11px;border:1px solid var(--border);border-radius:9px;background:var(--panel-alt);white-space:nowrap}
+/* Free Agency: search and quick controls are the first interaction; the full stat/move/ability toolkit is on demand. */
+body:has(#searchName) .toolbar{display:grid;grid-template-columns:minmax(220px,2fr) repeat(3,minmax(140px,1fr));align-items:end;gap:12px;padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--panel);box-shadow:none}
+body:has(#searchName) .toolbar>.toolbar-wide:first-child{grid-column:1/-1}
+.free-agency-advanced{grid-column:1/-1;border:1px solid var(--border);border-radius:10px;background:var(--panel-alt);overflow:hidden}
+.free-agency-advanced>summary{padding:11px 13px;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;font-weight:700}
+.free-agency-advanced>summary::-webkit-details-marker{display:none}
+.free-agency-advanced>summary:after{content:'+';font-size:18px;color:var(--sbl-theme-accent)}
+.free-agency-advanced[open]>summary:after{content:'−'}
+.free-agency-advanced-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:13px;border-top:1px solid var(--border)}
+.free-agency-advanced-grid .toolbar-wide{grid-column:span 1}
+.free-agency-advanced-grid .stat-help{grid-column:1/-1}
+.type-filter-wrap{margin:12px 0}
+/* Admin: present each existing admin destination as an intentional workspace, with strong active-state and content hierarchy. */
+body[data-admin="true"] .admin-page-header{margin-bottom:12px}
+body[data-admin="true"] .admin-nav{gap:8px}
+body[data-admin="true"] .admin-nav-group-toggle{font-weight:750;letter-spacing:.055em}
+body[data-admin="true"] .admin-nav-item{border-radius:8px;min-height:38px}
+body[data-admin="true"] .admin-nav-item.active{box-shadow:inset 3px 0 var(--sbl-theme-accent);background:color-mix(in srgb,var(--panel-alt) 86%,var(--sbl-theme-accent) 14%)}
+.admin-focused-workspace{margin-top:14px}
+.admin-focused-workspace-head{padding:16px 18px;border:1px solid var(--border);border-radius:13px;background:linear-gradient(120deg,color-mix(in srgb,var(--panel) 94%,var(--sbl-theme-accent) 6%),var(--panel))}
+.admin-focused-workspace-head h2{margin:4px 0;font-size:clamp(21px,2.5vw,27px);letter-spacing:-.03em}
+.admin-focused-section-nav{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0}
+.admin-focused-section-tab{padding:9px 13px;border:1px solid var(--border);border-radius:9px;background:var(--panel);font-size:12px;font-weight:700}
+.admin-focused-section-tab.active{border-color:var(--sbl-theme-accent);background:color-mix(in srgb,var(--panel) 86%,var(--sbl-theme-accent) 14%);color:var(--text)}
+.admin-focused-section-pane{display:none}
+.admin-focused-section-pane.active{display:block}
+.admin-focused-section-pane>.panel{margin:0 0 12px}
+@media(max-width:760px){
+ .pre-draft-hero,.draft-plan-toolbar,.draft-projected-head{flex-direction:column;align-items:stretch}
+ .pre-draft-hero-stat{align-self:stretch}
+ body:has(#searchName) .toolbar{grid-template-columns:1fr 1fr}
+ body:has(#searchName) .toolbar>.toolbar-wide:first-child{grid-column:1/-1}
+ .free-agency-advanced-grid{grid-template-columns:1fr 1fr}
+ .ra-detail-group>summary{align-items:flex-start;flex-wrap:wrap}
+ .ra-detail-group>summary small{width:100%;margin:0;text-align:left}
+}
+@media(max-width:480px){.free-agency-advanced-grid{grid-template-columns:1fr}.ra-detail-group>.ra-columns,.ra-detail-group>.ra-insight-grid{margin:8px}.admin-focused-section-nav{display:grid;grid-template-columns:1fr 1fr}}
+/* Final page-level composition: reduce duplicate emphasis and make the main action obvious. */
+.myteam-hero{margin-bottom:14px}
+.myteam-hero-grid{gap:16px}
+.myteam-roster-grid{gap:9px}
+.myteam-mon{padding:11px;border-radius:11px;background:var(--panel);border:1px solid var(--border);box-shadow:none}
+.myteam-mon-top{gap:9px}
+.myteam-mon-stats{gap:6px}
+.myteam-mon-stat{padding:7px 5px;border-radius:8px;background:var(--panel-alt)}
+#myTeamPlannerAnalysis .ra-head{align-items:center}
+#myTeamPlannerAnalysis .ra-score{min-width:88px}
+body.draft-user-dashboard .dash-tabs{gap:7px;padding:5px;border:1px solid var(--border);border-radius:12px;background:var(--panel)}
+body.draft-user-dashboard .dash-tabs button{border-radius:8px}
+body.draft-user-dashboard .dash-filter-panel{border:1px solid var(--border);border-radius:14px;box-shadow:none}
+body.draft-user-dashboard .draft-projection-summary{display:flex;align-items:center;justify-content:space-between;gap:14px;border:1px solid var(--border);border-radius:14px;background:var(--panel);padding:14px 16px}
+body.draft-user-dashboard .draft-projection-roster{margin-top:12px;padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--panel)}
+body.draft-user-dashboard .draft-projection-roster .dash-list{gap:7px}
+body.draft-user-dashboard .draft-projection-roster .dash-card{min-height:68px;padding:9px 12px;border-radius:10px;border:1px solid var(--border);background:var(--panel-alt)}
+body.draft-user-dashboard .draft-projection-roster .projected-state{font-size:10px}
+body.draft-user-dashboard .draft-plan-queue .dash-list{gap:8px}
+body.draft-user-dashboard .draft-plan-queue .dash-card{border-radius:11px;box-shadow:none}
+body[data-admin="true"] .pokemon-roles-workspace .admin-section-title{margin-bottom:12px}
+body[data-admin="true"] .pokemon-roles-workspace #pokemonRoleSettingsPanel{margin-bottom:12px}
+body[data-admin="true"] .pokemon-roles-workspace #pokemonRoleAssignmentPanel{margin-top:0}
+@media(max-width:700px){body.draft-user-dashboard .draft-projection-summary{align-items:stretch;flex-direction:column}body.draft-user-dashboard .draft-projection-counts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}body.draft-user-dashboard .draft-projection-counts span{text-align:center;padding:7px 4px;font-size:11px}}
