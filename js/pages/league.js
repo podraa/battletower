@@ -1056,22 +1056,70 @@
     const d=DASH.settings?.draft||{};
     return (Array.isArray(d.pool)?d.pool:[]).filter(m=>m&&m.name);
   }
-  function plannerMon(id){return draftPoolForPlanner().find(m=>String(m.id||m.name)===String(id));}
+  // Draft queue records have existed as both pool IDs and Pokémon names.
+  // Resolve either representation against the current pool, then persist the
+  // current canonical pool ID so My Team and Draft Room stay in sync.
+  function plannerMon(id){
+    const key=String(id??'').trim();if(!key)return null;
+    const pool=draftPoolForPlanner();
+    return pool.find(m=>String(m.id??'').trim()===key)
+      ||pool.find(m=>String(m.name??'').trim().toLowerCase()===key.toLowerCase())
+      ||pool.find(m=>SBL.pokemon?.sameSpeciesForm?.(m.name,key));
+  }
+  function plannerQueueId(mon){return String(mon?.id??mon?.name??'');}
+  function normalizePlannerQueue(ids){
+    const normalized=[],seen=new Set();
+    for(const raw of Array.isArray(ids)?ids:[]){
+      const mon=plannerMon(raw);if(!mon||mon.drafted)continue;
+      const id=plannerQueueId(mon);if(!id||seen.has(id))continue;
+      seen.add(id);normalized.push(id);
+    }
+    return normalized;
+  }
   function plannerAvailable(){return draftPoolForPlanner().filter(m=>!m.drafted);}
+  function plannerAbilityCandidates(name){
+    const raw=String(name||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[’']/g,'').replace(/♀/g,'-f').replace(/♂/g,'-m').replace(/[._]/g,'-').replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'').replace(/-+/g,'-').replace(/^-|-$/g,'');
+    const megaPrefix=raw.match(/^mega-(.+)$/);
+    const megaSuffix=raw.match(/^(.+?)-mega(?:-([xyz]))?$/);
+    const mega=!!(megaPrefix||megaSuffix);
+    if(mega){
+      const base=megaPrefix?megaPrefix[1]:megaSuffix[1];
+      const form=megaPrefix?(base.match(/^(.*?)-([xyz])$/)?.[2]||''):(megaSuffix[2]||'');
+      const species=megaPrefix?(form?base.replace(/-[xyz]$/,''):base):base;
+      const slug=form?`${species}-mega-${form}`:`${species}-mega`;
+      // PokéAPI stores official Mega forms using species-mega[-x/y] slugs.
+      // Do not silently substitute base-form abilities for a Mega: they can differ.
+      return [...new Set([slug, ...(SBL.pokemon?.draftStatsApiCandidates?.(name)||[]).filter(x=>/-mega(?:-[xyz])?$/.test(x))])];
+    }
+    return [...new Set([...(SBL.pokemon?.draftStatsApiCandidates?.(name)||[]),raw].filter(Boolean))];
+  }
   async function loadPlannerAbilities(){
     const queued=preDraftPlan.queue.map(plannerMon).filter(Boolean).filter(m=>!Array.isArray(m.abilities)||!m.abilities.length);
     if(!queued.length)return;
     let cursor=0;
     const worker=async()=>{while(cursor<queued.length){const mon=queued[cursor++];
-      const raw=String(mon.name||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[’']/g,'').replace(/♀/g,'-f').replace(/♂/g,'-m').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-      const candidates=[...(SBL.pokemon?.draftStatsApiCandidates?.(mon.name)||[]),raw].filter(Boolean);
+      const candidates=plannerAbilityCandidates(mon.name);
       let abilities=null;
-      for(const slug of [...new Set(candidates)]){
-        const key='sbl_plan_abilities_v1:'+slug;
+      for(const slug of candidates){
+        const key='sbl_plan_abilities_v2:'+slug;
         try{const cached=JSON.parse(sessionStorage.getItem(key)||'null');if(Array.isArray(cached)&&cached.length){abilities=cached;break;}}catch(_){}
-        try{const response=await fetch('https://pokeapi.co/api/v2/pokemon/'+encodeURIComponent(slug));if(!response.ok)continue;const data=await response.json();abilities=(data.abilities||[]).map(x=>String(x.ability?.name||'').replace(/-/g,' ')).filter(Boolean);if(abilities.length){try{sessionStorage.setItem(key,JSON.stringify(abilities));}catch(_){}break;}}catch(_){}
+        // Retry transient rate limits/server errors; a missing Mega form is not
+        // treated as permission to display the base species' different ability.
+        for(let attempt=0;attempt<3;attempt++){
+          try{
+            const response=await fetch('https://pokeapi.co/api/v2/pokemon/'+encodeURIComponent(slug),{cache:'force-cache'});
+            if(response.status===404)break;
+            if(!response.ok){if((response.status===429||response.status>=500)&&attempt<2){await new Promise(resolve=>setTimeout(resolve,400*(attempt+1)));continue;}break;}
+            const data=await response.json();
+            const found=(data.abilities||[]).map(x=>String(x.ability?.name||'').replace(/-/g,' ')).filter(Boolean);
+            if(found.length){abilities=found;try{sessionStorage.setItem(key,JSON.stringify(found));}catch(_){} }
+            break;
+          }catch(_){if(attempt<2)await new Promise(resolve=>setTimeout(resolve,400*(attempt+1)));}
+        }
+        if(abilities?.length)break;
       }
       if(abilities?.length)mon.abilities=abilities;
+      else mon.abilityLookupFailed=true;
     }};
     await Promise.all(Array.from({length:Math.min(3,queued.length)},worker));
     if(preDraftPlan.showAbilities)renderDraftPlannerBody();
@@ -1080,8 +1128,8 @@
     const seasonId=String(DASH.seasonId||SBL.leagueDb.selectedSeasonId?.()||'');
     if(!seasonId)return [];
     if(preDraftPlan.loaded&&preDraftPlan.seasonId===seasonId){
-      const clean=preDraftPlan.queue.filter(id=>plannerMon(id)&&!plannerMon(id)?.drafted);
-      if(clean.length!==preDraftPlan.queue.length){preDraftPlan.queue=clean;savePreDraftPlan();}
+      const clean=normalizePlannerQueue(preDraftPlan.queue);
+      if(JSON.stringify(clean)!==JSON.stringify(preDraftPlan.queue)){preDraftPlan.queue=clean;savePreDraftPlan();}
       return preDraftPlan.queue;
     }
     preDraftPlan={seasonId,queue:[],loaded:false,saving:false,message:'Loading your saved plan…',query:'',typeFilter:'',roleFilter:'',showAbilities:false};
@@ -1089,11 +1137,10 @@
     try{ ids=await SBL.draft.queue.load(); }
     catch(error){ console.warn('Draft plan load failed:',error); }
     if(!Array.isArray(ids)){try{ids=JSON.parse(localStorage.getItem('sbl_draft_queue:'+seasonId)||'null')}catch(_){ids=null}}
-    const valid=new Set(draftPoolForPlanner().map(m=>String(m.id||m.name)));
     const original=Array.isArray(ids)?ids.map(String):[];
-    preDraftPlan.queue=original.filter(id=>valid.has(id)&&!plannerMon(id)?.drafted);
+    preDraftPlan.queue=normalizePlannerQueue(original);
     preDraftPlan.loaded=true;preDraftPlan.message='Your plan is ready.';
-    if(preDraftPlan.queue.length!==original.length){
+    if(JSON.stringify(preDraftPlan.queue)!==JSON.stringify(original)){
       try{const saved=await SBL.draft.queue.save(preDraftPlan.queue);preDraftPlan.message=saved?.ok?'Taken picks removed · plan synced':'Taken picks removed · saved on this device';}
       catch(error){console.warn('Pruned draft plan sync failed:',error);}
     }
@@ -1113,40 +1160,49 @@
     if(version===preDraftSaveVersion){preDraftPlan.saving=false;renderDraftPlannerBody();}
   }
   function queuePreDraftPlan(){
-    preDraftPlan.queue=preDraftPlan.queue.filter(id=>plannerMon(id)&&!plannerMon(id)?.drafted);
+    preDraftPlan.queue=normalizePlannerQueue(preDraftPlan.queue);
     savePreDraftPlan();
   }
   function plannerCard(mon,queued=false,index=-1){
     const id=String(mon.id||mon.name),sprite=SBL.pokemon.spriteMarkup(mon.name,'sprite');
     const types=Array.isArray(mon.types)&&mon.types.length?mon.types:(SBL.pokemonTypes?.lookupTypes(mon.name)||[]);
     const abilities=Array.isArray(mon.abilities)?mon.abilities:[];
-    return `<article class="pre-draft-mon" ${queued?`draggable="true" data-plan-drag-id="${SBL.pokemon.escapeHtml(id)}"`:''}><div class="pre-draft-mon-art">${sprite}</div><div class="pre-draft-mon-info"><strong>${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(mon.name)||mon.name)}</strong><span>${Number(mon.points)||0} pts${types.length?' · '+types.join(' / '):''}</span>${queued&&preDraftPlan.showAbilities?`<small class="pre-draft-abilities">Abilities: ${abilities.length?abilities.map(x=>SBL.pokemon.escapeHtml(String(x).replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase()))).join(' · '):'Loading / unavailable'}</small>`:''}</div>${queued?`<div class="pre-draft-order">#${index+1}</div><div class="pre-draft-actions"><button type="button" data-plan-action="up" data-plan-id="${SBL.pokemon.escapeHtml(id)}" ${index===0?'disabled':''} aria-label="Move up">↑</button><button type="button" data-plan-action="down" data-plan-id="${SBL.pokemon.escapeHtml(id)}" ${index===preDraftPlan.queue.length-1?'disabled':''} aria-label="Move down">↓</button><button type="button" data-plan-action="remove" data-plan-id="${SBL.pokemon.escapeHtml(id)}" aria-label="Remove">×</button></div>`:`<button type="button" class="pre-draft-add" data-plan-action="add" data-plan-id="${SBL.pokemon.escapeHtml(id)}">Add to plan</button>`}</article>`;
+    return `<article class="pre-draft-mon" ${queued?`draggable="true" data-plan-drag-id="${SBL.pokemon.escapeHtml(id)}"`:''}><div class="pre-draft-mon-art">${sprite}</div><div class="pre-draft-mon-info"><strong>${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(mon.name)||mon.name)}</strong><span>${Number(mon.points)||0} pts${types.length?' · '+types.join(' / '):''}</span>${queued&&preDraftPlan.showAbilities?`<small class="pre-draft-abilities">Abilities: ${abilities.length?abilities.map(x=>SBL.pokemon.escapeHtml(String(x).replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase()))).join(' · '):(mon.abilityLookupFailed?'Unavailable for this form':'Loading…')}</small>`:''}</div>${queued?`<div class="pre-draft-order">#${index+1}</div><div class="pre-draft-actions"><button type="button" data-plan-action="up" data-plan-id="${SBL.pokemon.escapeHtml(id)}" ${index===0?'disabled':''} aria-label="Move up">↑</button><button type="button" data-plan-action="down" data-plan-id="${SBL.pokemon.escapeHtml(id)}" ${index===preDraftPlan.queue.length-1?'disabled':''} aria-label="Move down">↓</button><button type="button" data-plan-action="remove" data-plan-id="${SBL.pokemon.escapeHtml(id)}" aria-label="Remove">×</button></div>`:`<button type="button" class="pre-draft-add" data-plan-action="add" data-plan-id="${SBL.pokemon.escapeHtml(id)}">Add to plan</button>`}</article>`;
   }
   function plannerRoleData(){
     const assignments=DASH.settings?.pokemonRoleAssignments&&typeof DASH.settings.pokemonRoleAssignments==='object'?DASH.settings.pokemonRoleAssignments:{};
-    const roles=[...new Set([...(Array.isArray(DASH.settings?.pokemonRoleCatalog)?DASH.settings.pokemonRoleCatalog:[]),...Object.values(assignments).flatMap(v=>Array.isArray(v)?v:[])])].sort((a,b)=>(SBL.rosterAnalysis?.roleLabel?.(a)||a).localeCompare(SBL.rosterAnalysis?.roleLabel?.(b)||b));
+    const roleValues=[...(Array.isArray(DASH.settings?.pokemonRoleCatalog)?DASH.settings.pokemonRoleCatalog:[]),...Object.values(assignments).flatMap(v=>Array.isArray(v)?v:[]),'Disruptor'];
+    const roles=(SBL.rosterAnalysis?.uniqueRoles?SBL.rosterAnalysis.uniqueRoles(roleValues):[...new Set(roleValues)]).sort((a,b)=>(SBL.rosterAnalysis?.roleLabel?.(a)||a).localeCompare(SBL.rosterAnalysis?.roleLabel?.(b)||b));
     return {assignments,roles};
   }
   function renderDraftPlannerBody(){
     const root=document.getElementById('preDraftPlanner');if(!root)return;
-    preDraftPlan.queue=preDraftPlan.queue.filter(id=>plannerMon(id)&&!plannerMon(id)?.drafted);
+    preDraftPlan.queue=normalizePlannerQueue(preDraftPlan.queue);
     const pool=plannerAvailable(),queued=preDraftPlan.queue.map(plannerMon).filter(Boolean);
     const {assignments,roles}=plannerRoleData();
     const query=String(preDraftPlan.query||'').trim().toLowerCase();
     const filtered=pool.filter(m=>!preDraftPlan.queue.includes(String(m.id||m.name))&&(!query||String(m.name).toLowerCase().includes(query))).filter(m=>{
       const types=Array.isArray(m.types)&&m.types.length?m.types:(SBL.pokemonTypes?.lookupTypes(m.name)||[]);
       const monRoles=assignments[analysisRoleKey(m.name)]||[];
-      return (!preDraftPlan.typeFilter||types.some(t=>String(t).toLowerCase()===preDraftPlan.typeFilter))&&(!preDraftPlan.roleFilter||monRoles.includes(preDraftPlan.roleFilter));
+      return (!preDraftPlan.typeFilter||types.some(t=>String(t).toLowerCase()===preDraftPlan.typeFilter))&&(!preDraftPlan.roleFilter||monRoles.some(r=>(SBL.rosterAnalysis?.roleLabel?.(r)||String(r)).toLowerCase()===(SBL.rosterAnalysis?.roleLabel?.(preDraftPlan.roleFilter)||String(preDraftPlan.roleFilter)).toLowerCase()));
     }).sort((a,b)=>(Number(b.points)||0)-(Number(a.points)||0)||String(a.name).localeCompare(String(b.name)));
     const list=root.querySelector('[data-planner-available]');
     const plan=root.querySelector('[data-planner-queue]');
     const status=root.querySelector('[data-planner-status]');
-    const count=root.querySelector('[data-planner-count]');
+    const count=contentEl?.querySelector('[data-planner-count]')||document.querySelector('[data-planner-count]');
     if(count)count.textContent=`${queued.length} Pokémon planned`;
+    const actualForBudget=myRoster()||[];
+    const pointsFor=mon=>{const direct=Number(mon?.points);if(Number.isFinite(direct)&&direct>0)return direct;const key=SBL.pokemon.matchKey?.(mon?.name);const match=(DASH.settings?.draft?.pool||[]).find(x=>SBL.pokemon.matchKey?.(x.name)===key);return Number(match?.points)||0;};
+    const projectedPoints=[...actualForBudget,...queued].reduce((sum,mon)=>sum+pointsFor(mon),0);
+    const leagueDefaultPoints=Math.max(0,Number(DASH.settings?.draft?.defaultBudget ?? DASH.settings?.draft?.default_budget ?? DASH.settings?.defaultDraftPoints ?? 115)||115);
+    const overBy=Math.max(0,projectedPoints-leagueDefaultPoints);
+    const budgetRoot=document.getElementById('preDraftProjectedBudget');
+    if(budgetRoot){const status=overBy?`Over cap by ${overBy} pts`:`${leagueDefaultPoints-projectedPoints} pts below cap`;budgetRoot.innerHTML='<div class="pre-draft-budget-card '+(overBy?'is-over':'')+'"><div><span class="pre-draft-budget-kicker">PROJECTED ROSTER COST</span><strong>'+projectedPoints+' <small>/ '+leagueDefaultPoints+' pts</small></strong><span class="pre-draft-budget-caption">'+actualForBudget.length+' drafted + '+queued.length+' planned Pokémon · League default</span></div><div class="pre-draft-budget-status">'+status+'</div><div class="pre-draft-budget-track"><i style="width:'+Math.min(100,projectedPoints/leagueDefaultPoints*100)+'%"></i></div></div>'; }
     const analysisRoot=document.getElementById('myTeamPlannerAnalysis');
     if(analysisRoot){
       const assignments=DASH.settings?.pokemonRoleAssignments&&typeof DASH.settings.pokemonRoleAssignments==='object'?DASH.settings.pokemonRoleAssignments:{};
-      const roles=[...new Set([...(Array.isArray(DASH.settings?.pokemonRoleCatalog)?DASH.settings.pokemonRoleCatalog:[]),...Object.values(assignments).flatMap(v=>Array.isArray(v)?v:[])])].sort((a,b)=>(SBL.rosterAnalysis?.roleLabel?.(a)||a).localeCompare(SBL.rosterAnalysis?.roleLabel?.(b)||b));
+      const roleValues=[...(Array.isArray(DASH.settings?.pokemonRoleCatalog)?DASH.settings.pokemonRoleCatalog:[]),...Object.values(assignments).flatMap(v=>Array.isArray(v)?v:[]),'Disruptor'];
+    const roles=(SBL.rosterAnalysis?.uniqueRoles?SBL.rosterAnalysis.uniqueRoles(roleValues):[...new Set(roleValues)]).sort((a,b)=>(SBL.rosterAnalysis?.roleLabel?.(a)||a).localeCompare(SBL.rosterAnalysis?.roleLabel?.(b)||b));
       const actual=(myRoster()||[]).map(mon=>({name:mon.name,status:'actual',types:SBL.pokemonTypes?.lookupTypes(mon.name)||[],roles:Array.isArray(assignments[analysisRoleKey(mon.name)])?assignments[analysisRoleKey(mon.name)]:[]}));
       const planned=queued.map(mon=>({name:mon.name,status:'planned',types:Array.isArray(mon.types)&&mon.types.length?mon.types:(SBL.pokemonTypes?.lookupTypes(mon.name)||[]),roles:Array.isArray(assignments[analysisRoleKey(mon.name)])?assignments[analysisRoleKey(mon.name)]:[],abilities:Array.isArray(mon.abilities)?mon.abilities:[]}));
       const entries=[...actual,...planned];
@@ -1159,7 +1215,7 @@
     if(list)list.innerHTML=filtered.length?filtered.slice(0,160).map(m=>plannerCard(m,false)).join(''):'<div class="pre-draft-empty">No available Pokémon match those filters.</div>';
   }
   async function renderDraftPlanner(){
-    contentEl.innerHTML=`<section class="pre-draft-hero"><div><div class="myteam-kicker">PRE-SEASON WORKSPACE</div><h2>Draft Planner</h2><p>Build and evaluate your draft priorities. Your saved plan syncs with the Draft Room, where your actual picks and remaining plan are combined into one live projection.</p></div><div class="pre-draft-hero-stat"><strong data-planner-count>0 Pokémon planned</strong><span>Priority order is yours to change</span></div></section><section class="pre-draft-layout" id="preDraftPlanner"><div class="pre-draft-panel"><div class="pre-draft-panel-head"><div><h3>Your Draft Plan</h3><p>Drag Pokémon to reorder, or use the up/down controls. The first Pokémon is your highest priority.</p></div><div class="pre-draft-head-tools"><label class="pre-draft-ability-toggle"><input type="checkbox" data-plan-abilities ${preDraftPlan.showAbilities?'checked':''}> Show Abilities</label><button type="button" class="pre-draft-clear" data-plan-clear ${preDraftPlan.queue.length?'':'disabled'}>Clear Draft Plan</button><span class="pre-draft-save" data-planner-status>Loading your saved plan…</span></div></div><div data-planner-queue class="pre-draft-list"><div class="pre-draft-empty">Loading your plan…</div></div></div><div class="pre-draft-panel"><div class="pre-draft-panel-head"><div><h3>Available Draft Pool</h3><p>Search and filter the pool, then add Pokémon to your plan.</p></div></div><input class="pre-draft-search" type="search" placeholder="Search Pokémon…" aria-label="Search draft pool" value="${SBL.pokemon.escapeHtml(preDraftPlan.query)}"><div class="pre-draft-filter-row"><select class="pre-draft-type-filter" aria-label="Filter pool by type"><option value="">All types</option>${['Normal','Fire','Water','Electric','Grass','Ice','Fighting','Poison','Ground','Flying','Psychic','Bug','Rock','Ghost','Dragon','Dark','Steel','Fairy'].map(t=>`<option value="${t.toLowerCase()}" ${preDraftPlan.typeFilter===t.toLowerCase()?'selected':''}>${t}</option>`).join('')}</select><select class="pre-draft-role-filter" aria-label="Filter pool by competitive role"><option value="">All roles</option>${plannerRoleData().roles.map(r=>`<option value="${SBL.pokemon.escapeHtml(r)}" ${preDraftPlan.roleFilter===r?'selected':''}>${SBL.pokemon.escapeHtml(SBL.rosterAnalysis?.roleLabel?.(r)||r)}</option>`).join('')}</select></div><div data-planner-available class="pre-draft-list"><div class="pre-draft-empty">Loading available Pokémon…</div></div></div></section><div id="myTeamPlannerAnalysis" class="my-team-planner-analysis"><section class="roster-analysis"><h2>Team Analysis</h2><p>Loading your roster and draft plan analysis…</p></section></div>`;
+    contentEl.innerHTML=`<section class="pre-draft-hero"><div><div class="myteam-kicker">PRE-SEASON WORKSPACE</div><h2>Draft Planner</h2><p>Build and evaluate your draft priorities. Your saved plan syncs with the Draft Room, where your actual picks and remaining plan are combined into one live projection.</p></div><div class="pre-draft-hero-stat"><strong data-planner-count>0 Pokémon planned</strong><span>Priority order is yours to change</span></div></section><div id="myTeamPlannerAnalysis" class="my-team-planner-analysis"><section class="roster-analysis"><h2>Team Analysis</h2><p>Loading your roster and draft plan analysis…</p></section></div><div id="preDraftProjectedBudget" class="pre-draft-projected-budget" aria-live="polite"></div><section class="pre-draft-layout" id="preDraftPlanner"><div class="pre-draft-panel"><div class="pre-draft-panel-head"><div><h3>Your Draft Plan</h3><p>Drag Pokémon to reorder, or use the up/down controls. The first Pokémon is your highest priority.</p></div><div class="pre-draft-head-tools"><label class="pre-draft-ability-toggle"><input type="checkbox" data-plan-abilities ${preDraftPlan.showAbilities?'checked':''}> Show Abilities</label><button type="button" class="pre-draft-clear" data-plan-clear ${preDraftPlan.queue.length?'':'disabled'}>Clear Draft Plan</button><span class="pre-draft-save" data-planner-status>Loading your saved plan…</span></div></div><div data-planner-queue class="pre-draft-list"><div class="pre-draft-empty">Loading your plan…</div></div></div><div class="pre-draft-panel"><div class="pre-draft-panel-head"><div><h3>Available Draft Pool</h3><p>Search and filter the pool, then add Pokémon to your plan.</p></div></div><input class="pre-draft-search" type="search" placeholder="Search Pokémon…" aria-label="Search draft pool" value="${SBL.pokemon.escapeHtml(preDraftPlan.query)}"><div class="pre-draft-filter-row"><select class="pre-draft-type-filter" aria-label="Filter pool by type"><option value="">All types</option>${['Normal','Fire','Water','Electric','Grass','Ice','Fighting','Poison','Ground','Flying','Psychic','Bug','Rock','Ghost','Dragon','Dark','Steel','Fairy'].map(t=>`<option value="${t.toLowerCase()}" ${preDraftPlan.typeFilter===t.toLowerCase()?'selected':''}>${t}</option>`).join('')}</select><select class="pre-draft-role-filter" aria-label="Filter pool by competitive role"><option value="">All roles</option>${plannerRoleData().roles.map(r=>`<option value="${SBL.pokemon.escapeHtml(r)}" ${preDraftPlan.roleFilter===r?'selected':''}>${SBL.pokemon.escapeHtml(SBL.rosterAnalysis?.roleLabel?.(r)||r)}</option>`).join('')}</select></div><div data-planner-available class="pre-draft-list"><div class="pre-draft-empty">Loading available Pokémon…</div></div></div></section>`;
     await loadPreDraftPlan();renderDraftPlannerBody();
     const root=document.getElementById('preDraftPlanner');
     if(root&&!root.dataset.abilitiesBound){root.dataset.abilitiesBound='1';root.addEventListener('change',e=>{if(e.target.matches('[data-plan-abilities]')){preDraftPlan.showAbilities=!!e.target.checked;renderDraftPlannerBody();if(preDraftPlan.showAbilities)void loadPlannerAbilities();}});}
@@ -1179,7 +1235,7 @@
     }
     const button=event.target.closest('[data-plan-action]');if(!button)return;
     const id=String(button.dataset.planId||''),action=button.dataset.planAction;
-    if(action==='add'&&!preDraftPlan.queue.includes(id)&&plannerMon(id)&&!plannerMon(id).drafted)preDraftPlan.queue.push(id);
+    if(action==='add'&&!preDraftPlan.queue.includes(plannerQueueId(plannerMon(id)))&&plannerMon(id)&&!plannerMon(id).drafted)preDraftPlan.queue.push(plannerQueueId(plannerMon(id)));
     else if(action==='remove')preDraftPlan.queue=preDraftPlan.queue.filter(x=>x!==id);
     else if(action==='up'||action==='down'){
       const i=preDraftPlan.queue.indexOf(id),j=action==='up'?i-1:i+1;

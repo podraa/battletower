@@ -118,8 +118,9 @@ function pickCount(d,t){return d.picks.filter(p=>sameTeam(p.team,t)).length}
 // commissioner assignment is shared by every roster in the league.
 function roleKey(name){return String(name||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/♀/g,'-f').replace(/♂/g,'-m').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')}
 function roleAssignments(){const x=state.settings.pokemonRoleAssignments;return x&&typeof x==='object'?x:{}}
-function rolesFor(name){const a=roleAssignments()[roleKey(name)];return Array.isArray(a)?a:[]}
-function allAssignedRoles(){return [...new Set([...(Array.isArray(state.settings.pokemonRoleCatalog)?state.settings.pokemonRoleCatalog:[]),...Object.values(roleAssignments()).flatMap(x=>Array.isArray(x)?x:[])])].sort((a,b)=>a.localeCompare(b))}
+function rolesFor(name){const a=roleAssignments()[roleKey(name)];const values=Array.isArray(a)?a:[];return SBL.rosterAnalysis?.uniqueRoles?SBL.rosterAnalysis.uniqueRoles(values):values}
+function draftRoleLabel(value){if(SBL.rosterAnalysis?.roleLabel)return SBL.rosterAnalysis.roleLabel(value);const spaced=String(value??'').trim().replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[._-]+/g,' ').replace(/\s+/g,' ').trim();if(/^(?:cleric|celric)$/i.test(spaced))return 'Recovery';if(/^speed control$/i.test(spaced))return 'Sticky Webs';if(/^hazard setter$/i.test(spaced))return '';return spaced.replace(/\b\w/g,c=>c.toUpperCase())}
+function allAssignedRoles(){const values=[...(Array.isArray(state.settings.pokemonRoleCatalog)?state.settings.pokemonRoleCatalog:[]),...Object.values(roleAssignments()).flatMap(x=>Array.isArray(x)?x:[]),'Disruptor'];const roles=SBL.rosterAnalysis?.uniqueRoles?SBL.rosterAnalysis.uniqueRoles(values):[...new Set(values.filter(x=>draftRoleLabel(x)))];return roles.sort((a,b)=>draftRoleLabel(a).localeCompare(draftRoleLabel(b)))}
 function rosterEntries(team,d=state.settings.draft){
   const stored=keyedValue(state.settings.rosters,team,[]);
   const roster=Array.isArray(stored)?stored:[];
@@ -532,7 +533,7 @@ function cmdResultsHtml(d,team){
   const live=d.status==='live';
   return '<div class="cmd-results">'+list.map(m=>{const ok=live&&team&&DD().canAfford(d,team,m);
     const block=team?DD().megaBlock(d,team,m):null;
-    const why=!live?'Draft is not live':!ok?(block?.message||'Over budget or roster full for '+team):'Draft for '+team;
+    const why=!live?'Draft is not live':!ok?'Unavailable under current draft limits for '+team:'Draft for '+team;
     return '<button class="cmd-mon" data-cmd-pick="'+esc(m.id)+'" '+(ok?'':'disabled')+' title="'+esc(why)+'">'+dashSprite(m.name)+'<span><span class="nm">'+esc(displayMonName(m.name))+'</span><br><span class="sb">'+m.points+' pts · '+(m.abilities||[]).slice(0,2).map(esc).join(', ')+'</span></span></button>'}).join('')+'</div>'+(d.pool.filter(m=>!m.drafted).length>60?'<div class="note">Showing the first 60 matches. Narrow the filters to find more specific Pokémon.</div>':'');
 }
 function consoleHtml(d,ts){
@@ -594,6 +595,7 @@ function wireConsole(ts){
   });
 }
 function renderCommissioner(d,ts){
+  document.body.classList.remove('draft-user-dashboard');
   const tabs=MOCK_DRAFT_MODE?[['console','Simulation Draft Room']]:[['console','Commissioner console'],['user','My plan']];
   if(!$('cmdShell')){
     content.innerHTML=(MOCK_DRAFT_MODE?mockBannerHtml():'')+'<div id="cmdShell"><div class="cmd-tabs" id="cmdTabs"></div><div id="cmdBody"></div></div>';
@@ -647,7 +649,7 @@ function showDashToast(msg){
   if(!t){t=document.createElement('div');t.id='dashToast';t.setAttribute('role','status');t.setAttribute('aria-live','polite');document.body.appendChild(t)}
   t.textContent=msg;t.classList.add('show');clearTimeout(showDashToast.t);showDashToast.t=setTimeout(()=>t.classList.remove('show'),9000);
 }
-function dashBlockLabel(d,t,m){if(!DD().budgetCanAfford(d,t,m))return 'Over your current budget';const b=DD().megaBlock?.(d,t,m);return b?(b.code==='mega-max'?'Mega limit reached':'Mega required for this final slot'):'Over your limit'}
+function dashBlockLabel(d,t,m){if(!DD().budgetCanAfford(d,t,m))return 'Over your current budget';const b=DD().megaBlock?.(d,t,m);return b?.code==='mega-max'?'Mega limit reached':'Over your limit'}
 /* Taken Pokemon (by anyone, including the user's own picks) leave the queue automatically. */
 function pruneTakenQueue(d){
   if(!dash.queueReady||!dash.queue.length)return false;
@@ -834,7 +836,7 @@ function dashQueueChanged(){
 function dashCard(d,t,m,opts={}){
   const aff=DD().budgetCanAfford(d,t,m),q=dash.queue.includes(String(m.id));
   const megaBlock=!m.drafted&&t?DD().megaBlock?.(d,t,m):null;
-  const status=m.drafted?`<span>Taken${m.draftedBy?' by '+esc(m.draftedBy):''}</span>`:(!aff&&t?'<span>'+dashBlockLabel(d,t,m)+'</span>':(megaBlock?'<span>'+dashBlockLabel(d,t,m)+'</span>':''));
+  const status=m.drafted?`<span>Taken${m.draftedBy?' by '+esc(m.draftedBy):''}</span>`:(!aff&&t?'<span>'+dashBlockLabel(d,t,m)+'</span>':(megaBlock?.code==='mega-max'?'<span>Mega limit reached</span>':''));
   const right=opts.queueTab
     ?(m.drafted?'':`<div class="dash-acts"><button class="dash-mini" data-act="up" data-id="${esc(m.id)}" aria-label="Move up">▲</button><button class="dash-mini" data-act="down" data-id="${esc(m.id)}" aria-label="Move down">▼</button><button class="dash-mini" data-act="rm" data-id="${esc(m.id)}" aria-label="Remove from queue">✕</button></div>`)
     :`<button class="dash-star${q?' on':''}" data-act="q" data-id="${esc(m.id)}" aria-label="${q?'Remove from queue':'Add to queue'}">★</button>`;
@@ -870,7 +872,7 @@ function dashBoardCard(d,t,m){
   const types=(Array.isArray(m.types)?m.types:[]).map(x=>String(x).toLowerCase()).filter(Boolean);
   const stats=Object.fromEntries(['hp','atk','def','spa','spd','spe'].map(k=>[k,DD().statValue(m,k)]).filter(([,v])=>v!=null));
   const megaBlock=!m.drafted&&t?DD().megaBlock?.(d,t,m):null;
-  const status=m.drafted?`<div class="dash-status taken">Drafted${m.draftedBy?' by '+esc(m.draftedBy):''}</div>`:(!aff&&t?'<div class="dash-status over">'+dashBlockLabel(d,t,m)+'</div>':(megaBlock?'<div class="dash-status over">'+dashBlockLabel(d,t,m)+'</div>':'<div class="dash-status available">Available</div>'));
+  const status=m.drafted?`<div class="dash-status taken">Drafted${m.draftedBy?' by '+esc(m.draftedBy):''}</div>`:(!aff&&t?'<div class="dash-status over">'+dashBlockLabel(d,t,m)+'</div>':(megaBlock?.code==='mega-max'?'<div class="dash-status over">Mega limit reached</div>':'<div class="dash-status available">Available</div>'));
   return `<article class="dash-mon-card${m.drafted?' dr':''}${!aff&&t&&!m.drafted?' na':''}">
     <div class="dash-mon-art">${dashSprite(m.name)}</div>
     <div class="dash-mon-name">${esc(SBL.pokemon.displayNameWithForm?.(m.name)||m.name)}</div>
@@ -883,7 +885,7 @@ function dashBoardCard(d,t,m){
 }
 function buildDashPool(d){
   const body=$('dashBody');if(!body)return;const f=dash.f;
-  body.innerHTML=`<section class="dash-filter-panel"><div class="dash-filter-title"><div><span class="dash-kicker">PLAYER TOOLKIT</span><h2>Find your next pick</h2><p>Search, compare stats and narrow the pool before adding Pokémon to your queue.</p></div><span class="dash-save" id="dashSave">${esc(dash.saveMsg)}</span></div><div class="dash-search-row"><input type="search" id="dashQ" placeholder="Search Pokémon by name…" value="${esc(f.q)}" autocomplete="off"></div><div class="dash-filter-grid"><label class="dash-field"><span>Sort results</span><select id="dashSort"><option value="pts-desc">Points · high to low</option><option value="pts-asc">Points · low to high</option><option value="name">Name · A–Z</option><option value="type">Type</option><option value="stat-desc">Selected stat · highest</option></select></label><label class="dash-field"><span>Stat to filter / rank</span><select id="dashStat"><option value="">Select stat to filter…</option><option value="bst">BST (total)</option><option value="atk">Attack</option><option value="spa">Special Attack</option><option value="def">Defense</option><option value="spd">Special Defense</option><option value="spe">Speed</option><option value="hp">HP</option></select></label><label class="dash-field"><span>Minimum stat</span><input type="number" id="dashStatMin" min="0" max="1200" inputmode="numeric" placeholder="No minimum" value="${esc(f.statMin)}"></label><label class="dash-field"><span>Maximum stat</span><input type="number" id="dashStatMax" min="0" max="1200" inputmode="numeric" placeholder="No maximum" value="${esc(f.statMax)}"></label><label class="dash-field"><span>Minimum points</span><input type="number" id="dashMin" min="0" inputmode="numeric" placeholder="Any" value="${esc(f.minPts)}"></label><label class="dash-field"><span>Maximum points</span><input type="number" id="dashMax" min="0" inputmode="numeric" placeholder="Any" value="${esc(f.maxPts)}"></label><label class="dash-field"><span>Group results</span><select id="dashGroup"><option value="points">By point tier</option><option value="stat">Overall stat ranking</option></select></label><label class="dash-field"><span>Ability contains</span><input type="search" id="dashAbility" placeholder="Filter by ability…" value="${esc(f.ability)}"></label><label class="dash-field"><span>Competitive role</span><select id="dashRole"><option value="">Any role</option>${allAssignedRoles().map(r=>`<option value="${esc(r)}" ${f.role===r?'selected':''}>${esc(r)}</option>`).join('')}</select></label><label class="dash-field"><span>Pokémon form</span><select id="dashMega"><option value="all" ${f.mega==='all'?'selected':''}>All Pokémon</option><option value="mega" ${f.mega==='mega'?'selected':''}>Mega only</option><option value="standard" ${f.mega==='standard'?'selected':''}>Non-Mega only</option></select></label></div><div class="dash-filter-footer"><div class="dash-chips" id="dashTypes">${DD().allTypes(d.pool).map(x=>`<button data-act="type" data-type="${esc(x)}">${esc(x)}</button>`).join('')}</div><div class="dash-tog"><label><input type="checkbox" id="dashAff" ${f.affordable?'checked':''}> Affordable only</label><label><input type="checkbox" id="dashDr" ${f.showDrafted?'checked':''}> Include drafted</label><label><input type="checkbox" id="dashQo" ${f.queuedOnly?'checked':''}> Queue only</label></div></div><div class="dash-result-line"><span class="note" id="dashCount"></span><button type="button" class="dash-reset" data-act="resetFilters">Reset filters</button></div></section><div class="dash-list" id="dashList"></div>`;
+  body.innerHTML=`<section class="dash-filter-panel"><div class="dash-filter-title"><div><span class="dash-kicker">PLAYER TOOLKIT</span><h2>Find your next pick</h2><p>Search, compare stats and narrow the pool before adding Pokémon to your queue.</p></div><span class="dash-save" id="dashSave">${esc(dash.saveMsg)}</span></div><div class="dash-search-row"><input type="search" id="dashQ" placeholder="Search Pokémon by name…" value="${esc(f.q)}" autocomplete="off"></div><div class="dash-filter-grid"><label class="dash-field"><span>Sort results</span><select id="dashSort"><option value="pts-desc">Points · high to low</option><option value="pts-asc">Points · low to high</option><option value="name">Name · A–Z</option><option value="type">Type</option><option value="stat-desc">Selected stat · highest</option></select></label><label class="dash-field"><span>Stat to filter / rank</span><select id="dashStat"><option value="">Select stat to filter…</option><option value="bst">BST (total)</option><option value="atk">Attack</option><option value="spa">Special Attack</option><option value="def">Defense</option><option value="spd">Special Defense</option><option value="spe">Speed</option><option value="hp">HP</option></select></label><label class="dash-field"><span>Minimum stat</span><input type="number" id="dashStatMin" min="0" max="1200" inputmode="numeric" placeholder="No minimum" value="${esc(f.statMin)}"></label><label class="dash-field"><span>Maximum stat</span><input type="number" id="dashStatMax" min="0" max="1200" inputmode="numeric" placeholder="No maximum" value="${esc(f.statMax)}"></label><label class="dash-field"><span>Minimum points</span><input type="number" id="dashMin" min="0" inputmode="numeric" placeholder="Any" value="${esc(f.minPts)}"></label><label class="dash-field"><span>Maximum points</span><input type="number" id="dashMax" min="0" inputmode="numeric" placeholder="Any" value="${esc(f.maxPts)}"></label><label class="dash-field"><span>Group results</span><select id="dashGroup"><option value="points">By point tier</option><option value="stat">Overall stat ranking</option></select></label><label class="dash-field"><span>Ability contains</span><input type="search" id="dashAbility" placeholder="Filter by ability…" value="${esc(f.ability)}"></label><label class="dash-field"><span>Competitive role</span><select id="dashRole"><option value="">Any role</option>${allAssignedRoles().map(r=>`<option value="${esc(r)}" ${f.role===r?'selected':''}>${esc(draftRoleLabel(r))}</option>`).join('')}</select></label><label class="dash-field"><span>Pokémon form</span><select id="dashMega"><option value="all" ${f.mega==='all'?'selected':''}>All Pokémon</option><option value="mega" ${f.mega==='mega'?'selected':''}>Mega only</option><option value="standard" ${f.mega==='standard'?'selected':''}>Non-Mega only</option></select></label></div><div class="dash-filter-footer"><div class="dash-chips" id="dashTypes">${DD().allTypes(d.pool).map(x=>`<button data-act="type" data-type="${esc(x)}">${esc(x)}</button>`).join('')}</div><div class="dash-tog"><label><input type="checkbox" id="dashAff" ${f.affordable?'checked':''}> Affordable only</label><label><input type="checkbox" id="dashDr" ${f.showDrafted?'checked':''}> Include drafted</label><label><input type="checkbox" id="dashQo" ${f.queuedOnly?'checked':''}> Queue only</label></div></div><div class="dash-result-line"><span class="note" id="dashCount"></span><button type="button" class="dash-reset" data-act="resetFilters">Reset filters</button></div></section><div class="dash-list" id="dashList"></div>`;
   $('dashSort').value=dash.sort;$('dashStat').value=dash.f.stat||'';$('dashGroup').value=dash.groupBy||'points';drawDashList(d);
 }
 function drawDashBody(d,rebuild){
@@ -954,22 +956,48 @@ function bindDash(){
 const teamTint=team=>{try{return (team&&SBL.teamColors?.styleAttr?.(state.settings,team))||''}catch(_){return ''}};
 function sheetMatch(m,q){return !q||String(m.name).toLowerCase().includes(q)||(m.types||[]).some(x=>String(x).toLowerCase().includes(q))}
 function sheetDisplay(m){return SBL.pokemon.displayNameWithForm?.(m.name)||m.name}
+function sheetWorkbookPool(d){
+  const board=Array.isArray(d.pool)?d.pool:[];
+  const workbook=Array.isArray(state.settings?.freeAgency?.mons)?state.settings.freeAgency.mons:[];
+  if(!workbook.length)return board.map(m=>({...m,_onDraftBoard:true}));
+  const key=name=>String(SBL.pokemon?.normalizeName?.(name)||name||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  const byName=new Map(workbook.map(entry=>[key(entry?.name??entry?.species),entry]).filter(([k])=>k));
+  const merged=board.map(mon=>{
+    const fa=byName.get(key(mon.name));
+    // The published Free Agency workbook is authoritative for current point
+    // allocations and Mega classification, while the active board remains
+    // authoritative for drafted state, IDs and team ownership.
+    return {...mon,points:fa&&Number.isFinite(Number(fa.points))?Number(fa.points):Number(mon.points)||0,isMega:!!(mon.isMega||fa?.isMega||DD().isMegaMon(mon)||(fa&&DD().isMegaMon(fa))),_onDraftBoard:true};
+  });
+  const boardNames=new Set(board.map(mon=>key(mon.name)));
+  workbook.forEach(entry=>{
+    const name=String(entry?.name??entry?.species??'').trim(),k=key(name);
+    if(!name||!k||boardNames.has(k))return;
+    merged.push({id:'',name,points:Number(entry.points)||0,isMega:!!(entry.isMega||DD().isMegaMon(entry)),types:[],abilities:[],drafted:false,draftedBy:null,pickNumber:null,_onDraftBoard:false});
+  });
+  return merged;
+}
 function sheetGrid(d,q){
-  const sh=dash.sheet,pool=(d.pool||[]).filter(m=>!(sh.hideDrafted&&m.drafted));
-  const isM=m=>DD().isMegaMon(m),all=d.pool||[];
-  const cols=[...new Set(pool.filter(m=>!isM(m)).map(m=>Number(m.points)||0))].sort((a,b)=>b-a).map(p=>({label:p+(p===1?' POINT':' POINTS'),list:pool.filter(m=>!isM(m)&&(Number(m.points)||0)===p),total:all.filter(m=>!isM(m)&&(Number(m.points)||0)===p)}));
-  const megas=pool.filter(isM);if(megas.length)cols.push({label:'MEGAS',list:megas,total:all.filter(isM),mega:true});
+  const sh=dash.sheet,all=sheetWorkbookPool(d),pool=all.filter(m=>!(sh.hideDrafted&&m.drafted));
+  const missing=all.filter(m=>!m._onDraftBoard).length;
+  // Match the uploaded workbook's TIERS sheet exactly: Mega forms belong in
+  // their numeric point-allocation columns, not in a separate MEGAS column.
+  // The published Free Agency allocation is already merged into each entry
+  // by sheetWorkbookPool(), so Mega and non-Mega forms share the same grouping.
+  const pointValues=[...new Set(pool.map(m=>Number(m.points)||0))].sort((a,b)=>b-a);
+  const cols=pointValues.map(p=>({label:p+(p===1?' POINT':' POINTS'),list:pool.filter(m=>(Number(m.points)||0)===p),total:all.filter(m=>(Number(m.points)||0)===p)}));
   if(!cols.length)return '<div class="note dash-empty">Nothing to show.</div>';
   const rows=Math.max(...cols.map(c=>c.list.length));
   const cell=(m,mega)=>{
     if(!m)return '<td class="sheet-cell empty"></td>';
-    const dr=!!m.drafted,qd=dash.queue.includes(String(m.id)),bst=DD().statValue(m,'bst');
+    const dr=!!m.drafted,qd=!!m.id&&dash.queue.includes(String(m.id)),bst=DD().statValue(m,'bst');
     const types=(m.types||[]).map(x=>`<i class="sheet-ty type-${esc(String(x).toLowerCase())}" title="${esc(x)}"></i>`).join('');
-    const title=`${m.name} \u00b7 ${Number(m.points)||0} pts${bst!=null?' \u00b7 BST '+bst:''}${dr?' \u00b7 Drafted'+(m.draftedBy?' by '+m.draftedBy:''):''}`;
-    return `<td class="sheet-cell${dr?' dr':''}${qd?' q':''}${sheetMatch(m,q)?'':' dim'}"${dr?'':` data-act="q" data-id="${esc(m.id)}"`}${dr?teamTint(m.draftedBy):''} title="${esc(title)}"><span class="sheet-name">${esc(sheetDisplay(m))}</span>${mega?`<em>${Number(m.points)||0}</em>`:''}<span class="sheet-types">${types}</span>${dr&&m.draftedBy?`<small>${esc(m.draftedBy)}</small>`:''}${qd?'<b class="sheet-star" aria-label="In your queue">\u2605</b>':''}</td>`;
+    const title=`${m.name} \u00b7 ${Number(m.points)||0} pts${bst!=null?' \u00b7 BST '+bst:''}${dr?' \u00b7 Drafted'+(m.draftedBy?' by '+m.draftedBy:''):''}${!m._onDraftBoard?' \u00b7 Not yet loaded onto the draft board':''}`;
+    const canQueue=!dr&&!!m._onDraftBoard&&!!m.id;
+    return `<td class="sheet-cell${dr?' dr':''}${qd?' q':''}${!m._onDraftBoard?' sheet-not-loaded':''}${sheetMatch(m,q)?'':' dim'}"${canQueue?` data-act="q" data-id="${esc(m.id)}"`:''}${dr?teamTint(m.draftedBy):''} title="${esc(title)}"><span class="sheet-name">${esc(sheetDisplay(m))}</span>${mega?`<em>${Number(m.points)||0}</em>`:''}<span class="sheet-types">${types}</span>${dr&&m.draftedBy?`<small>${esc(m.draftedBy)}</small>`:(!m._onDraftBoard?'<small class="sheet-not-loaded-label">Not on draft board</small>':'')}${qd?'<b class="sheet-star" aria-label="In your queue">\u2605</b>':''}</td>`;
   };
   let body='';for(let r=0;r<rows;r++)body+=`<tr><th class="sheet-rn" scope="row">${r+1}</th>${cols.map(c=>cell(c.list[r],c.mega)).join('')}</tr>`;
-  return `<div class="sheet-scroll" tabindex="0" role="region" aria-label="Scrollable draft spreadsheet"><table class="sheet-grid"><thead><tr><th class="sheet-corner"></th>${cols.map(c=>`<th scope="col">${esc(c.label)}<small>${c.total.filter(m=>!m.drafted).length} of ${c.total.length} left</small></th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `${missing?`<div class="note">${missing} Pokémon from the latest Free Agency workbook (including new Mega forms) are not yet on the active draft board. A commissioner can add them using <b>League Admin → Draft Setup → Load board from Free Agency</b>.</div>`:''}<div class="sheet-scroll" tabindex="0" role="region" aria-label="Scrollable draft spreadsheet"><table class="sheet-grid"><thead><tr><th class="sheet-corner"></th>${cols.map(c=>`<th scope="col">${esc(c.label)}<small>${c.total.filter(m=>!m.drafted).length} of ${c.total.length} left</small></th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 function sheetTable(d,q){
   const sh=dash.sheet,t=myTeam();

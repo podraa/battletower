@@ -3218,6 +3218,11 @@ function renderDraft(){ return drawDraft(); }
       if(!name || /^(pokemon|pokémon|species|name|pick|roster|points?|pts?|cost|tier|value)$/i.test(name)) return;
       const key=freeAgencyKey(name);
       if(!key) return;
+      // Mega forms in tier-column workbooks inherit the numeric point value
+      // of their column; the word 'Mega' identifies the form, not a separate
+      // unpriced category. Preserve explicit metadata when supplied.
+      const inferredMega=/^(?:mega\s+|.+[- ]mega(?:[- ]?[xyz])?$)/i.test(name);
+      if(inferredMega && !meta.isMega) meta={...meta,isMega:true};
       const numeric=Number(points);
       if(!Number.isFinite(numeric) || numeric<0 || numeric>1000) return;
       if(seen.has(key)){
@@ -3248,15 +3253,17 @@ function renderDraft(){ return drawDraft(); }
         headers.forEach((h,c)=>{
           const pts=pointHeader(h);
           if(pts!==null) tierCols.push({c,points:pts});
-          else if(isMegaHeader(h)) tierCols.push({c,points:1,isMega:true});
+          else if(isMegaHeader(h)) tierCols.push({c,points:null,isMega:true});
         });
         if(!tierCols.length) continue;
         for(const tier of tierCols){
           for(let r=hr+1;r<rows.length;r++){
             const value=rows[r]?.[tier.c];
             if(value===undefined||value===null||String(value).trim()==='') continue;
-            const meta=tier.isMega?{isMega:true,costTbd:true}:{};
-            add(value,tier.points,meta);
+            // A standalone Megas column has no numeric tier. Do not invent a
+            // cost for it; require a real points column or explicit cost table.
+            if(tier.points===null) continue;
+            add(value,tier.points,tier.isMega?{isMega:true}:{});
           }
         }
         if(out.length>before){ sourceSheets.push(sheetName); sheetCount=out.length-before; break; }
@@ -3316,13 +3323,43 @@ function renderDraft(){ return drawDraft(); }
 
   async function publishFreeAgency(pool,sourceName){
     requireAdmin();
-    const mons=pool.map(m=>({name:String(m.name||'').trim(),points:Number(m.points)||0,...(m.isMega?{isMega:true,costTbd:true}:{})})).filter(m=>m.name);
+    const mons=pool.map(m=>({name:String(m.name||'').trim(),points:Number(m.points)||0,...(m.isMega?{isMega:true}:{})})).filter(m=>m.name);
     if(!mons.length) throw new Error('Free Agency pool is empty.');
     STATE.settings=STATE.settings||{};
+
+    // Role protection boundary: workbook uploads may replace pool membership,
+    // names and point costs, but must never replace role metadata. Keep all
+    // assignments (including entries temporarily absent from this workbook)
+    // and merge equivalent keys rather than rebuilding assignments from mons.
+    const prior=STATE.settings;
+    const cloneMap=value=>value&&typeof value==='object'&&!Array.isArray(value)?{...value}:{};
+    const protectedRoles={
+      pokemonRoleAssignments:cloneMap(prior.pokemonRoleAssignments),
+      pokemonRoleManual:cloneMap(prior.pokemonRoleManual),
+      pokemonRoleAuto:cloneMap(prior.pokemonRoleAuto),
+      pokemonRoleCatalog:Array.isArray(prior.pokemonRoleCatalog)?prior.pokemonRoleCatalog.slice():[],
+      pokemonRoleFormat:prior.pokemonRoleFormat
+    };
+    // Canonicalise equivalent Pokémon keys without discarding any roles.
+    const canonicalKey=value=>String(value||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/♀/g,'-f').replace(/♂/g,'-m').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+    const mergeAssignments=source=>{
+      const merged={};
+      Object.entries(source).forEach(([key,roles])=>{
+        const canonical=canonicalKey(key)||key;
+        if(Array.isArray(roles)) merged[canonical]=[...new Set([...(merged[canonical]||[]),...roles])];
+        else if(roles!==undefined) merged[canonical]=roles;
+      });
+      return merged;
+    };
+    protectedRoles.pokemonRoleAssignments=mergeAssignments(protectedRoles.pokemonRoleAssignments);
+    protectedRoles.pokemonRoleManual=mergeAssignments(protectedRoles.pokemonRoleManual);
+    protectedRoles.pokemonRoleAuto=mergeAssignments(protectedRoles.pokemonRoleAuto);
+
     STATE.settings.freeAgency={mons,source:String(sourceName||'Workbook'),updatedAt:new Date().toISOString()};
+    Object.assign(STATE.settings,protectedRoles);
     ROLE_EDITOR_POKEMON='';ROLE_STATUS_MESSAGE='';
     await saveSharedState();
-    await logAdminAction('publish_free_agency', `Published Free Agency with ${mons.length} Pokémon from ${String(sourceName||'Workbook')}.`, {count:mons.length, source:String(sourceName||'Workbook')});
+    await logAdminAction('publish_free_agency', `Published Free Agency with ${mons.length} Pokémon from ${String(sourceName||'Workbook')}; existing manual and automatic role assignments were preserved.`, {count:mons.length, source:String(sourceName||'Workbook'), protectedRoleAssignments:Object.keys(protectedRoles.pokemonRoleAssignments).length, protectedManualAssignments:Object.keys(protectedRoles.pokemonRoleManual).length, protectedAutomaticAssignments:Object.keys(protectedRoles.pokemonRoleAuto).length});
   }
 
   const ROLE_FORMAT_FALLBACKS=[
@@ -3338,10 +3375,14 @@ function renderDraft(){ return drawDraft(); }
   let ROLE_EDITOR_POKEMON='';
   let ROLE_STATUS_MESSAGE='';
   const roleKey=name=>String(name||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/♀/g,'-f').replace(/♂/g,'-m').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  // Admin has its own page bundle and does not load roster-analysis.js. Keep the
+  // display-name mapping local so every Admin role surface is correct regardless
+  // of script load order; never change the persisted/API role identifier.
+  const roleLabelAdmin=value=>{const spaced=String(value??'').trim().replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[._-]+/g,' ').replace(/\s+/g,' ').trim();if(/^(?:cleric|celric)$/i.test(spaced))return 'Recovery';if(/^speed control$/i.test(spaced))return 'Sticky Webs';if(/^hazard setter$/i.test(spaced))return '';if(/^stealth rock setter$/i.test(spaced))return 'Stealth Rock';if(/^spikes setter$/i.test(spaced))return 'Spikes';if(/^toxic spikes setter$/i.test(spaced))return 'Toxic Spikes';if(/^sticky web(?: setter|s)?$/i.test(spaced))return 'Sticky Webs';return spaced.replace(/\b\w/g,c=>c.toUpperCase());};
   const roleAssignments=()=>STATE.settings?.pokemonRoleAssignments&&typeof STATE.settings.pokemonRoleAssignments==='object'?STATE.settings.pokemonRoleAssignments:{};
   const roleManual=()=>STATE.settings?.pokemonRoleManual&&typeof STATE.settings.pokemonRoleManual==='object'?STATE.settings.pokemonRoleManual:{};
   const roleAuto=()=>STATE.settings?.pokemonRoleAuto&&typeof STATE.settings.pokemonRoleAuto==='object'?STATE.settings.pokemonRoleAuto:{};
-  const rolesForAdmin=name=>{const v=roleAssignments()[roleKey(name)];return Array.isArray(v)?v:[];};
+  const rolesForAdmin=name=>{const v=roleAssignments()[roleKey(name)];const values=Array.isArray(v)?v:[];const seen=new Set();return values.filter(r=>{const label=roleLabelAdmin(r);if(!label)return false;const key=label.toLocaleLowerCase().replace(/\s+/g,' ').trim();if(seen.has(key))return false;seen.add(key);return true;});};
   function roleApiCandidates(name){
     const raw=String(name||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[’']/g,'').replace(/[♀]/g,'-f').replace(/[♂]/g,'-m').replace(/[._]/g,'-').replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'').replace(/-+/g,'-').replace(/^-|-$/g,'');
     const out=[raw];
@@ -3378,21 +3419,71 @@ function renderDraft(){ return drawDraft(); }
       button.disabled=true;try{STATE.settings.pokemonRoleFormat=format;await saveSettings();await logAdminAction('set_pokemon_role_format',`Set Pokékipe role suggestion format to ${format}.`,{format});if(status)status.textContent=`Saved ${ROLE_FORMATS.find(x=>x.format_id===format)?.label||format}.`;}catch(error){if(status)status.textContent='Could not save: '+(error.message||String(error));}finally{button.disabled=false;}
     });
   }
+  let ROLE_HAZARD_DATA=null;
+  async function loadRoleHazardData(){
+    if(ROLE_HAZARD_DATA)return ROLE_HAZARD_DATA;
+    const [dexResult,learnResult]=await Promise.allSettled([
+      fetch('https://play.pokemonshowdown.com/data/pokedex.json').then(r=>{if(!r.ok)throw new Error(`Pokémon Showdown Pokédex HTTP ${r.status}`);return r.json()}),
+      fetch('https://play.pokemonshowdown.com/data/learnsets.json').then(r=>{if(!r.ok)throw new Error(`Pokémon Showdown learnsets HTTP ${r.status}`);return r.json()})
+    ]);
+    ROLE_HAZARD_DATA={pokedex:dexResult.status==='fulfilled'?dexResult.value:{},learnsets:learnResult.status==='fulfilled'?learnResult.value:{},errors:[dexResult,learnResult].filter(x=>x.status==='rejected').map(x=>String(x.reason?.message||x.reason))};
+    if(!Object.keys(ROLE_HAZARD_DATA.learnsets).length)throw new Error('Could not load Pokémon Showdown learnsets for hazard-role detection. '+ROLE_HAZARD_DATA.errors.join('; '));
+    return ROLE_HAZARD_DATA;
+  }
+  function showdownEntry(name,data,source){
+    const candidates=[...(SBL.pokemon?.showdownStatsIdCandidates?.(name)||[]),...roleApiCandidates(name)];
+    for(const id of candidates){if(source[id])return source[id];}
+    return null;
+  }
+  function hazardRoleNames(name,data){
+    const entry=showdownEntry(name,data,data.learnsets),learnset=entry?.learnset||entry||{},roles=[];
+    if(learnset.stealthrock)roles.push('Stealth Rock Setter');
+    if(learnset.spikes)roles.push('Spikes Setter');
+    if(learnset.toxicspikes)roles.push('Toxic Spikes Setter');
+    if(learnset.stickyweb)roles.push('Sticky Web Setter');
+    return roles;
+  }
+  function abilitySetterRole(name,row,data){
+    const apiAbilities=Array.isArray(row?.abilities)?row.abilities.map(a=>String(typeof a==='string'?a:(a?.name||a?.ability||''))).join(' '):String(row?.abilities||'');
+    const dex=showdownEntry(name,data,data.pokedex);
+    const abilities=(apiAbilities+' '+Object.values(dex?.abilities||{}).join(' ')).toLowerCase();
+    if(/drizzle|drought|sand stream|snow warning|desolate land|primordial sea|orichalcum pulse/.test(abilities))return 'Weather Setter';
+    if(/electric surge|grassy surge|psychic surge|misty surge/.test(abilities))return 'Terrain Setter';
+    return '';
+  }
   async function loadRoleMeta(){
     const format=String(STATE.settings?.pokemonRoleFormat||'gen9ou');
     if(ROLE_META_CACHE?.format===format)return ROLE_META_CACHE;
     const payload=await requestRoleApi({action:'meta',formatId:format});
     const rows=Array.isArray(payload?.pokemon)?payload.pokemon:(Array.isArray(payload?.results)?payload.results:[]);
-    const index=new Map(),catalogue=new Set();
-    rows.forEach(row=>{
-      const name=String(row?.pokemon_name||row?.name||'').trim();if(!name)return;
-      const roles=Array.isArray(row?.roles)?[...new Set(row.roles.filter(x=>typeof x==='string'&&x.trim()).map(x=>x.trim()))]:[];
-      roleApiCandidates(name).forEach(k=>index.set(k,roles));roles.forEach(r=>catalogue.add(r));
+    const hazardData=await loadRoleHazardData(),index=new Map(),catalogue=new Set(),apiRows=new Map();
+    rows.forEach(row=>{const name=String(row?.pokemon_name||row?.name||'').trim();if(name)apiRows.set(roleKey(name),row);});
+    // Include every published draft-pool Pokémon, not only Pokémon present in
+    // the API's format-specific role response. This is important in draft:
+    // move eligibility matters even when a Pokémon is not an OU usage pick.
+    const pool=Array.isArray(STATE.settings?.freeAgency?.mons)?STATE.settings.freeAgency.mons:[];
+    const names=new Map();rows.forEach(row=>{const n=String(row?.pokemon_name||row?.name||'').trim();if(n)names.set(roleKey(n),n);});
+    pool.forEach(mon=>{const n=String(mon?.name||'').trim();if(n)names.set(roleKey(n),n);});
+    names.forEach(name=>{
+      const row=apiRows.get(roleKey(name))||null;
+      // Keep every Pokékipe role. Supplement with learnset eligibility for
+      // each entry hazard; draft usefulness is not restricted to OU viability.
+      let roles=Array.isArray(row?.roles)?[...new Set(row.roles.filter(x=>typeof x==='string'&&x.trim()).map(x=>x.trim()).filter(x=>!/^hazard[ _-]*setter$/i.test(x)&&!/^annoying[ _-]*cunt$/i.test(x)).map(x=>/^speed[ _-]*control$/i.test(x)?'Sticky Webs':x))]:[];
+      const setter=abilitySetterRole(name,row,hazardData);
+      if(Object.keys(hazardData.pokedex||{}).length){roles=roles.filter(r=>!/^weather setter$|^terrain setter$/i.test(r));if(setter)roles.push(setter);}
+      hazardRoleNames(name,hazardData).forEach(r=>{if(!roles.some(x=>roleLabelAdmin(x).toLowerCase()===roleLabelAdmin(r).toLowerCase()))roles.push(r)});
+      roles=roles.filter(Boolean).filter((r,i,a)=>a.findIndex(x=>roleLabelAdmin(x).toLowerCase()===roleLabelAdmin(r).toLowerCase())===i);
+      roleApiCandidates(name).forEach(k=>index.set(k,roles));roles.forEach(r=>{if(roleLabelAdmin(r))catalogue.add(r)});
     });
+    ['Weather Setter','Terrain Setter','Stealth Rock','Spikes','Toxic Spikes','Sticky Webs','Annoying Cunt'].forEach(r=>catalogue.add(r));
+    for(const r of [...catalogue])if(/^hazard[ _-]*setter$/i.test(r))catalogue.delete(r);
     ROLE_META_CACHE={format,rows,index,catalogue:[...catalogue].sort((a,b)=>a.localeCompare(b))};
     return ROLE_META_CACHE;
   }
-  function rolesForApiName(meta,name){for(const candidate of roleApiCandidates(name)){if(meta.index.has(candidate))return meta.index.get(candidate)||[];}return null;}
+  function rolesForApiName(meta,name){
+    let roles=null;for(const candidate of roleApiCandidates(name)){if(meta.index.has(candidate)){roles=[...(meta.index.get(candidate)||[])];break;}}
+    return roles;
+  }
   function renderRoleAssignmentPanel(current){
     const mons=current.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name)));
     const selected=mons.find(m=>roleKey(m.name)===roleKey(ROLE_EDITOR_POKEMON))||mons[0];
@@ -3400,10 +3491,11 @@ function renderDraft(){ return drawDraft(); }
     const key=selected?roleKey(selected.name):'';
     const assigned=selected?rolesForAdmin(selected.name):[];
     const catalog=ROLE_META_CACHE?.catalogue||[];
-    const options=[...new Set([...catalog,...assigned])].sort((a,b)=>a.localeCompare(b));
+    const roleValues=values=>{const seen=new Set(),out=[];for(const value of values){const label=roleLabelAdmin(value);if(!label)continue;const key=label.toLocaleLowerCase().replace(/\s+/g,' ').trim();if(seen.has(key))continue;seen.add(key);out.push(value);}return out;};
+    const options=roleValues([...catalog,...assigned,'Annoying Cunt','Disruptor']).filter(r=>roleLabelAdmin(r)).sort((a,b)=>roleLabelAdmin(a).localeCompare(roleLabelAdmin(b)));
     const manual=!!(key&&roleManual()[key]);
     const autoFormat=key?roleAuto()[key]:'';
-    return `<section class="panel" id="pokemonRoleAssignmentPanel"><div class="section-head-row"><div><div class="admin-dashboard-kicker">FREE AGENCY ROLE MANAGEMENT</div><h2>Pokémon role assignments</h2><p class="note">Assignments are global across all franchises. A Pokémon can have multiple roles. Automatic assignment uses every role returned for each Pokémon in the selected format; manual edits are protected from future bulk refreshes.</p></div><span class="badge">ADMIN ONLY</span></div><div class="row" style="align-items:flex-end;margin:12px 0"><div><strong>Suggestion format:</strong> ${SBL.pokemon.escapeHtml(STATE.settings?.pokemonRoleFormat||'gen9ou')}</div><div style="flex:0"><button type="button" class="ghost" id="loadRoleCatalogueBtn">Load role catalogue</button></div><div style="flex:0"><button type="button" class="primary" id="autoAssignFreeAgencyRolesBtn">Auto-assign from Free Agency board</button></div></div><div class="note" id="freeAgencyRoleStatus" role="status">${SBL.pokemon.escapeHtml(ROLE_STATUS_MESSAGE)}</div><div class="row" style="align-items:flex-end;margin-top:14px"><div><label for="roleAssignmentPokemon">Pokémon</label><select id="roleAssignmentPokemon">${mons.map(m=>`<option value="${SBL.pokemon.escapeHtml(m.name)}" ${selected&&roleKey(m.name)===key?'selected':''}>${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(m.name)||m.name)}</option>`).join('')}</select></div><div style="flex:0"><button type="button" class="ghost" id="resetRoleAssignmentBtn" ${selected?'':'disabled'}>Reset to automatic</button></div><div style="flex:0"><button type="button" class="primary" id="saveRoleAssignmentBtn" ${selected?'':'disabled'}>Save manual roles</button></div></div>${selected?`<div class="note">${manual?'Manual assignment · protected from automatic updates':autoFormat?`Automatically assigned from ${SBL.pokemon.escapeHtml(autoFormat)}`:'Not yet automatically assigned'}</div>`:''}<div class="role-admin-options" id="roleAssignmentOptions">${options.length?options.map(r=>`<label class="role-admin-option"><input type="checkbox" value="${SBL.pokemon.escapeHtml(r)}" ${assigned.includes(r)?'checked':''}>${SBL.pokemon.escapeHtml(r)}</label>`).join(''):'<div class="note">Load the role catalogue to see all classifications available in this format.</div>'}</div><div class="note" style="margin-top:14px"><strong>Free Agency board coverage:</strong> ${mons.filter(m=>rolesForAdmin(m.name).length).length} of ${mons.length} Pokémon currently have roles assigned · ${Object.keys(roleManual()).filter(k=>roleManual()[k]).length} manual overrides.</div><div style="max-height:420px;overflow:auto;margin-top:12px"><table><thead><tr><th>Pokémon</th><th>Points</th><th>Assigned roles</th><th>Assignment source</th><th></th></tr></thead><tbody>${mons.map(m=>{const k=roleKey(m.name),rs=rolesForAdmin(m.name),source=roleManual()[k]?'Manual':roleAuto()[k]?`Auto · ${roleAuto()[k]}`:'Unassigned';return `<tr><td>${SBL.pokemon.spriteMarkup(m.name,'sprite')} ${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(m.name)||m.name)}</td><td class="num">${Number(m.points)||0}</td><td>${rs.length?rs.map(SBL.pokemon.escapeHtml).join(' · '):'<span class="note">—</span>'}</td><td>${SBL.pokemon.escapeHtml(source)}</td><td><button type="button" class="ghost small" data-edit-pokemon-roles="${SBL.pokemon.escapeHtml(m.name)}">Edit</button></td></tr>`;}).join('')||'<tr><td colspan="5" class="note">Publish a Free Agency board first.</td></tr>'}</tbody></table></div></section>`;
+    return `<section class="panel" id="pokemonRoleAssignmentPanel"><div class="section-head-row"><div><div class="admin-dashboard-kicker">FREE AGENCY ROLE MANAGEMENT</div><h2>Pokémon role assignments</h2><p class="note">Assignments are global across all franchises. A Pokémon can have multiple roles. Automatic assignment uses every role returned for each Pokémon in the selected format; manual edits are protected from future bulk refreshes.</p></div><span class="badge">ADMIN ONLY</span></div><div class="row" style="align-items:flex-end;margin:12px 0"><div><strong>Suggestion format:</strong> ${SBL.pokemon.escapeHtml(STATE.settings?.pokemonRoleFormat||'gen9ou')}</div><div style="flex:0"><button type="button" class="ghost" id="loadRoleCatalogueBtn">Load role catalogue</button></div><div style="flex:0"><button type="button" class="primary" id="autoAssignFreeAgencyRolesBtn">Auto-assign from Free Agency board</button></div></div><div class="note" id="freeAgencyRoleStatus" role="status">${SBL.pokemon.escapeHtml(ROLE_STATUS_MESSAGE)}</div><div class="row" style="align-items:flex-end;margin-top:14px"><div><label for="roleAssignmentPokemon">Pokémon</label><select id="roleAssignmentPokemon">${mons.map(m=>`<option value="${SBL.pokemon.escapeHtml(m.name)}" ${selected&&roleKey(m.name)===key?'selected':''}>${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(m.name)||m.name)}</option>`).join('')}</select></div><div style="flex:0"><button type="button" class="ghost" id="resetRoleAssignmentBtn" ${selected?'':'disabled'}>Admin: reset to automatic</button></div><div style="flex:0"><button type="button" class="primary" id="saveRoleAssignmentBtn" ${selected?'':'disabled'}>Save manual roles</button></div></div>${selected?`<div class="note">${manual?'Manual assignment · protected from automatic updates':autoFormat?`Automatically assigned from ${SBL.pokemon.escapeHtml(autoFormat)}`:'Not yet automatically assigned'}</div>`:''}<div class="role-admin-options" id="roleAssignmentOptions">${options.length?options.map(r=>{const label=roleLabelAdmin(r);return `<label class="role-admin-option"><input type="checkbox" value="${SBL.pokemon.escapeHtml(r)}" ${assigned.some(x=>(roleLabelAdmin(x)).toLowerCase()===(roleLabelAdmin(r)).toLowerCase())?'checked':''}>${SBL.pokemon.escapeHtml(label)}</label>`;}).join(''):'<div class="note">Load the role catalogue to see all classifications available in this format.</div>'}</div><div class="note" style="margin-top:14px"><strong>Free Agency board coverage:</strong> ${mons.filter(m=>rolesForAdmin(m.name).length).length} of ${mons.length} Pokémon currently have roles assigned · ${Object.keys(roleManual()).filter(k=>roleManual()[k]).length} manual overrides.</div><div style="max-height:420px;overflow:auto;margin-top:12px"><table><thead><tr><th>Pokémon</th><th>Points</th><th>Assigned roles</th><th>Assignment source</th><th></th></tr></thead><tbody>${mons.map(m=>{const k=roleKey(m.name),rs=rolesForAdmin(m.name),source=roleManual()[k]?'Manual':roleAuto()[k]?`Auto · ${roleAuto()[k]}`:'Unassigned';return `<tr><td>${SBL.pokemon.spriteMarkup(m.name,'sprite')} ${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(m.name)||m.name)}</td><td class="num">${Number(m.points)||0}</td><td>${rs.length?rs.map(r=>SBL.pokemon.escapeHtml(roleLabelAdmin(r))).join(' · '):'<span class="note">—</span>'}</td><td>${SBL.pokemon.escapeHtml(source)}</td><td><button type="button" class="ghost small" data-edit-pokemon-roles="${SBL.pokemon.escapeHtml(m.name)}">Edit</button></td></tr>`;}).join('')||'<tr><td colspan="5" class="note">Publish a Free Agency board first.</td></tr>'}</tbody></table></div></section>`;
   }
   async function wireRoleAssignmentPanel(current){
     const status=document.getElementById('freeAgencyRoleStatus');
@@ -3420,8 +3512,9 @@ function renderDraft(){ return drawDraft(); }
         const meta=await loadRoleMeta(),next={...roleAssignments()},manual={...roleManual()},auto={...roleAuto()};let assigned=0,missing=0,protectedCount=0;
         current.forEach(mon=>{
           const k=roleKey(mon.name);const hasLegacyAssignment=Array.isArray(next[k])&&!Object.prototype.hasOwnProperty.call(auto,k)&&!Object.prototype.hasOwnProperty.call(manual,k);
-          if(manual[k]||hasLegacyAssignment){if(hasLegacyAssignment)manual[k]=true;protectedCount++;return;}
-          const roles=rolesForApiName(meta,mon.name);
+          // Manual and legacy unlabelled assignments are authoritative: bulk API refreshes and clear/missing-result paths must never delete or replace them.
+          if(manual[k]===true||hasLegacyAssignment){if(hasLegacyAssignment)manual[k]=true;protectedCount++;return;}
+          const roles=(rolesForApiName(meta,mon.name)||[]).filter(r=>!/^annoying[ _-]*cunt$/i.test(r)&&!/^hazard[ _-]*setter$/i.test(r));
           if(roles&&roles.length){next[k]=roles;auto[k]=meta.format;assigned++;}
           else{delete next[k];delete auto[k];missing++;}
         });
@@ -3463,7 +3556,7 @@ function renderDraft(){ return drawDraft(); }
       </div>
       <div class="panel">
         <h2>Published Free Agency <span class="badge">${current.length} Pokémon</span></h2>
-        ${current.length?`<div class="note">${SBL.pokemon.escapeHtml(STATE.settings?.freeAgency?.source||'Workbook')} · ${tiers.length} point tiers</div><div style="max-height:380px;overflow:auto;margin-top:12px"><table><thead><tr><th>Pokémon</th><th>Points</th><th>Roles</th></tr></thead><tbody>${current.map(m=>`<tr><td>${SBL.pokemon.spriteMarkup(m.name,'sprite')} ${SBL.pokemon.escapeHtml(m.name)}</td><td class="num">${Number(m.points)||0}</td><td>${rolesForAdmin(m.name).map(SBL.pokemon.escapeHtml).join(' · ')||'<span class="note">Unassigned</span>'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">No Free Agency pool published yet.</div>'}
+        ${current.length?`<div class="note">${SBL.pokemon.escapeHtml(STATE.settings?.freeAgency?.source||'Workbook')} · ${tiers.length} point tiers</div><div style="max-height:380px;overflow:auto;margin-top:12px"><table><thead><tr><th>Pokémon</th><th>Points</th><th>Roles</th></tr></thead><tbody>${current.map(m=>`<tr><td>${SBL.pokemon.spriteMarkup(m.name,'sprite')} ${SBL.pokemon.escapeHtml(m.name)}</td><td class="num">${Number(m.points)||0}</td><td>${rolesForAdmin(m.name).map(r=>SBL.pokemon.escapeHtml(roleLabelAdmin(r))).join(' · ')||'<span class="note">Unassigned</span>'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">No Free Agency pool published yet.</div>'}
       </div>
       ${renderRoleAssignmentPanel(current)}`;
 
@@ -3475,7 +3568,7 @@ function renderDraft(){ return drawDraft(); }
       try{
         const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});
         const pool=parseFreeAgencyWorkbook(wb);
-        status.innerHTML=`<div class="panel" style="padding:12px"><strong>Workbook imported successfully</strong><div class="note">Found ${pool.length} Pokémon across ${new Set(pool.map(x=>x.points)).size} point values in ${pool.sourceSheets?.length||1} worksheet(s), including ${pool.filter(x=>x.isMega).length} Mega forms. Mega costs are marked TBD and temporarily set to 1 point for sprite testing. ${pool.sourceSheets?.length?`Source: ${SBL.pokemon.escapeHtml(pool.sourceSheets.join(', '))}.`:``}</div>${pool.importWarnings?.length?`<div class="note danger">Review before publishing:<ul>${pool.importWarnings.map(w=>`<li>${SBL.pokemon.escapeHtml(w)}</li>`).join('')}</ul></div>`:''}<div style="max-height:380px;overflow:auto;margin-top:12px"><table><thead><tr><th>Pokémon</th><th>Points</th><th>Category</th></tr></thead><tbody>${pool.map(m=>`<tr><td>${SBL.pokemon.spriteMarkup(m.name,'sprite')} ${SBL.pokemon.escapeHtml(m.name)}</td><td class="num">${m.points}</td><td>${m.isMega?'Mega · cost TBD':'Standard'}</td></tr>`).join('')}</tbody></table></div><div class="foot-actions" style="margin-top:12px"><button class="primary" id="confirmFreeAgency">Publish Free Agency</button><button class="ghost" id="cancelFreeAgency">Cancel</button></div></div>`;
+        status.innerHTML=`<div class="panel" style="padding:12px"><strong>Workbook imported successfully</strong><div class="note">Found ${pool.length} Pokémon across ${new Set(pool.map(x=>x.points)).size} point values in ${pool.sourceSheets?.length||1} worksheet(s), including ${pool.filter(x=>x.isMega).length} Mega forms. Mega point values are taken from their numeric tier columns in the workbook. ${pool.sourceSheets?.length?`Source: ${SBL.pokemon.escapeHtml(pool.sourceSheets.join(', '))}.`:``}</div>${pool.importWarnings?.length?`<div class="note danger">Review before publishing:<ul>${pool.importWarnings.map(w=>`<li>${SBL.pokemon.escapeHtml(w)}</li>`).join('')}</ul></div>`:''}<div style="max-height:380px;overflow:auto;margin-top:12px"><table><thead><tr><th>Pokémon</th><th>Points</th><th>Category</th></tr></thead><tbody>${pool.map(m=>`<tr><td>${SBL.pokemon.spriteMarkup(m.name,'sprite')} ${SBL.pokemon.escapeHtml(m.name)}</td><td class="num">${m.points}</td><td>${m.isMega?'Mega':'Standard'}</td></tr>`).join('')}</tbody></table></div><div class="foot-actions" style="margin-top:12px"><button class="primary" id="confirmFreeAgency">Publish Free Agency</button><button class="ghost" id="cancelFreeAgency">Cancel</button></div></div>`;
         document.getElementById('cancelFreeAgency').onclick=renderFreeAgency;
         document.getElementById('confirmFreeAgency').onclick=async()=>{const b=document.getElementById('confirmFreeAgency');b.disabled=true;try{await publishFreeAgency(pool,file.name);renderFreeAgency()}catch(e){status.innerHTML='<div class="note danger">'+SBL.pokemon.escapeHtml(e.message)+'</div>';b.disabled=false;}};
       }catch(e){status.innerHTML='<div class="note danger">'+SBL.pokemon.escapeHtml(e.message)+'</div>'}
@@ -4389,6 +4482,11 @@ function renderDraft(){ return drawDraft(); }
   }
 
   async function drawAdminLog(){
+    const logLeagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
+    if(logLeagueId){
+      await loadLeagueProfileCache(logLeagueId,{refresh:true});
+      try{const {data,error}=await supabase.rpc('sbl_admin_list_audit_users',{p_league_id:logLeagueId});if(error)throw error;LEAGUE_PROFILE_CACHE=new Map((data||[]).map(p=>[String(p.id),p]));LEAGUE_PROFILE_CACHE_LEAGUE=logLeagueId;LEAGUE_PROFILE_CACHE_READY=true;}catch(error){console.warn('Admin audit identity directory unavailable:',error);}
+    }
     let logs = [];
     let loadError = '';
     try{
@@ -4432,7 +4530,7 @@ function renderDraft(){ return drawDraft(); }
             <div class="admin-log-time">${SBL.pokemon.escapeHtml(new Date(log.created_at).toLocaleString())}</div>
             <div class="admin-log-action"><strong>${SBL.pokemon.escapeHtml(log.action_type || 'action')}</strong></div>
             <div class="admin-log-message">${SBL.pokemon.escapeHtml(log.message || '')}</div>
-            <div class="admin-log-admin"><span class="admin-log-admin-label">Admin</span><strong>${SBL.pokemon.escapeHtml(displayNameForUser(log.admin_id))}</strong></div>
+            <div class="admin-log-admin"><span class="admin-log-admin-label">Admin</span><strong>${SBL.pokemon.escapeHtml((displayNameForUser(log.admin_id)!=='Unknown user'?displayNameForUser(log.admin_id):String(log.admin_email||'').trim()||'Unknown user'))}</strong></div>
           </div>`).join('')}</div>` : ''}
       </div>`;
     document.getElementById('refreshAdminLogBtn')?.addEventListener('click', drawAdminLog);

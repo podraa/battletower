@@ -65,8 +65,8 @@
   }
   function roleKey(name){return String(name||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/♀/g,'-f').replace(/♂/g,'-m').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');}
   function roleAssignments(settings){const value=settings?.pokemonRoleAssignments;return value&&typeof value==='object'?value:{};}
-  function rolesFor(name,settings){const value=roleAssignments(settings)[roleKey(name)];return Array.isArray(value)?value:[];}
-  function allRoles(settings){return [...new Set([...(Array.isArray(settings?.pokemonRoleCatalog)?settings.pokemonRoleCatalog:[]),...Object.values(roleAssignments(settings)).flatMap(v=>Array.isArray(v)?v:[])])].sort((a,b)=>a.localeCompare(b));}
+  function rolesFor(name,settings){const value=roleAssignments(settings)[roleKey(name)];const roles=Array.isArray(value)?value:[];return SBL.rosterAnalysis?.uniqueRoles?SBL.rosterAnalysis.uniqueRoles(roles):[...new Set(roles)];}
+  function allRoles(settings){const values=[...(Array.isArray(settings?.pokemonRoleCatalog)?settings.pokemonRoleCatalog:[]),...Object.values(roleAssignments(settings)).flatMap(v=>Array.isArray(v)?v:[])];const roles=SBL.rosterAnalysis?.uniqueRoles?SBL.rosterAnalysis.uniqueRoles(values):[...new Set(values)];return roles.sort((a,b)=>(SBL.rosterAnalysis?.roleLabel?.(a)||a).localeCompare(SBL.rosterAnalysis?.roleLabel?.(b)||b));}
   function analysisMarkup(team,list,settings){
     if(!window.SBL?.rosterAnalysis?.render)return '';
     const entries=(Array.isArray(list)?list:[]).map(mon=>({name:canonicalName(mon?.name||mon),types:Array.isArray(mon?.types)&&mon.types.length?mon.types:(SBL.pokemonTypes?.lookupTypes(mon?.name||mon)||[]),roles:rolesFor(mon?.name||mon,settings)}));

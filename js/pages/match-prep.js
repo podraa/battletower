@@ -43,6 +43,8 @@ const supabase=window.SBL.getSupabase();
 let STATE={profileUserId:'',replays:{},teamMap:{},settings:{caseInsensitiveNames:true,rosters:{}},profileTeam:'',compareOpponent:'',comparePokemon:'',setPokemon:'',prepSection:'overview',prepCoverageMon:'',prepSwitchAtkItem:'',prepSwitchDefItem:'',prepSwitchWeather:'',prepSwitchTerrain:'',prepSwitchHits:'',prepSwitchAtkEVs:{hp:0,atk:0,def:0,spa:0,spd:0,spe:0},prepSwitchAttackerSide:'opponent'};
 const $=id=>document.getElementById(id);
 function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+function roleDisplayLabel(value){const spaced=String(value??'').trim().replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[._-]+/g,' ').replace(/\s+/g,' ').trim();if(/^(?:cleric|celric)$/i.test(spaced))return 'Recovery';if(/^speed control$/i.test(spaced)||/^sticky web(?: setter|s)?$/i.test(spaced))return 'Sticky Webs';if(/^hazard setter$/i.test(spaced))return '';if(/^stealth rock setter$/i.test(spaced))return 'Stealth Rock';if(/^spikes setter$/i.test(spaced))return 'Spikes';if(/^toxic spikes setter$/i.test(spaced))return 'Toxic Spikes';return spaced.replace(/\b\w/g,c=>c.toUpperCase());}
+function roleDisplayList(values){const seen=new Set(),out=[];(Array.isArray(values)?values:[]).forEach(value=>{const label=roleDisplayLabel(value);const key=label.toLocaleLowerCase();if(label&&!seen.has(key)){seen.add(key);out.push(label);}});return out;}
 function norm(s){
   const raw=String(s??'').trim().toLowerCase().replace(/[-_]/g,' ');
   // A legacy replay contains Comfey with the species text reversed as "yefmoc".
@@ -773,10 +775,12 @@ function scoutingEffectiveness(mult){if(mult===null)return 'Unknown';if(mult>=4)
 function fmtMult(v){if(v===null)return '?';if(v===0)return '0×';if(v===.25)return '¼×';if(v===.5)return '½×';return Number.isInteger(v)?v+'×':v.toFixed(2)+'×'}
 function moveKey(s){return norm(s).replace(/[^a-z0-9]/g,'')}
 const ROLE_RULES=[
-  ['Hazard setter',['stealthrock','spikes','toxicspikes','stickyweb']],
+  ['Stealth Rock',['stealthrock']],
+  ['Spikes',['spikes']],
+  ['Toxic Spikes',['toxicspikes']],
   ['Hazard remover',['rapidspin','defog','mortalspin']],
   ['Setup sweeper',['swordsdance','nastyplot','dragondance','quiverdance','calmmind','bulkup','agility','shellsmash','shiftgear','autotomize','curse','workup','tailglow','filletaway']],
-  ['Speed control',['tailwind','trickroom','electroweb','icywind','stringshot']],
+  ['Sticky Webs',['stickyweb']],
   ['Status spreader',['willowisp','thunderwave','toxic','spore','sleeppowder','stunspore','glare','yawn']],
   ['Pivot',['uturn','voltswitch','flipturn','partingshot','teleport']],
   ['Screens',['reflect','lightscreen','auroraveil']],
@@ -784,20 +788,25 @@ const ROLE_RULES=[
   ['Physical attacker',['closecombat','earthquake','flareblitz','bravebird','stoneedge','knockoff','crunch','ironhead','playrough','liquidation','drainpunch','machpunch','suckerpunch','bulletpunch']],
   ['Special attacker',['fireblast','flamethrower','hydropump','surf','icebeam','thunderbolt','thunder','shadowball','darkpulse','psychic','psychic','moonblast','energyball','gigadrain','makeitrain','dracometeor','dragonpulse']],
 ];
-function inferRoles(m){const moves=new Set((m.gameSets||[]).flatMap(g=>g.moves||[]).map(moveKey));const roles=[];for(const [role,keys] of ROLE_RULES){if(keys.some(k=>moves.has(k)))roles.push(role)}return roles.length?roles:['Unclassified'];}
+function inferRoles(m){const moves=new Set((m.gameSets||[]).flatMap(g=>g.moves||[]).map(moveKey));const roles=[];for(const [role,keys] of ROLE_RULES){if(keys.some(k=>moves.has(k)))roles.push(role)}const abilities=(m.abilities||[]).map(a=>String(typeof a==='string'?a:(a?.name||''))).join(' ').toLowerCase();if(/drizzle|drought|sand stream|snow warning|desolate land|primordial sea|orichalcum pulse/.test(abilities))roles.push('Weather Setter');if(/electric surge|grassy surge|psychic surge|misty surge/.test(abilities))roles.push('Terrain Setter');return [...new Set(roles)].length?[...new Set(roles)]:['Unclassified'];}
 function aggregateMoveCounts(mons){const counts={};for(const m of mons)for(const g of m.gameSets||[])for(const move of g.moves||[]){const k=String(move).trim();if(!k)continue;counts[k]=(counts[k]||0)+1}return counts}
 function pct(n,d){return d?Math.round(n/d*100):0}
 
 function roleDescription(role){
   return {
-    'Hazard setter':'Likely focused on establishing entry hazards and forcing switches.',
+    'Stealth Rock':'Can set Stealth Rock to punish opposing switches.',
+    'Spikes':'Can set Spikes to damage grounded Pokémon as they switch in.',
+    'Toxic Spikes':'Can set Toxic Spikes to poison opposing grounded Pokémon.',
+    'Sticky Webs':'Can set Sticky Web to lower the Speed of opposing grounded Pokémon.',
     'Hazard remover':'Likely focused on removing hazards while preserving momentum.',
     'Setup sweeper':'Likely focused on boosting and converting a free turn into a sweep.',
-    'Speed control':'Likely focused on controlling Speed for the team.',
+    
     'Status spreader':'Likely focused on spreading debilitating status conditions.',
     'Pivot':'Likely focused on gaining momentum through forced switches.',
     'Screens':'Likely focused on team support through screen effects.',
     'Recovery':'Likely built to stay healthy and repeatedly enter the field.',
+    'Weather Setter':'Uses an ability to establish weather for the team.',
+    'Terrain Setter':'Uses an ability to establish terrain for the team.',
     'Physical attacker':'Likely uses physical damage as its main offensive route.',
     'Special attacker':'Likely uses special damage as its main offensive route.',
     'Unclassified':'No clear role could be inferred from the recorded moves.'
@@ -946,7 +955,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
       <div class="prep-card-section"><span>Vulnerable to</span><div class="prep-chip-row">${(() => { const vulnerable=your.filter(y=>{const mult=combinedMultiplier(normalizedTypes(typeMap[y.species]||[]),normalizedTypes(typeMap[m.species]||[])); return mult!==null && mult>=2;}); return vulnerable.length?vulnerable.map(x=>`<span class="prep-chip">${esc(displaySpecies(x))}</span>`).join(''):'<span class="small">No clear disadvantage</span>'; })()}</div></div>
       <div class="prep-card-section"><span>Abilities</span><div class="prep-chip-row">${abilities.length?abilities.map(a=>`<span class="prep-chip">${esc(prettyAbility(a))}</span>`).join(''):'<span class="small">Unavailable</span>'}</div></div>
       <div class="prep-card-section"><span>Observed moves</span><div class="prep-chip-row">${moves.length?moves.map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">No recorded moves</span>'}</div></div>
-      <div class="prep-card-section"><span>Likely roles</span><div class="prep-chip-row">${roles.length?roles.map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">Unclear</span>'}</div></div>
+      <div class="prep-card-section"><span>Likely roles</span><div class="prep-chip-row">${roleDisplayList(roles).length?roleDisplayList(roles).map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">Unclear</span>'}</div></div>
       <div class="prep-card-section"><span>Point value</span><div class="small">${info?.points!==''&&info?.points!=null?esc(info.points)+' pts':'Point value unavailable'}</div></div>
     </div>
     <div class="prep-card-section"><span>Type effectiveness</span>${group('Weaknesses',weaknesses)}${group('Resistances',resistances)}${group('Immunities',immunities)}</div>
@@ -1004,7 +1013,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
           <section class="prep-analysis-table-card"><div class="prep-analysis-card-head"><div><h4>Moves brought</h4><small>Number of battle sets where each move was observed. Replay logs do not expose unclicked moves.</small></div><strong>${Object.values(seasonMovesBrought).reduce((a,b)=>a+Number(b||0),0)}</strong></div><div class="prep-analysis-list">${usageRows(sortedMoveBroughtEntries,'moves',broughtInWeeks.length||1)}</div></section>
           <section class="prep-analysis-table-card"><div class="prep-analysis-card-head"><div><h4>Items held</h4><small>Items actually recorded on this Pokémon</small></div><strong>${totalItemUses===1&&Object.keys(usage.items||{}).length===0?0:totalItemUses}</strong></div><div class="prep-analysis-list">${usageRows(sortedItemEntries,'items')}</div></section>
         </div>
-        <div class="prep-analysis-extra-grid"><div class="prep-analysis-mini-card"><span>Strong into ${opponent}</span><div class="prep-chip-row">${matchupItems}</div></div><div class="prep-analysis-mini-card"><span>Likely roles</span><div class="prep-chip-row">${roles.length?roles.map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">Unclear</span>'}</div></div></div>
+        <div class="prep-analysis-extra-grid"><div class="prep-analysis-mini-card"><span>Strong into ${opponent}</span><div class="prep-chip-row">${matchupItems}</div></div><div class="prep-analysis-mini-card"><span>Likely roles</span><div class="prep-chip-row">${roleDisplayList(roles).length?roleDisplayList(roles).map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">Unclear</span>'}</div></div></div>
       </section>
       <section class="prep-analysis-weeks-section"><div class="prep-analysis-section-head"><div><span class="prep-analysis-eyebrow">Weekly breakdown</span><h3>Usage by week</h3><p>Select a week to view its usage without scrolling through the entire season.</p></div><div class="prep-analysis-week-buttons" role="group" aria-label="Select week">${weekButtons}</div></div><div class="prep-analysis-weeks">${weekSections}</div></section>
     </div>`;
@@ -1044,7 +1053,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
       <div class="prep-card-section"><span>Strong into opponent</span><div class="prep-chip-row">${strongInto.length?strongInto.map(x=>`<span class="prep-chip">${esc(displaySpecies(x))}</span>`).join(''):'<span class="small">No clear type advantage</span>'}</div></div>
       <div class="prep-card-section"><span>Abilities</span><div class="prep-chip-row">${abilities.length?abilities.map(a=>`<span class="prep-chip">${esc(prettyAbility(a))}</span>`).join(''):'<span class="small">Unavailable</span>'}</div></div>
       <div class="prep-card-section"><span>Observed moves</span><div class="prep-chip-row">${moves.length?moves.map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">No recorded moves</span>'}</div></div>
-      <div class="prep-card-section"><span>Likely roles</span><div class="prep-chip-row">${roles.length?roles.map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">Unclear</span>'}</div></div>
+      <div class="prep-card-section"><span>Likely roles</span><div class="prep-chip-row">${roleDisplayList(roles).length?roleDisplayList(roles).map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">Unclear</span>'}</div></div>
       <div class="prep-card-section"><span>Point value</span><div class="small">${info?.points!==''&&info?.points!=null?esc(info.points)+' pts':'Point value unavailable'}</div></div>
     </div>
     <div class="prep-card-section"><span>Type effectiveness</span>${group('Weaknesses',weaknesses)}${group('Resistances',resistances)}${group('Immunities',immunities)}</div>
@@ -1097,7 +1106,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
           <section class="prep-analysis-table-card"><div class="prep-analysis-card-head"><div><h4>Moves brought</h4><small>Number of battle sets where each move was observed. Replay logs do not expose unclicked moves.</small></div><strong>${Object.values(seasonMovesBrought).reduce((a,b)=>a+Number(b||0),0)}</strong></div><div class="prep-analysis-list">${usageRows(sortedMoveBroughtEntries,'moves',broughtInWeeks.length||1)}</div></section>
           <section class="prep-analysis-table-card"><div class="prep-analysis-card-head"><div><h4>Items held</h4><small>Items actually recorded on this Pokémon</small></div><strong>${totalItemUses===1&&Object.keys(usage.items||{}).length===0?0:totalItemUses}</strong></div><div class="prep-analysis-list">${usageRows(sortedItemEntries,'items')}</div></section>
         </div>
-        <div class="prep-analysis-extra-grid"><div class="prep-analysis-mini-card"><span>Strong into ${opponent}</span><div class="prep-chip-row">${matchupItems}</div></div><div class="prep-analysis-mini-card"><span>Likely roles</span><div class="prep-chip-row">${roles.length?roles.map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">Unclear</span>'}</div></div></div>
+        <div class="prep-analysis-extra-grid"><div class="prep-analysis-mini-card"><span>Strong into ${opponent}</span><div class="prep-chip-row">${matchupItems}</div></div><div class="prep-analysis-mini-card"><span>Likely roles</span><div class="prep-chip-row">${roleDisplayList(roles).length?roleDisplayList(roles).map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">Unclear</span>'}</div></div></div>
       </section>
       <section class="prep-analysis-weeks-section"><div class="prep-analysis-section-head"><div><span class="prep-analysis-eyebrow">Weekly breakdown</span><h3>Usage by week</h3><p>Select a week to view its usage without scrolling through the entire season.</p></div><div class="prep-analysis-week-buttons" role="group" aria-label="Select week">${weekButtons}</div></div><div class="prep-analysis-weeks">${weekSections}</div></section>
     </div>`;
@@ -1352,7 +1361,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
     const m=row.mon,types=normalizedTypes(typeMap[m.species]||[]);
     const weak=defensiveTypeEffectiveness(types).filter(x=>x.mult!==null&&x.mult>1);
     const yourThreats=your.filter(ym=>{const mult=combinedMultiplier(typeMap[m.species]||[],typeMap[ym.species]||[]);return mult!==null&&mult>=2;});
-    return `<div class="prep-new-detail-head">${sprite(m.species,'prep-new-detail-sprite')}<div><h3>${esc(displaySpecies(m))}</h3><div class="type-row">${types.map(typePill).join('')}</div><span>${esc(row.roles.slice(0,2).join(' · ')||'Role not established')}</span></div></div>
+    return `<div class="prep-new-detail-head">${sprite(m.species,'prep-new-detail-sprite')}<div><h3>${esc(displaySpecies(m))}</h3><div class="type-row">${types.map(typePill).join('')}</div><span>${esc(roleDisplayList(row.roles).slice(0,2).join(' · ')||'Role not established')}</span></div></div>
       <div class="prep-new-scoreline"><div><small>THREAT SCORE</small><strong>${row.score}<em>/100</em></strong></div><span class="prep-new-threat-pill ${threatLevel(row.score)}">${threatLabel(row.score)} priority</span></div>
       <div class="prep-new-statgrid"><div><small>BROUGHT</small><b>${row.bring}%</b></div><div><small>SENT OUT</small><b>${row.sentOut}%</b></div><div><small>KOs</small><b>${Number(row.u.kills||0)}</b></div><div><small>DAMAGE DEALT</small><b>${Math.round(Number(row.u.dealt||0)).toLocaleString()}</b></div></div>
       <div class="prep-new-detail-block"><h4>OBSERVED MOVES</h4><div class="prep-new-chips">${row.moves.length?row.moves.slice(0,8).map(x=>`<span>${esc(x)}</span>`).join(''):'<i>No replay move data yet</i>'}</div></div>
