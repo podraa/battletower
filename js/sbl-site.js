@@ -342,51 +342,49 @@
       return selectors.some(selector => Array.from(document.querySelectorAll(selector)).some(isVisible));
     }
 
-    function syncNavVisibility() {
-      const popupOpen = hasOpenPopup();
-      const y = window.scrollY || document.documentElement.scrollTop || 0;
-      nav.classList.toggle('nav-hidden', popupOpen || y > 140);
+    let lastScrollY = Math.max(0, window.scrollY || window.pageYOffset || 0);
+    let scrollTicking = false;
+    const NAV_SCROLL_THRESHOLD = 8;
+    const NAV_TOP_REVEAL = 100;
+
+    function setNavHidden(hidden) {
+      nav.classList.toggle('nav-hidden', !!hidden);
     }
 
     function updateForScroll() {
-      syncNavVisibility();
-      ticking = false;
+      const currentY = Math.max(0, window.scrollY || window.pageYOffset || 0);
+      const delta = currentY - lastScrollY;
+      if (currentY <= NAV_TOP_REVEAL) {
+        setNavHidden(false);
+      } else if (delta > NAV_SCROLL_THRESHOLD) {
+        // Scrolling down: get the navigation out of the way.
+        setNavHidden(true);
+      } else if (delta < -NAV_SCROLL_THRESHOLD) {
+        // Scrolling up: reveal navigation so it remains easy to reach.
+        setNavHidden(false);
+      }
+      lastScrollY = currentY;
+      scrollTicking = false;
     }
 
     window.addEventListener('scroll', () => {
-      if (!ticking) {
-        ticking = true;
+      if (!scrollTicking) {
+        scrollTicking = true;
         requestAnimationFrame(updateForScroll);
       }
     }, { passive: true });
 
-    nav.addEventListener('mouseenter', () => {
-      if (!hasOpenPopup()) nav.classList.remove('nav-hidden');
-    });
-
-    hover.addEventListener('mouseenter', () => {
-      if (!hasOpenPopup()) nav.classList.remove('nav-hidden');
-    });
-
+    nav.addEventListener('mouseenter', () => setNavHidden(false));
+    hover.addEventListener('mouseenter', () => setNavHidden(false));
     document.addEventListener('mousemove', e => {
-      if (e.clientY <= 12 && !hasOpenPopup()) nav.classList.remove('nav-hidden');
+      if (e.clientY <= 12) setNavHidden(false);
     }, { passive: true });
 
-    // Any popup can be created by page-specific code. Watch the DOM so the
-    // shared navigation hides immediately when a dialog/overlay appears,
-    // without requiring each page to know about the nav implementation.
-    const popupObserver = new MutationObserver(() => syncNavVisibility());
-    popupObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'] });
+    // No DOM observer is needed for scroll visibility. In particular, avoid
+    // observing nav class mutations and then writing to that same class from
+    // the observer callback (which caused a feedback loop in earlier builds).
+    setNavHidden(false);
 
-    // Clicking inside an open popup should keep the navigation hidden even
-    // if the popup is positioned below the nav or the nav was previously open.
-    document.addEventListener('click', e => {
-      if (e.target?.closest?.('[role=\"dialog\"], .modal, .pokemon-overlay, .audit-overlay, .damage-calc-modal, .showdown-import-overlay, .prep-detail-modal, [data-popup=\"true\"]')) {
-        nav.classList.add('nav-hidden');
-      }
-    }, true);
-
-    syncNavVisibility();
   }
 
   function lockNav(locked) {
