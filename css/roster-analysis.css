@@ -399,3 +399,15 @@
 /* CP4.122: Draft pool Mega visibility control */
 .pre-draft-mega-toggle{display:inline-flex;align-items:center;gap:.45rem;white-space:nowrap;font-size:.88rem;cursor:pointer;padding:.5rem .7rem;border:1px solid rgba(160,169,205,.25);border-radius:9px;background:rgba(120,130,180,.08)}
 .pre-draft-mega-toggle input{accent-color:#b39bff}
+
+/* CP4.123: handoff controls share the draft-plan toolbar without hiding on mobile. */
+.pre-draft-export{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:8px 12px;border:1px solid var(--border);border-radius:9px;background:var(--panel-alt);color:var(--text);font:inherit;font-size:11px;font-weight:750;cursor:pointer;white-space:nowrap}
+.pre-draft-export:hover{border-color:var(--teal);background:color-mix(in srgb,var(--teal) 10%,var(--panel-alt))}
+
+/* CP4.127: My Team planner sprite containment, without changing Draft Room art. */
+.pre-draft-mon .pre-draft-mon-art{flex:0 0 62px;width:62px;height:62px;min-width:62px;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}
+.pre-draft-mon .pre-draft-mon-art .sprite,.pre-draft-mon .pre-draft-mon-art img{display:block;width:56px!important;height:56px!important;max-width:56px!important;max-height:56px!important;object-fit:contain!important;object-position:center center!important;flex:none;margin:auto;transform:none!important}
+.dash-plan-switcher{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:11px;background:var(--panel-alt)}
+.dash-plan-select-label{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:700}
+.dash-plan-select-label select{min-width:200px;max-width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text)}
+.dash-plan-scope{font-size:11px;color:var(--text-dim)}
