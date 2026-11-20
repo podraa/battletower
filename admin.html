@@ -20,59 +20,61 @@
 <link href="css/sbl-components.css?v=cp463" rel="stylesheet"/>
 <link href="css/sbl-sprites-layout.css?v=cp454-contained-sprites" rel="stylesheet"/>
 <link href="css/sbl-ui.css?v=cp463-gutters" rel="stylesheet"/>
-<link href="css/pages/admin.css?v=cp479-role-admin-reorg" rel="stylesheet"/>
+<link href="css/pages/admin.css?v=cp4114-top-workspace-navigation" rel="stylesheet"/>
 
 
 
 <link href="css/sbl-standard-ui.css?v=cp435-ui-standardization" rel="stylesheet">
   <link rel="stylesheet" href="css/sbl-mobile-scroll.css?v=cp493">
+<link rel="stylesheet" href="css/sbl-ux-sweep.css?v=cp4110">
 </head>
 <body data-admin="true">
 <div id="app" style="display:none">
 <header class="admin-page-header">
-  <h1>League Admin <span class="badge" id="seasonBadge" style="vertical-align:middle;"></span></h1>
+  <div class="admin-header-identity">
+    <div class="admin-header-kicker">SBL CONTROL CENTRE</div>
+    <h1>League Admin <span class="badge" id="seasonBadge" style="vertical-align:middle;"></span></h1>
+    <p>Manage your league, draft, player pool and competition data.</p>
+  </div>
   <button type="button" class="ghost small admin-refresh-button" id="adminRefreshButton" title="Refresh the current admin workspace" aria-label="Refresh admin workspace">
     <span aria-hidden="true">↻</span> Refresh
   </button>
 </header>
 <nav class="tabs admin-nav" id="tabs" aria-label="Admin navigation">
-  <button type="button" class="admin-sidebar-toggle" id="adminSidebarToggle" aria-label="Collapse sidebar" title="Collapse sidebar"><span class="admin-sidebar-toggle-icon">‹</span><span class="admin-sidebar-toggle-label">Collapse</span></button>
-  <button class="admin-nav-item admin-nav-featured" data-tab="bug-reports">Bug Reports &amp; Feedback</button>
-  <div class="admin-nav-group" data-nav-group="home">
-    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>Home</span><span aria-hidden="true">⌄</span></button>
+  <div class="admin-nav-group admin-nav-standalone">
+    <div class="admin-nav-group-title">Support</div>
+    <div class="admin-nav-submenu"><button class="admin-nav-item admin-nav-featured" data-tab="bug-reports">Bug Reports &amp; Feedback</button></div>
+  </div>
+  <div class="admin-nav-group" data-nav-group="league">
+    <div class="admin-nav-group-title">League management</div>
     <div class="admin-nav-submenu">
       <button class="admin-nav-item active" data-tab="overview">League Dashboard</button>
-      <button class="admin-nav-item" data-tab="league">League Manager</button>
-    </div>
-  </div>
-  <div class="admin-nav-group" data-nav-group="season">
-    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>Season</span><span aria-hidden="true">⌄</span></button>
-    <div class="admin-nav-submenu">
+      <button class="admin-nav-item" data-tab="league">League Setup</button>
       <button class="admin-nav-item" data-tab="seasonsetup">Season Management</button>
-      <button class="admin-nav-item" data-tab="draft">Draft</button>
-      <button class="admin-nav-item" data-tab="freeagency">Free Agency</button>
+      <button class="admin-nav-item" data-tab="people">People &amp; Franchises</button>
+      <button class="admin-nav-item" data-tab="settings-franchises">Showdown Team Mapping</button>
       <button class="admin-nav-item" data-tab="trades">Trades</button>
       <button class="admin-nav-item" data-tab="updates">League Updates</button>
     </div>
   </div>
-  <div class="admin-nav-group" data-nav-group="people">
-    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>People</span><span aria-hidden="true">⌄</span></button>
-    <div class="admin-nav-submenu">
-      <button class="admin-nav-item" data-tab="people">People &amp; Franchises</button>
-      <button class="admin-nav-item" data-tab="settings-franchises">Showdown Team Mapping</button>
-    </div>
+  <div class="admin-nav-group" data-nav-group="draft">
+    <div class="admin-nav-group-title">Draft</div>
+    <div class="admin-nav-submenu"><button class="admin-nav-item" data-tab="draft">Draft Management</button></div>
   </div>
-  <div class="admin-nav-group" data-nav-group="replays">
-    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>Replays</span><span aria-hidden="true">⌄</span></button>
+  <div class="admin-nav-group" data-nav-group="freeagency">
+    <div class="admin-nav-group-title">Free agency</div>
+    <div class="admin-nav-submenu"><button class="admin-nav-item" data-tab="freeagency">Workbook &amp; Free Agency Board</button></div>
+  </div>
+  <div class="admin-nav-group" data-nav-group="roles">
+    <div class="admin-nav-group-title">Pokémon data</div>
+    <div class="admin-nav-submenu"><button class="admin-nav-item" data-tab="pokemon-roles">Role Catalogue &amp; Assignments</button></div>
+  </div>
+  <div class="admin-nav-group" data-nav-group="diagnostics">
+    <div class="admin-nav-group-title">Diagnostics &amp; archives</div>
     <div class="admin-nav-submenu">
       <button class="admin-nav-item" data-tab="process">Processed Replays</button>
       <button class="admin-nav-item" data-tab="players">Replays by Player</button>
       <button class="admin-nav-item" data-tab="legacy-migration">Archived Seasons</button>
-    </div>
-  </div>
-  <div class="admin-nav-group" data-nav-group="system">
-    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>System</span><span aria-hidden="true">⌄</span></button>
-    <div class="admin-nav-submenu">
       <button class="admin-nav-item" data-tab="settings-data">Data Management</button>
       <button class="admin-nav-item" data-tab="admin-log">Admin Log</button>
       <button class="admin-nav-item" data-tab="settings-system">System Settings</button>
@@ -106,7 +108,7 @@
 <script src="js/services/data.js" defer></script>
 <script src="js/services/finals.js" defer></script>
 <script src="js/services/fixture-workflow.js?v=cp451" defer></script>
-<script src="js/pages/admin.js?v=cp497-recovery-label-all-surfaces" defer></script>
+<script src="js/pages/admin.js?v=cp4114-workspace-dedup" defer></script>
 
 
 <script src="js/app.js" defer></script>
