@@ -33,59 +33,25 @@
     });
     return out;
   }
+  // Defending-type multipliers against each attacking type (Gen 9 standard chart).
+  const ATTACK={Normal:{Rock:.5,Ghost:0,Steel:.5},Fire:{Fire:.5,Water:.5,Grass:2,Ice:2,Bug:2,Rock:.5,Dragon:.5,Steel:2},Water:{Fire:2,Water:.5,Grass:.5,Ground:2,Rock:2,Dragon:.5},Electric:{Water:2,Electric:.5,Grass:.5,Ground:0,Flying:2,Dragon:.5},Grass:{Fire:.5,Water:2,Grass:.5,Poison:.5,Ground:2,Flying:.5,Bug:.5,Rock:2,Dragon:.5,Steel:.5},Ice:{Fire:.5,Water:.5,Grass:2,Ice:.5,Ground:2,Flying:2,Dragon:2,Steel:.5},Fighting:{Normal:2,Ice:2,Poison:.5,Flying:.5,Psychic:.5,Bug:.5,Rock:2,Ghost:0,Dark:2,Steel:2,Fairy:.5},Poison:{Grass:2,Poison:.5,Ground:.5,Rock:.5,Ghost:.5,Steel:0,Fairy:2},Ground:{Fire:2,Electric:2,Grass:.5,Poison:2,Flying:0,Bug:.5,Rock:2,Steel:2},Flying:{Electric:.5,Grass:2,Fighting:2,Bug:2,Rock:.5,Steel:.5},Psychic:{Fighting:2,Poison:2,Psychic:.5,Dark:0,Steel:.5},Bug:{Fire:.5,Grass:2,Fighting:.5,Poison:.5,Flying:.5,Psychic:2,Ghost:.5,Dark:2,Steel:.5,Fairy:.5},Rock:{Fire:2,Ice:2,Fighting:.5,Ground:.5,Flying:2,Bug:2,Steel:.5},Ghost:{Normal:0,Psychic:2,Ghost:2,Dark:.5},Dragon:{Dragon:2,Steel:.5,Fairy:0},Dark:{Fighting:.5,Psychic:2,Ghost:2,Dark:.5,Fairy:.5},Steel:{Fire:.5,Water:.5,Electric:.5,Ice:2,Rock:2,Steel:.5,Fairy:2},Fairy:{Fire:.5,Fighting:2,Poison:.5,Dragon:2,Dark:2,Steel:.5}};
+  function defensiveMultiplier(attack,defenders){return (defenders||[]).reduce((n,d)=>n*(ATTACK[attack]?.[TYPES.find(t=>t.toLowerCase()===String(d).toLowerCase())]??1),1);}
   function render(opts){
     opts=opts||{};
-    const team=opts.team||'Roster';
-    const entries=(opts.entries||[]).map(m=>({name:String(m.name||''),types:Array.isArray(m.types)&&m.types.length?m.types:(window.SBL.pokemonTypes?.lookupTypes(m.name)||[]),roles:uniqueRoles(Array.isArray(m.roles)?m.roles:[]),abilities:Array.isArray(m.abilities)?m.abilities:[],status:m.status==='planned'?'planned':'actual'})).filter(m=>m.name);
+    const entries=(opts.entries||[]).map(m=>({name:String(m.name||''),types:Array.isArray(m.types)&&m.types.length?m.types:(window.SBL.pokemonTypes?.lookupTypes(m.name)||[]),roles:uniqueRoles(m.roles||[]),status:m.status==='planned'?'planned':'actual'})).filter(m=>m.name);
     const roles=uniqueRoles([...(opts.roles||[]),...entries.flatMap(m=>m.roles)]).sort((a,b)=>roleLabel(a).localeCompare(roleLabel(b)));
-    const typeCounts=Object.fromEntries(TYPES.map(t=>[t.toLowerCase(),0]));
-    entries.forEach(m=>m.types.forEach(t=>{const k=String(t).toLowerCase();if(k in typeCounts)typeCounts[k]++;}));
-    const roleCounts=Object.fromEntries(roles.map(r=>[r,0]));
-    entries.forEach(m=>m.roles.forEach(r=>{
-      const match=roles.find(candidate=>roleLabel(candidate).toLowerCase()===roleLabel(r).toLowerCase());
-      if(match)roleCounts[match]++;
-    }));
-    const covered=TYPES.filter(t=>typeCounts[t.toLowerCase()]>0).length;
-    const missing=TYPES.filter(t=>!typeCounts[t.toLowerCase()]);
-    const roleCovered=roles.filter(r=>roleCounts[r]>0).length;
-    const missingRoles=roles.filter(r=>roleCounts[r]===0);
-    const repeatedRoles=roles.filter(r=>roleCounts[r]>1).sort((a,b)=>roleCounts[b]-roleCounts[a]);
-    const concentratedTypes=TYPES.filter(t=>typeCounts[t.toLowerCase()]>=3).sort((a,b)=>typeCounts[b.toLowerCase()]-typeCounts[a.toLowerCase()]);
-    const multiRoleCount=entries.filter(m=>m.roles.length>1).length;
-    const unassigned=entries.filter(m=>!m.roles.length).length;
-    const actualCount=entries.filter(m=>m.status==='actual').length;
-    const plannedCount=entries.filter(m=>m.status==='planned').length;
-    const mons=entries.map(m=>{
-      const name=esc(m.name), types=m.types.map(t=>String(t).toLowerCase()), rs=m.roles, abilities=opts.showAbilities&&m.abilities.length?`<div class=\"ra-ability-tags\">Abilities: ${m.abilities.map(a=>esc(String(a).replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase()))).join(' · ')}</div>`:'';
-      const status=m.status==='planned'?'Planned pick':'Drafted';
-      return `<article class="ra-mon ${m.status==='planned'?'is-planned':'is-actual'}" data-name="${name.toLowerCase()}" data-types="${esc(types.join('|'))}" data-roles="${esc(rs.map(r=>roleLabel(r).toLowerCase()).join('|'))}">
-        <div class="ra-mon-sprite">${opts.sprite?opts.sprite(m.name):''}</div>
-        <div class="ra-mon-main"><div class="ra-mon-title"><strong>${name}</strong><span class="ra-status ${m.status==='planned'?'planned':'actual'}">${status}</span></div><div class="ra-mon-tags">${m.types.map(t=>`<span class="type-badge type-${esc(String(t).toLowerCase())}">${esc(t)}</span>`).join('')||'<span class="ra-muted">Types unavailable</span>'}</div>
-        <div class="ra-role-tags">${rs.map(r=>`<span class="ra-role-tag">${esc(roleLabel(r))}</span>`).join('')||'<span class="ra-muted">No role assigned</span>'}</div>${abilities}</div></article>`;
+    const source=entries.length+' Pokémon';
+    const roleCells=entries.map(mon=>`<tr><th scope="row"><span class="ra-matrix-name">${opts.sprite?opts.sprite(mon.name):''}<span>${esc(mon.name)}</span></span></th>${roles.map(r=>`<td class="${mon.roles.some(x=>roleLabel(x)===roleLabel(r))?'ra-cell-yes':''}" title="${esc(mon.name)} · ${esc(roleLabel(r))}">${mon.roles.some(x=>roleLabel(x)===roleLabel(r))?'✓':'·'}</td>`).join('')}</tr>`).join('');
+    // Type coverage here means types represented on the actual + planned roster,
+    // not offensive move coverage or defensive effectiveness.
+    const typeMarkup=TYPES.map(type=>{
+      const members=entries.filter(m=>m.types.some(t=>String(t).toLowerCase()===type.toLowerCase()));
+      return `<div class="ra-type-tile ${members.length?'is-covered':'is-missing'}" title="${esc(type)}: ${members.length?esc(members.map(m=>m.name).join(', ')):'not represented'}"><span class="type-badge type-${type.toLowerCase()}">${type}</span><div class="ra-type-members">${members.length?members.map(mon=>`<span class="ra-type-member" title="${esc(mon.name)}" aria-label="${esc(mon.name)}">${typeof opts.sprite==='function'?opts.sprite(mon.name):`<span class="ra-type-member-name">${esc(mon.name)}</span>`}</span>`).join(''):'<span class="ra-type-coverage-count">Not covered</span>'}</div></div>`;
     }).join('');
-    const rolesMarkup=roles.length?roles.map(r=>`<div class="ra-role-row ${roleCounts[r]?'':'is-missing'}"><span title="${esc(roleLabel(r))}">${esc(roleLabel(r))}</span><div class="ra-role-bar"><i style="width:${entries.length?Math.min(100,roleCounts[r]/entries.length*100):0}%"></i></div><strong>${roleCounts[r]}</strong></div>`).join(''):'<p class="ra-muted">No competitive roles have been assigned by the commissioner yet.</p>';
-    const sourceLabel=plannedCount?`${actualCount} drafted + ${plannedCount} planned`:`${actualCount} drafted`;
-    return `<section class="roster-analysis" aria-label="Team Analysis">
-      <div class="ra-head"><div><span class="ra-kicker">TEAM ANALYSIS</span><h2>${esc(opts.heading||'Team Analysis')}</h2><p>${esc(team)} · ${entries.length} Pokémon · ${sourceLabel}</p></div><div class="ra-score"><strong>${covered}<span>/18</span></strong><small>Types covered</small></div></div>
-      <div class="ra-projection-key"><div class="ra-colour-setting"><button type="button" class="ra-colour-control" data-status-colour="actual" aria-expanded="false" aria-label="Choose Drafted colour"><i class="ra-key-dot actual"></i>Drafted <span class="ra-colour-chevron">▾</span></button><div class="ra-colour-picker" data-colour-picker="actual" hidden>${PALETTE.map(([value,label])=>`<button type="button" class="ra-swatch ${value}" data-status-colour-choice="actual" data-colour="${value}" aria-label="${label} drafted colour" title="${label}"><span></span>${label}</button>`).join('')}</div></div>${plannedCount?`<div class="ra-colour-setting"><button type="button" class="ra-colour-control" data-status-colour="planned" aria-expanded="false" aria-label="Choose Planned pick colour"><i class="ra-key-dot planned"></i>Planned pick <span class="ra-colour-chevron">▾</span></button><div class="ra-colour-picker" data-colour-picker="planned" hidden>${PALETTE.map(([value,label])=>`<button type="button" class="ra-swatch ${value}" data-status-colour-choice="planned" data-colour="${value}" aria-label="${label} planned colour" title="${label}"><span></span>${label}</button>`).join('')}</div></div>`:''}<span class="ra-projection-note">${plannedCount?'Projection includes your remaining draft plan.':'Based on your current roster.'}</span></div>
-      <div class="ra-metrics">
-        <div class="ra-metric"><span>Type coverage</span><strong>${covered} / 18</strong><div class="ra-track"><i style="width:${covered/18*100}%"></i></div><small>${missing.length?`${missing.length} types not represented`:'Every type represented'}</small></div>
-        <div class="ra-metric"><span>Role coverage</span><strong>${roleCovered} / ${roles.length||0}</strong><div class="ra-track"><i style="width:${roles.length?roleCovered/roles.length*100:0}%"></i></div><small>${missingRoles.length?`${missingRoles.length} roles missing`:'All catalogue roles represented'}</small></div>
-        <div class="ra-metric"><span>${plannedCount?'Projected Roster':'Roster Size'}</span><strong>${entries.length}</strong><div class="ra-depth-dots">${Array.from({length:Math.min(entries.length,12)},()=>'<i></i>').join('')}</div><small>${plannedCount?`${actualCount} drafted · ${plannedCount} planned`:`${actualCount} Pokémon drafted`}</small></div>
-      </div>
-      <div class="ra-columns">
-        <section class="ra-block"><div class="ra-block-head"><div><span class="ra-kicker">DEFENSIVE & OFFENSIVE SPREAD</span><h3>Type coverage</h3></div><span class="ra-count">${covered}/18</span></div><div class="ra-type-grid">${TYPES.map(t=>`<div class="ra-type ${typeCounts[t.toLowerCase()]?'is-covered':'is-missing'}"><span class="type-badge type-${t.toLowerCase()}">${t}</span><strong>${typeCounts[t.toLowerCase()]}</strong><small>${typeCounts[t.toLowerCase()]?'represented':'not represented'}</small></div>`).join('')}</div>
-        <div class="ra-insight ${missing.length?'ra-warning':'ra-good'}"><strong>${missing.length?'Type coverage gaps':'Full type spread'}</strong><span>${missing.length?`No Pokémon in this ${plannedCount?'projection':'roster'} represent ${missing.join(', ')}.`:`Your ${plannedCount?'projected roster':'roster'} represents every type.`}</span></div></section>
-        <section class="ra-block"><div class="ra-block-head"><div><span class="ra-kicker">BATTLEFIELD JOBS</span><h3>Competitive role coverage</h3></div><span class="ra-count">${roleCovered}/${roles.length}</span></div>
-          <div class="ra-role-list">${rolesMarkup}</div>
-          <div class="ra-insight ${missingRoles.length||unassigned?'ra-warning':'ra-good'}"><strong>${missingRoles.length?`${missingRoles.length} roles not covered`:unassigned?`${unassigned} Pokémon unassigned`:'Role coverage represented'}</strong><span>${missingRoles.length?`Your ${plannedCount?'projected team':'team'} has no assigned ${missingRoles.slice(0,5).map(roleLabel).join(', ')}${missingRoles.length>5?' and other':''}.`:unassigned?'Some Pokémon have no commissioner-assigned roles yet.':`Every catalogue role appears at least once in this ${plannedCount?'projection':'roster'}.`}</span></div></section>
-      </div>
-      <section class="ra-insight-grid"><div class="ra-insight ${repeatedRoles.length||multiRoleCount?'ra-good':'ra-warning'}"><strong>Role strengths</strong><span>${repeatedRoles.length?`Repeated coverage: ${repeatedRoles.slice(0,4).map(r=>`${roleLabel(r)} ×${roleCounts[r]}`).join(', ')}.`:multiRoleCount?`${multiRoleCount} Pokémon provide more than one assigned role.`:'No repeated role coverage yet; consider adding complementary role options.'}</span></div><div class="ra-insight ${concentratedTypes.length?'ra-warning':'ra-good'}"><strong>Type concentration</strong><span>${concentratedTypes.length?`Three or more roster members share: ${concentratedTypes.map(t=>`${t} (${typeCounts[t.toLowerCase()]})`).join(', ')}.`:'No single type appears on three or more roster members.'}</span></div></section>
-      <section class="ra-roster"><div class="ra-block-head"><div><span class="ra-kicker">PLAYER-BY-PLAYER BREAKDOWN</span><h3>${plannedCount?'Projected Roster':'Roster Breakdown'}</h3></div><span class="ra-count">${entries.length} Pokémon</span></div>
-        <div class="ra-filters"><input type="search" class="ra-search" placeholder="Search Pokémon…" aria-label="Search roster Pokémon"><select class="ra-type-filter" aria-label="Filter by type"><option value="">All types</option>${TYPES.map(t=>`<option value="${t.toLowerCase()}">${t}</option>`).join('')}</select><select class="ra-role-filter" aria-label="Filter by role"><option value="">All roles</option>${roles.map(r=>`<option value="${esc(roleLabel(r).toLowerCase())}">${esc(roleLabel(r))}</option>`).join('')}</select><select class="ra-status-filter" aria-label="Filter by roster status"><option value="">${plannedCount?'Drafted + planned':'All drafted'}</option><option value="actual">Drafted only</option>${plannedCount?'<option value="planned">Planned only</option>':''}</select><span class="ra-filter-count">${entries.length} shown</span></div>
-        <div class="ra-mon-grid">${mons||`<div class="ra-empty">${plannedCount?'No Pokémon to analyse yet. Add picks to your draft plan to see a projection.':'No drafted Pokémon to analyse yet.'}</div>`}</div>
-      </section><footer class="ra-credit">Competitive roles are assigned by your league commissioner. Role names are displayed in player-friendly format.</footer>
-    </section>`;
+    const represented=TYPES.filter(type=>entries.some(m=>m.types.some(t=>String(t).toLowerCase()===type.toLowerCase()))).length;
+    const roleGaps=roles.filter(r=>!entries.some(m=>m.roles.some(x=>roleLabel(x)===roleLabel(r))));
+    return `<section class="roster-analysis ra-redesign ra-compact" aria-label="Team Analysis"><div class="ra-compact-heading"><h2>${esc(opts.heading||'Team Analysis')}</h2><span>${source} · ${roles.length-roleGaps.length}/${roles.length} roles covered</span></div><nav class="ra-matrix-tabs" aria-label="Analysis views"><button type="button" class="is-active" data-ra-view="roles" aria-pressed="true">Role Coverage</button><button type="button" data-ra-view="types" aria-pressed="false">Type Coverage</button></nav><div data-ra-panel="roles"><div class="ra-matrix-scroll"><table class="ra-matrix"><thead><tr><th scope="col">Pokémon</th>${roles.map(r=>`<th scope="col" title="${esc(roleLabel(r))}"><span class="ra-role-column">${esc(roleLabel(r))}</span></th>`).join('')}</tr></thead><tbody>${roleCells||'<tr><td>No Pokémon in this projection yet.</td></tr>'}</tbody><tfoot><tr><th scope="row">Total</th>${roles.map(r=>`<td>${entries.filter(m=>m.roles.some(x=>roleLabel(x)===roleLabel(r))).length}</td>`).join('')}</tr></tfoot></table></div></div><div data-ra-panel="types" hidden><p class="ra-type-summary">${represented} of 18 types represented on your roster · ${18-represented} missing</p><div class="ra-type-grid">${typeMarkup}</div></div></section>`;
+
   }
   const COLOUR_KEY='sbl_team_analysis_status_colours';
   const PALETTE=[['teal','Teal'],['rose','Rose'],['blue','Blue'],['green','Green'],['purple','Purple'],['orange','Orange']];
@@ -126,6 +92,17 @@
     if(root.dataset.raBound!=='1'){
       root.dataset.raBound='1';
       root.addEventListener('input',e=>{if(e.target.matches('.ra-search'))filter(e.target.closest('.roster-analysis'));});
+      root.addEventListener('click',e=>{const tab=e.target.closest('[data-ra-view]');if(!tab)return;const section=tab.closest('.roster-analysis');if(!section)return;section.querySelectorAll('[data-ra-view]').forEach(b=>{const active=b===tab;b.classList.toggle('is-active',active);b.setAttribute('aria-pressed',String(active));});section.querySelectorAll('[data-ra-panel]').forEach(panel=>{panel.hidden=panel.dataset.raPanel!==tab.dataset.raView;});});
+      root.addEventListener('click',e=>{
+        const button=e.target.closest('[data-matchup-type]');if(!button)return;
+        const section=button.closest('.ra-matchup-section');if(!section)return;
+        const type=button.dataset.matchupType;
+        section.querySelectorAll('[data-matchup-type]').forEach(b=>{const selected=b===button;b.classList.toggle('is-selected',selected);b.setAttribute('aria-pressed',String(selected));});
+        let entries=[];try{entries=JSON.parse(section.querySelector('.ra-matchup-data')?.textContent||'[]');}catch(_){return;}
+        const groups={weak:[],resist:[],immune:[],neutral:[]};
+        entries.forEach(mon=>{const mult=defensiveMultiplier(type,mon.types);const label=`${esc(mon.name)} <small>×${mult}</small>`;groups[mult===0?'immune':mult>1?'weak':mult<1?'resist':'neutral'].push(label);});
+        section.querySelector('.ra-matchup-results').innerHTML=`<div class="ra-matchup-grid">${[['weak','Weak'],['resist','Resist'],['immune','Immune'],['neutral','Neutral']].map(([key,title])=>`<div class="ra-matchup-group"><strong>${title} <span>${groups[key].length}</span></strong><div>${groups[key].map(x=>`<span>${x}</span>`).join('')||'<em>None</em>'}</div></div>`).join('')}</div>`;
+      });
       root.addEventListener('change',e=>{if(e.target.matches('.ra-type-filter,.ra-role-filter,.ra-status-filter'))filter(e.target.closest('.roster-analysis'));});
       root.addEventListener('click',async e=>{
         const control=e.target.closest('[data-status-colour]');if(!control)return;
@@ -153,5 +130,5 @@
     let n=0;panel.querySelectorAll('.ra-mon').forEach(card=>{const show=(!q||card.dataset.name.includes(q))&&(!type||card.dataset.types.split('|').includes(type))&&(!role||card.dataset.roles.split('|').includes(role))&&(!status||card.classList.contains(status==='planned'?'is-planned':'is-actual'));card.hidden=!show;if(show)n++;});
     const count=panel.querySelector('.ra-filter-count');if(count)count.textContent=`${n} shown`;
   }
-  window.SBL.rosterAnalysis={render,bind,roleLabel,uniqueRoles};
+  window.SBL.rosterAnalysis={render,bind,roleLabel,uniqueRoles,defensiveMultiplier,types:TYPES};
 })();
