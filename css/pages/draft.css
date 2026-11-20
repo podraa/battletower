@@ -245,6 +245,8 @@
 .sheet-cell{position:relative;min-width:132px;padding:7px 9px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);vertical-align:top}
 .sheet-grid tbody tr:nth-child(even) .sheet-cell:not([style*="--team-color"]){background:color-mix(in srgb,var(--panel-alt) 55%,transparent)}
 .sheet-cell[data-act]{cursor:pointer}
+.sheet-cell.sheet-not-loaded{background:color-mix(in srgb,var(--amber) 7%,var(--panel))}
+.sheet-cell .sheet-not-loaded-label{color:var(--amber);font-weight:700}
 .sheet-cell[data-act]:hover{outline:2px solid var(--amber);outline-offset:-2px}
 .sheet-name{font-weight:700;display:block}
 .sheet-cell em{font-style:normal;color:var(--amber);font-size:10px;margin-left:5px;font-weight:800}
