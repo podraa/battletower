@@ -41,6 +41,12 @@ let queueSaveTimer=null;
 let queueSaveState='';
 let draftPoolIndex=[];
 let draftPoolSignature='';
+let draftPoolByName=new Map();
+let ownerCache=new Map();
+let ownerIndex=new Map();
+let resultsDelegatedRoot=null;
+const resultCardCache=new Map();
+const resultTierCache=new Map();
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??''). replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -58,8 +64,20 @@ const key=s=>String(s||''). trim().toLowerCase()
 let filterName='';
 let filterTypes=new Set();
 let filterPtsMin=1;
-let filterPtsMax=20; // slider: 1 and 20 are the ends of the range (no limit at that end)
-const PTS_MIN=1,PTS_MAX=20;
+let filterPtsMax=1; // Dataset-derived upper endpoint; no upper filter when selected.
+const PTS_MIN=1;
+let PTS_MAX=1;
+// Only the published Free Agency pool determines the available point range.
+function syncPublishedPointRange(mons){
+  const numeric=(Array.isArray(mons)?mons:[]).map(m=>Number(m?.points)).filter(n=>Number.isFinite(n)&&n>=0);
+  const nextMax=numeric.length?Math.max(PTS_MIN,...numeric):PTS_MIN;
+  if(nextMax===PTS_MAX)return false;
+  const wasUnbounded=filterPtsMax===PTS_MAX;
+  PTS_MAX=nextMax;
+  filterPtsMin=Math.max(PTS_MIN,Math.min(PTS_MAX,filterPtsMin));
+  filterPtsMax=wasUnbounded?PTS_MAX:Math.max(filterPtsMin,Math.min(PTS_MAX,filterPtsMax));
+  return true;
+}
 const ptsFilterActive=()=>filterPtsMin>PTS_MIN||filterPtsMax<PTS_MAX;
 const draftIsOpen=()=>['lobby','live'].includes(String((settings&&settings.draft&&settings.draft.status)||'').trim().toLowerCase());
 let filterMega='all';
@@ -91,18 +109,34 @@ function normalizeRosters(raw){
 }
 
 
+function rebuildOwnerIndex(){
+  ownerIndex=new Map(); ownerCache.clear();
+  for(const [team,list] of Object.entries(allRosters)) for(const mon of list){
+    const name=mon?.name||'';
+    const aliases=[key(name),...(SBL.pokemon?.showdownStatsIdCandidates?.(name)||[])].filter(Boolean);
+    for(const alias of aliases) if(!ownerIndex.has(alias)) ownerIndex.set(alias,team);
+  }
+}
 function owner(name){
-  for(const [team,list] of Object.entries(allRosters))
-    for(const mon of list)
-      if(SBL.pokemon.sameSpeciesForm(name, mon.name)) return team;
-  return null;
+  const cacheKey=key(name);
+  if(ownerCache.has(cacheKey)) return ownerCache.get(cacheKey);
+  let found=ownerIndex.get(cacheKey)||null;
+  if(!found){
+    const aliases=SBL.pokemon?.showdownStatsIdCandidates?.(name)||[];
+    for(const alias of aliases){if(ownerIndex.has(alias)){found=ownerIndex.get(alias);break;}}
+  }
+  // Rare display-name aliases retain the original form-aware fallback.
+  if(!found) for(const [team,list] of Object.entries(allRosters)){
+    if(list.some(mon=>SBL.pokemon.sameSpeciesForm(name,mon.name))){found=team;break;}
+  }
+  ownerCache.set(cacheKey,found); return found;
 }
 
 
-function sprite(name){ return SBL.pokemon.spriteMarkup(name, 'sprite'); }
+function sprite(name){ return SBL.pokemon.spriteMarkup(name, 'sprite').replace('<img ', '<img loading=\"lazy\" '); }
 
 function queueIdFor(mon){
-  const match=draftPoolIndex.find(x=>SBL.pokemon.sameSpeciesForm(x.name,mon.name));
+  const match=draftPoolByName.get(key(mon.name))||draftPoolIndex.find(x=>SBL.pokemon.sameSpeciesForm(x.name,mon.name));
   return String(match?.id||mon.id||mon.name);
 }
 function queueContains(mon){ return draftQueue.includes(queueIdFor(mon)); }
@@ -248,7 +282,7 @@ function openSelection(mon){
   modal.className='modal';
   modal.innerHTML=`<div class="modalbox fa-mon-modal" role="dialog" aria-modal="true" aria-labelledby="faModalTitle">
     <div class="fa-modal-heading"><div class="fa-modal-sprite">${sprite(mon.name)}</div><div class="fa-modal-title"><h2 id="faModalTitle">${esc((SBL.pokemon.displayNameWithForm ? SBL.pokemon.displayNameWithForm(mon.name) : SBL.pokemon.displayName(mon.name)))}</h2>
-    <div class="note">${mon.points} points${mon.isMega?' · Mega · cost TBD':''} · ${owner(mon.name)?'Drafted':'Available'}</div><div class="modal-types">${types.map(typeBadge).join('')||''}</div></div></div>
+    <div class="note">${mon.points} points · ${owner(mon.name)?'Drafted':'Available'}</div><div class="modal-types">${types.map(typeBadge).join('')||''}</div></div></div>
     <section class="fa-base-stats" aria-label="Base stats"><div class="fa-stats-heading"><h3>Base stats</h3><strong>${statTotal===null?'Stats unavailable':`Total ${statTotal}`}</strong></div>${statRows}${statTotal===null?'<p class="note fa-stat-warning">Some or all base stats could not be resolved for this form.</p>':''}</section>
     <p class="note">${owner(mon.name)?`Drafted by <strong>${esc(owner(mon.name))}</strong>.`:'This Pokémon is available — it does not appear on any currently published roster.'}</p>
     <div class="actions"><button class="btn" id="modalClose" type="button">Close</button></div>
@@ -324,11 +358,13 @@ async function load(){
     const draftState=await SBL.draft.read();
     const nextPool=draftState?.settings?.draft?.pool||[];
     const nextSignature=JSON.stringify(nextPool);
-    if(nextSignature!==draftPoolSignature){draftPoolIndex=nextPool;draftPoolSignature=nextSignature;statResolver.setSources({pool:draftPoolIndex,dex:dexData});filterMemo.clear();}
+    if(nextSignature!==draftPoolSignature){draftPoolIndex=nextPool;draftPoolSignature=nextSignature;statResolver.setSources({pool:draftPoolIndex,dex:dexData});filterMemo.clear();draftPoolByName=new Map(draftPoolIndex.map(mon=>[key(mon.name),mon]));}
   }catch(_){}
   const result=await SBL.freeAgency.load(db);
   settings=result.settings||settings;
+  const pointsRangeChanged=syncPublishedPointRange(settings.freeAgency?.mons);
   allRosters=result.rosters||{};
+  rebuildOwnerIndex();
   await loadMulliganState();
   const mons=result.pool||[];
 
@@ -338,7 +374,8 @@ async function load(){
   const changed=signature!==lastDataSignature;
   lastDataSignature=signature;
   statResolver.setSources({pool:draftPoolIndex,dex:dexData});
-  if(changed) render();
+  draftPoolByName=new Map(draftPoolIndex.map(mon=>[key(mon.name),mon]));
+  if(changed || pointsRangeChanged) render();
 }
 
 function dexKey(name){
@@ -354,13 +391,20 @@ function getLearnset(name){
   return dexData.learnsets[k]?.learnset || dexData.learnsets[k] || {};
 }
 const filterMemo=new Map();
+function memoFilter(key,value){if(filterMemo.size>=25000)filterMemo.clear();filterMemo.set(key,value);return value;}
+const monMetaCache=new WeakMap();
+function monMeta(mon){
+  let meta=monMetaCache.get(mon);
+  if(!meta){meta={nameLower:String(mon?.name||'').toLowerCase(),mega:!!mon?.isMega||!!SBL?.pokemon?.isMega?.(mon?.name),types:lookupTypes(mon?.name)};monMetaCache.set(mon,meta);}
+  return meta;
+}
 function hasMove(name, needle){
   if(!needle) return true;
   const mk='m|'+key(name)+'|'+key(needle); if(filterMemo.has(mk)) return filterMemo.get(mk);
   const q=key(needle).replace(/-/g,'');
   if(!q) return true;
   const ls=getLearnset(name);
-  const out=Object.keys(ls).some(m=>m.replace(/-/g,'').includes(q)); filterMemo.set(mk,out); return out;
+  const out=Object.keys(ls).some(m=>m.replace(/-/g,'').includes(q)); memoFilter(mk,out); return out;
 }
 function hasAbility(name, needle){
   if(!needle) return true;
@@ -370,7 +414,7 @@ function hasAbility(name, needle){
   const stored=Array.isArray(poolEntry?.abilities)?poolEntry.abilities:[];
   const e=getDexEntry(name);
   const values=[...stored,...Object.values(e?.abilities||{})];
-  const out=values.some(a=>key(a).includes(q)); filterMemo.set(mk,out); return out;
+  const out=values.some(a=>key(a).includes(q)); memoFilter(mk,out); return out;
 }
 function meetsStat(name, stat, min, max){
   return statResolver.matches(name,stat,min,max);
@@ -402,19 +446,19 @@ async function loadDexData(){
 }
 function scheduleFilterRender(){
   clearTimeout(filterRenderTimer);
-  filterRenderTimer=setTimeout(()=>{ if(!document.hidden) renderResults(); },120);
+  filterRenderTimer=setTimeout(()=>{ if(!document.hidden) renderResults(); },45);
 }
 
 function applyFilters(mons){
   return mons.filter(m=>{
     // name
-    if(filterName && !String(m.name).toLowerCase().includes(filterName)) return false;
+    const meta=monMeta(m);
+    if(filterName && !meta.nameLower.includes(filterName)) return false;
     // points
     {const pv=Number(m.points); if(filterPtsMin>PTS_MIN && !(pv>=filterPtsMin)) return false; if(filterPtsMax<PTS_MAX && !(pv<=filterPtsMax)) return false;}
     // Mega classification
-    const mega=!!m.isMega || !!SBL?.pokemon?.isMega?.(m.name);
-    if(filterMega==='mega'&&!mega) return false;
-    if(filterMega==='standard'&&mega) return false;
+    if(filterMega==='mega'&&!meta.mega) return false;
+    if(filterMega==='standard'&&meta.mega) return false;
     // availability
     const taken=!!owner(m.name);
     if(filterAvail==='available' && taken) return false;
@@ -423,11 +467,18 @@ function applyFilters(mons){
     if(filterAbility && !hasAbility(m.name,filterAbility)) return false;
     if(!meetsStat(m.name,filterStat,filterStatMin,filterStatMax)) return false;
     if(filterTypes.size>0){
-      const types=lookupTypes(m.name);
-      if(!types.some(t=>filterTypes.has(t))) return false;
+      if(!meta.types.some(t=>filterTypes.has(t))) return false;
     }
     return true;
   });
+}
+
+function reconcileChildren(parent,desired){
+  for(let i=0;i<desired.length;i++){
+    const node=desired[i],at=parent.children[i]||null;
+    if(at!==node) parent.insertBefore(node,at);
+  }
+  while(parent.children.length>desired.length) parent.lastElementChild.remove();
 }
 
 function renderResults(){
@@ -444,55 +495,72 @@ function renderResults(){
 
   const results=$('results');
   if(!results) return;
+  const indexByMon=new Map(allMons.map((mon,index)=>[mon,index]));
 
   const activeFilters=(filterName?1:0)+(filterTypes.size>0?1:0)+(ptsFilterActive()?1:0)+(filterMega!=='all'?1:0)+(filterAvail!=='all'?1:0)+(filterMove?1:0)+(filterAbility?1:0)+(filterStat?1:0)+(filterSort?1:0)+(filterStatMin!==''?1:0)+(filterStatMax!==''?1:0);
+  if(!results.querySelector('#faResultsSummary')) results.innerHTML='<div class="summary" id="faResultsSummary"></div><div id="faDexNotice"></div><div id="faTierRoot"></div><div class="empty" id="faEmptyState" hidden></div>';
+  const summary=$('faResultsSummary'),notice=$('faDexNotice'),tierRoot=$('faTierRoot'),empty=$('faEmptyState');
+  summary.innerHTML=`
+    <div class="stat"><div class="note">Showing</div><b>${visible.length}</b></div>
+    <div class="stat"><div class="note">Available</div><b>${free}</b></div>
+    <div class="stat"><div class="note">Taken</div><b>${taken}</b></div>
+    <div class="stat"><div class="note">Total pool</div><b>${allMons.length}</b></div>
+    ${activeFilters?`<button class="clear-filters" id="clearFilters">Clear filters (${activeFilters})</button>`:''}
+    ${draftIsOpen()?`<div class="queue-summary"><strong>${draftQueue.length}</strong> in your draft queue <span id="queueStatus" role="status">${esc(queueSaveState|| (queueReady?'Saved':'Loading queue…'))}</span></div>`:''}`;
+  notice.innerHTML=dexData.error?`<div class="note danger" role="status">Some Pokémon move/ability fallback data could not be loaded (${esc(dexData.error)}). Persisted draft stats remain available for stat filters. <button type="button" class="ghost small" id="retryDexData">Retry data load</button></div>`:'';
 
-  results.innerHTML=`
-    <div class="summary">
-      <div class="stat"><div class="note">Showing</div><b>${visible.length}</b></div>
-      <div class="stat"><div class="note">Available</div><b>${free}</b></div>
-      <div class="stat"><div class="note">Taken</div><b>${taken}</b></div>
-      <div class="stat"><div class="note">Total pool</div><b>${allMons.length}</b></div>
-      ${activeFilters?`<button class="clear-filters" id="clearFilters">Clear filters (${activeFilters})</button>`:''}
-      ${draftIsOpen()?`<div class="queue-summary"><strong>${draftQueue.length}</strong> in your draft queue <span id="queueStatus" role="status">${esc(queueSaveState|| (queueReady?'Saved':'Loading queue…'))}</span></div>`:''}
-    </div>
-    ${dexData.error ? `<div class="note danger" role="status">Some Pokémon move/ability fallback data could not be loaded (${esc(dexData.error)}). Persisted draft stats remain available for stat filters. <button type="button" class="ghost small" id="retryDexData">Retry data load</button></div>` : ''}
-    ${tiers.length ? tiers.map(p=>{
-      const label=Number(p)===1?'1 POINT':`${p} POINTS`;
-      return `<section class="tier">
-        <div class="tier-head"><h2>${label}</h2><span class="note">${groups[p].length} shown</span></div>
-        <div class="grid">${groups[p].map(m=>{
-          const o=owner(m.name), types=lookupTypes(m.name);
-          return `<article class="mon ${o?'taken':''}" data-name="${esc(m.name)}">
-            ${sprite(m.name)}
-            <div class="mon-name">${esc((SBL.pokemon.displayNameWithForm ? SBL.pokemon.displayNameWithForm(m.name) : SBL.pokemon.displayName(m.name)))}</div>
-            <div class="mon-points">${m.points??'—'} pts${m.isMega?' · MEGA · COST TBD':''}</div>
-            <div class="mon-types">${types.map(typeBadge).join('')}</div>
-            ${filterStat?`<div class="note mon-stat-value">${STAT_LABELS[filterStat]||filterStat} ${esc(String(statResolver.statValue(m.name,filterStat)??'—'))}</div>`:''}
-            ${draftIsOpen()?`<button class="queue-toggle ${queueContains(m)?'queued':''}" type="button" data-queue="${esc(m.id||m.name)}" aria-pressed="${queueContains(m)}">${queueContains(m)?'★ In draft queue':'☆ Add to draft queue'}</button>`:''}
-            <div class="mon-status ${o?'taken-status':'available'}">${o?'Drafted by '+esc(o):'Available'}</div>
-          </article>`;
-        }).join('')}</div>
-      </section>`;
-    }).join('') : `<div class="empty">${allMons.length?'No Pokémon match your filters.':'No Free Agency pool has been published yet.'}</div>`}`;
+  const desiredTiers=[];
+  for(const p of tiers){
+    let section=resultTierCache.get(p);
+    if(!section){
+      section=document.createElement('section');section.className='tier';
+      section.innerHTML='<div class="tier-head"><h2></h2><span class="note"></span></div><div class="grid"></div>';
+      resultTierCache.set(p,section);
+    }
+    const heading=section.querySelector('.tier-head h2'),count=section.querySelector('.tier-head .note'),grid=section.querySelector('.grid');
+    heading.textContent=Number(p)===1?'1 POINT':`${p} POINTS`;count.textContent=`${groups[p].length} shown`;
+    const desiredCards=[];
+    for(const m of groups[p]){
+      const originalIndex=indexByMon.get(m)??-1;
+      const cacheKey=key(m.name),o=owner(m.name),types=monMeta(m).types,queued=queueContains(m),isDraftOpen=draftIsOpen();
+      const statValue=filterStat?statResolver.statValue(m.name,filterStat):null;
+      const signature=JSON.stringify([originalIndex,m.name,o,m.points,!!m.isMega,types,filterStat,statValue,isDraftOpen,queued]);
+      let cached=resultCardCache.get(cacheKey);
+      if(!cached){cached={node:document.createElement('article'),signature:''};cached.node.className='mon';resultCardCache.set(cacheKey,cached);}
+      if(cached.signature!==signature){
+        const card=cached.node;card.className=`mon ${o?'taken':''}`;card.dataset.index=String(originalIndex);card.dataset.name=m.name;
+        card.innerHTML=`${sprite(m.name)}
+          <div class="mon-name">${esc((SBL.pokemon.displayNameWithForm ? SBL.pokemon.displayNameWithForm(m.name) : SBL.pokemon.displayName(m.name)))}</div>
+          <div class="mon-points">${m.points??'—'} pts</div>
+          <div class="mon-types">${types.map(typeBadge).join('')}</div>
+          ${filterStat?`<div class="note mon-stat-value">${STAT_LABELS[filterStat]||filterStat} ${esc(String(statValue??'—'))}</div>`:''}
+          ${isDraftOpen?`<button class="queue-toggle ${queued?'queued':''}" type="button" data-queue-index="${originalIndex}" aria-pressed="${queued}">${queued?'★ In draft queue':'☆ Add to draft queue'}</button>`:''}
+          <div class="mon-status ${o?'taken-status':'available'}">${o?'Drafted by '+esc(o):'Available'}</div>`;
+        cached.signature=signature;
+      }
+      desiredCards.push(cached.node);
+    }
+    reconcileChildren(grid,desiredCards);
+    desiredTiers.push(section);
+  }
+  reconcileChildren(tierRoot,desiredTiers);
+  empty.hidden=tiers.length>0;
+  if(!tiers.length) empty.textContent=allMons.length?'No Pokémon match your filters.':'No Free Agency pool has been published yet.';
 
-  const retryDex=$('retryDexData');
-  if(retryDex) retryDex.onclick=()=>loadDexData();
-  const clearBtn=$('clearFilters');
-  if(clearBtn) clearBtn.onclick=()=>{
-    filterName='';filterTypes.clear();filterPtsMin=PTS_MIN;filterPtsMax=PTS_MAX;filterMega='all';filterAvail='all';filterMove='';filterAbility='';filterStat='';filterStatMin='';filterStatMax='';filterSort='';
-    syncFilterControls();
-    renderResults();
-  };
-
-  results.querySelectorAll('.mon').forEach(el=>el.onclick=e=>{
-    if(e.target.closest('[data-queue]')) return;
-    const m=allMons.find(x=>key(x.name)===key(el.dataset.name));
-    if(m) openSelection(m);
-  });
-  results.querySelectorAll('[data-queue]').forEach(btn=>btn.onclick=e=>{
-    e.stopPropagation(); const m=allMons.find(x=>String(x.id||x.name)===btn.dataset.queue); if(m) toggleQueue(m);
-  });
+  if(resultsDelegatedRoot!==results){
+    resultsDelegatedRoot=results;
+    results.addEventListener('click',e=>{
+      const retry=e.target.closest('#retryDexData'); if(retry){loadDexData();return;}
+      const clear=e.target.closest('#clearFilters'); if(clear){
+        filterName='';filterTypes.clear();filterPtsMin=PTS_MIN;filterPtsMax=PTS_MAX;filterMega='all';filterAvail='all';filterMove='';filterAbility='';filterStat='';filterStatMin='';filterStatMax='';filterSort='';
+        syncFilterControls();renderResults();return;
+      }
+      const queueButton=e.target.closest('[data-queue-index]');
+      if(queueButton){e.stopPropagation();const mon=settings.freeAgency?.mons?.[Number(queueButton.dataset.queueIndex)];if(mon)toggleQueue(mon);return;}
+      const card=e.target.closest('.mon[data-index]');
+      if(card){const mon=settings.freeAgency?.mons?.[Number(card.dataset.index)];if(mon)openSelection(mon);}
+    },{passive:true});
+  }
 }
 
 function syncFilterControls(){
@@ -503,10 +571,11 @@ function syncFilterControls(){
     const el=$(id); if(el && document.activeElement!==el && el.value!==val) el.value=val;
   });
   const pMin=$('filterPtsMin'),pMax=$('filterPtsMax');
-  if(pMin&&document.activeElement!==pMin) pMin.value=String(filterPtsMin);
-  if(pMax&&document.activeElement!==pMax) pMax.value=String(filterPtsMax);
+  if(pMin){pMin.min=String(PTS_MIN);pMin.max=String(PTS_MAX);if(document.activeElement!==pMin)pMin.value=String(filterPtsMin);}
+  if(pMax){pMax.min=String(PTS_MIN);pMax.max=String(PTS_MAX);if(document.activeElement!==pMax)pMax.value=String(filterPtsMax);}
+  const endpoints=document.querySelectorAll('.points-slider-ends span');
+  if(endpoints.length===2){endpoints[0].textContent=`${PTS_MIN} · Any`;endpoints[1].textContent=`${PTS_MAX} · Any`;}
   const pLabel=$('ptsRangeLabel'); if(pLabel) pLabel.textContent=ptsRangeText();
-  const fill=$('pointsSliderFill');if(fill){const lo=(filterPtsMin-PTS_MIN)/(PTS_MAX-PTS_MIN)*100,hi=(filterPtsMax-PTS_MIN)/(PTS_MAX-PTS_MIN)*100;fill.style.left=lo+'%';fill.style.width=(hi-lo)+'%';}
   const mega=$('filterMega'); if(mega && mega.value!==filterMega) mega.value=filterMega;
   const stat=$('filterStat'); if(stat && stat.value!==filterStat) stat.value=filterStat;
   const sortSel=$('filterSort'); if(sortSel && sortSel.value!==filterSort) sortSel.value=filterSort;
@@ -517,12 +586,11 @@ function syncFilterControls(){
 }
 
 function ptsRangeText(){
-  if(!ptsFilterActive()) return 'All points (1\u201320)';
+  if(!ptsFilterActive()) return `All points (${PTS_MIN}\u2013${PTS_MAX})`;
   return filterPtsMin===filterPtsMax?`${filterPtsMin} pts`:`${filterPtsMin}\u2013${filterPtsMax} pts`;
 }
 
 function render(){
-  const allMons=Array.isArray(settings.freeAgency?.mons)?settings.freeAgency.mons:[];
   if($('results') && $('searchName') && $('filterMove') && $('filterAbility')){
     syncMulliganPanel();
     renderResults();
@@ -530,15 +598,15 @@ function render(){
     return;
   }
 
-  const pointValues=[...new Set(allMons.map(m=>Number(m.points)||0))].sort((a,b)=>b-a);
 
   $('main').innerHTML=`
     ${mulliganPanelHtml()}
     <div class="toolbar">
       <div class="toolbar-wide"><label>Search by name</label><input type="text" id="searchName" value="${esc(filterName)}" placeholder="e.g. Landorus, Cinderace…" autocomplete="off"></div>
       <div><label for="filterMega">Pokémon form</label><select class="filter-select" id="filterMega"><option value="all" ${filterMega==='all'?'selected':''}>All Pokémon</option><option value="mega" ${filterMega==='mega'?'selected':''}>Mega only</option><option value="standard" ${filterMega==='standard'?'selected':''}>Non-Mega only</option></select></div>
-      <div class="points-filter points-slider"><label>Points range <span class="pts-range-label" id="ptsRangeLabel">${esc(ptsRangeText())}</span></label><div class="points-dual-slider"><div class="points-slider-track"><i id="pointsSliderFill"></i></div><input type="range" id="filterPtsMin" min="${PTS_MIN}" max="${PTS_MAX}" step="1" value="${filterPtsMin}" aria-label="Minimum points"><input type="range" id="filterPtsMax" min="${PTS_MIN}" max="${PTS_MAX}" step="1" value="${filterPtsMax}" aria-label="Maximum points"></div><div class="points-slider-ends"><span>${PTS_MIN} · Any</span><span>${PTS_MAX} · Any</span></div></div>
+      <div class="points-filter points-range-inputs"><label>Points range <span class="pts-range-label" id="ptsRangeLabel">${esc(ptsRangeText())}</span></label><div class="points-range-fields"><label class="sr-only" for="filterPtsMin">Minimum points</label><input type="number" id="filterPtsMin" min="${PTS_MIN}" max="${PTS_MAX}" step="1" value="${filterPtsMin}" inputmode="numeric" aria-label="Minimum points"><span>to</span><label class="sr-only" for="filterPtsMax">Maximum points</label><input type="number" id="filterPtsMax" min="${PTS_MIN}" max="${PTS_MAX}" step="1" value="${filterPtsMax}" inputmode="numeric" aria-label="Maximum points"></div><div class="points-slider-ends"><span>${PTS_MIN} · Any</span><span>${PTS_MAX} · Any</span></div></div>
       <div><label>Availability</label><div class="avail-toggle"><button class="avail-btn ${filterAvail==='all'?'active':''}" data-avail="all">All</button><button class="avail-btn ${filterAvail==='available'?'active':''}" data-avail="available">Available</button><button class="avail-btn ${filterAvail==='taken'?'active':''}" data-avail="taken">Taken</button></div></div>
+      <details class="free-agency-advanced" ${(filterMove||filterAbility||filterStat||filterStatMin!==''||filterStatMax!=='')?'open':''}><summary><span>Advanced filters</span><small>Moves, abilities and base stats</small></summary><div class="free-agency-advanced-grid">
       <div class="toolbar-wide"><label>Move</label><input type="text" id="filterMove" value="${esc(filterMove)}" placeholder="e.g. Earthquake, Knock Off…" autocomplete="off"></div>
       <div class="toolbar-wide"><label>Ability</label><input type="text" id="filterAbility" value="${esc(filterAbility)}" placeholder="e.g. Intimidate, Levitate…" autocomplete="off"></div>
       <div><label for="filterStat">Stat to filter / sort by</label><select class="filter-select" id="filterStat"><option value="">No stat selected</option>${[['bst','BST (total of all 6 stats)'],['hp','HP'],['atk','Attack'],['def','Defense'],['spa','Sp. Atk'],['spd','Sp. Def'],['spe','Speed']].map(([v,n])=>`<option value="${v}" ${filterStat===v?'selected':''}>${n}</option>`).join('')}</select></div>
@@ -546,6 +614,8 @@ function render(){
       <div><label for="filterStatMin">Min value of that stat</label><input type="number" id="filterStatMin" min="0" max="1200" value="${esc(filterStatMin)}" placeholder="No minimum"></div>
       <div><label for="filterStatMax">Max value of that stat</label><input type="number" id="filterStatMax" min="0" max="1200" value="${esc(filterStatMax)}" placeholder="No maximum"></div>
       <div class="toolbar-wide stat-help note" id="statHelp">Pick a stat, then set a minimum and/or maximum value for it (a single stat tops out around 255). <strong>BST</strong> is the base stat total: HP + Atk + Def + SpA + SpD + Spe (usually 300\u2013780).</div>
+
+      </div></details>
     </div>
     <details class="type-filter-wrap" id="typeFilterPanel" ${filterTypes.size?'open':''}>
       <summary><span class="type-filter-title">Filter by type</span><span class="type-filter-count" id="typeFilterCount">${filterTypes.size?`${filterTypes.size} selected`:'All types'}</span></summary>
@@ -559,8 +629,9 @@ function render(){
   $('filterAbility').oninput=e=>{filterAbility=e.target.value;schedule();};
   $('filterStatMin').oninput=e=>{filterStatMin=e.target.value;if(e.target.value&&!filterStat){filterStat='atk';$('filterStat').value='atk';}schedule();};
   $('filterStatMax').oninput=e=>{filterStatMax=e.target.value;if(e.target.value&&!filterStat){filterStat='atk';$('filterStat').value='atk';}schedule();};
-  $('filterPtsMin').oninput=e=>{filterPtsMin=Math.min(Number(e.target.value),filterPtsMax);renderResults();syncFilterControls();};
-  $('filterPtsMax').oninput=e=>{filterPtsMax=Math.max(Number(e.target.value),filterPtsMin);renderResults();syncFilterControls();};
+  $('filterPtsMin').oninput=e=>{const n=e.target.value===''?PTS_MIN:Number(e.target.value);if(Number.isFinite(n)){filterPtsMin=Math.max(PTS_MIN,Math.min(PTS_MAX,Math.round(n)));if(filterPtsMin>filterPtsMax)filterPtsMax=filterPtsMin;}schedule();syncFilterControls();};
+  $('filterPtsMax').oninput=e=>{const n=e.target.value===''?PTS_MAX:Number(e.target.value);if(Number.isFinite(n)){filterPtsMax=Math.max(PTS_MIN,Math.min(PTS_MAX,Math.round(n)));if(filterPtsMax<filterPtsMin)filterPtsMin=filterPtsMax;}schedule();syncFilterControls();};
+  $('filterPtsMin').onblur=()=>syncFilterControls();$('filterPtsMax').onblur=()=>syncFilterControls();
   $('filterMega').onchange=e=>{filterMega=e.target.value;renderResults();syncFilterControls();};
   $('filterStat').onchange=e=>{filterStat=e.target.value;if(!filterStat)filterSort='';renderResults();syncFilterControls();};
   $('filterSort').onchange=e=>{filterSort=e.target.value;if(filterSort&&!filterStat){filterStat='atk';$('filterStat').value='atk';}renderResults();syncFilterControls();};
@@ -579,7 +650,7 @@ function render(){
 (async()=>{
   const ok = await enforceAccessGate();
   if(!ok) return;
-  try{ const draftState=await SBL.draft.read(); draftPoolIndex=draftState?.settings?.draft?.pool||[]; draftPoolSignature=JSON.stringify(draftPoolIndex); statResolver.setSources({pool:draftPoolIndex,dex:dexData}); draftQueue=await SBL.draft.queue.load(); queueReady=true; }catch(_){ draftQueue=[]; queueReady=true; }
+  try{ const draftState=await SBL.draft.read(); draftPoolIndex=draftState?.settings?.draft?.pool||[]; draftPoolSignature=JSON.stringify(draftPoolIndex); statResolver.setSources({pool:draftPoolIndex,dex:dexData}); draftPoolByName=new Map(draftPoolIndex.map(mon=>[key(mon.name),mon])); draftQueue=await SBL.draft.queue.load(); queueReady=true; }catch(_){ draftQueue=[]; queueReady=true; }
   loadDexData();
   load().catch(e=>$("main").innerHTML=`<div class="empty">Could not load Free Agency: ${esc(String(e?.message||e))}</div>`);
   setInterval(()=>{if(!document.hidden)load().catch(()=>{});},5000);

@@ -1106,8 +1106,6 @@ Choose Cancel to keep draft status unchanged.`);
   // ---------- rendering ----------
   const contentEl = document.getElementById('content');
   const tabsEl = document.getElementById('tabs');
-  const appEl = document.getElementById('app');
-  const sidebarToggle = document.getElementById('adminSidebarToggle');
   const ADMIN_LAST_TAB_KEY = 'sbl_admin_last_tab';
   let activeTab = (() => {
     try {
@@ -1128,28 +1126,8 @@ Choose Cancel to keep draft status unchanged.`);
     window.location.reload();
   });
 
-  // Sidebar collapse is a local UI preference; it never touches league data.
-  const SIDEBAR_KEY = 'sbl_admin_sidebar_collapsed';
   const NAV_GROUP_KEY = 'sbl_admin_nav_group';
-  let sidebarCollapsed = localStorage.getItem(SIDEBAR_KEY) === '1';
   let openNavGroup = localStorage.getItem(NAV_GROUP_KEY) || '';
-  function applySidebarState(){
-    if(!appEl) return;
-    appEl.classList.toggle('admin-sidebar-collapsed', sidebarCollapsed);
-    if(sidebarToggle){
-      sidebarToggle.setAttribute('aria-expanded', String(!sidebarCollapsed));
-      sidebarToggle.setAttribute('aria-label', sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
-      sidebarToggle.title = sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
-      const icon = sidebarToggle.querySelector('.admin-sidebar-toggle-icon');
-      if(icon) icon.textContent = sidebarCollapsed ? '›' : '‹';
-    }
-  }
-  applySidebarState();
-  sidebarToggle?.addEventListener('click', ()=>{
-    sidebarCollapsed = !sidebarCollapsed;
-    localStorage.setItem(SIDEBAR_KEY, sidebarCollapsed ? '1' : '0');
-    applySidebarState();
-  });
 
   function syncAdminNavGroups() {
     tabsEl.querySelectorAll('.admin-nav-group').forEach(group => {
@@ -1276,6 +1254,7 @@ Choose Cancel to keep draft status unchanged.`);
       'bug-reports': renderBugReports,
       draft: renderDraft,
       freeagency: renderFreeAgency,
+      'pokemon-roles': renderPokemonRoles,
       trades: renderTrades,
       updates: renderUpdates,
       commissioner: renderPeople,
@@ -1301,7 +1280,7 @@ Choose Cancel to keep draft status unchanged.`);
   }
 
   const ADMIN_SECTION_WORKSPACE_TABS = new Set([
-    'people','legacy-migration','draft','freeagency','trades','updates',
+    'people','legacy-migration','draft','freeagency','pokemon-roles','trades','updates',
     'franchise-requests','settings-franchises','settings-data','settings-system'
   ]);
   function applyAdminSectionWorkspace(container=contentEl, workspaceKey='main', headingOverride=''){
@@ -1357,6 +1336,12 @@ Choose Cancel to keep draft status unchanged.`);
       body.appendChild(pane);
     });
 
+    // A nested section title can repeat the workspace heading verbatim.
+    // Keep its description/actions, but remove only the redundant heading text.
+    const outerTitle = host.querySelector(':scope > .admin-section-title h2');
+    if(outerTitle && outerTitle.textContent.trim().toLowerCase() === heading.trim().toLowerCase()) {
+      outerTitle.remove();
+    }
     workspace.append(header, nav, body);
     host.appendChild(workspace);
     nav.addEventListener('click', event => {
@@ -3398,7 +3383,7 @@ function renderDraft(){ return drawDraft(); }
   function roleSettingsPanelHtml(){
     const selected=String(STATE.settings?.pokemonRoleFormat||'gen9ou');
     const options=ROLE_FORMATS.some(x=>x.format_id===selected)?ROLE_FORMATS:ROLE_FORMATS.concat([{format_id:selected,label:selected}]);
-    return `<section class="panel" id="pokemonRoleSettingsPanel"><div class="section-head-row"><div><div class="admin-dashboard-kicker">ADMIN CONFIGURATION</div><h2>Competitive role data</h2><p class="note">Choose the Pokékipe format used for role suggestions and automatic assignment. This setting only controls suggestions; saved Pokémon role assignments remain global and are not replaced when the format changes.</p></div><span class="badge">ADMIN ONLY</span></div><div class="row" style="align-items:flex-end;margin-top:12px"><div><label for="pokemonRoleFormat">Suggestion format</label><select id="pokemonRoleFormat">${options.map(x=>`<option value="${SBL.pokemon.escapeHtml(x.format_id)}" ${x.format_id===selected?'selected':''}>${SBL.pokemon.escapeHtml(x.label||x.format_id)}</option>`).join('')}</select></div><div style="flex:0"><button type="button" class="ghost" id="loadPokemonRoleFormats">Load formats / test API</button></div><div style="flex:0"><button type="button" class="primary" id="savePokemonRoleFormat">Save format</button></div></div><div class="note" id="pokemonRoleFormatStatus" role="status"></div><div class="note">Role source: <a href="https://pokekipe.com/api" target="_blank" rel="noopener">Pokékipe public API</a> · CC BY 4.0 attribution to Pokékipe and upstream Smogon data is shown in the Draft Planner and Draft Room. Use Admin → Free Agency to load the role catalogue, bulk-assign roles, or make manual assignments.</div></section>`;
+    return `<section class="panel" id="pokemonRoleSettingsPanel"><div class="section-head-row"><div><div class="admin-dashboard-kicker">ADMIN CONFIGURATION</div><h2>Competitive role data</h2><p class="note">Choose the Pokékipe format used for role suggestions and automatic assignment. This setting only controls suggestions; saved Pokémon role assignments remain global and are not replaced when the format changes.</p></div><span class="badge">ADMIN ONLY</span></div><div class="row" style="align-items:flex-end;margin-top:12px"><div><label for="pokemonRoleFormat">Suggestion format</label><select id="pokemonRoleFormat">${options.map(x=>`<option value="${SBL.pokemon.escapeHtml(x.format_id)}" ${x.format_id===selected?'selected':''}>${SBL.pokemon.escapeHtml(x.label||x.format_id)}</option>`).join('')}</select></div><div style="flex:0"><button type="button" class="ghost" id="loadPokemonRoleFormats">Load formats / test API</button></div><div style="flex:0"><button type="button" class="primary" id="savePokemonRoleFormat">Save format</button></div></div><div class="note" id="pokemonRoleFormatStatus" role="status"></div><div class="note">Role source: <a href="https://pokekipe.com/api" target="_blank" rel="noopener">Pokékipe public API</a> · CC BY 4.0 attribution to Pokékipe and upstream Smogon data is shown in the Draft Planner and Draft Room. Use Admin → Pokémon Roles to load the role catalogue, bulk-assign roles, or make manual assignments.</div></section>`;
   }
   function wireRoleSettings(){
     const status=document.getElementById('pokemonRoleFormatStatus');
@@ -3499,7 +3484,7 @@ function renderDraft(){ return drawDraft(); }
   }
   async function wireRoleAssignmentPanel(current){
     const status=document.getElementById('freeAgencyRoleStatus');
-    const refresh=()=>renderFreeAgency();
+    const refresh=()=>renderPokemonRoles();
     document.getElementById('roleAssignmentPokemon')?.addEventListener('change',e=>{ROLE_EDITOR_POKEMON=e.target.value;refresh();});
     document.querySelectorAll('[data-edit-pokemon-roles]').forEach(btn=>btn.addEventListener('click',()=>{ROLE_EDITOR_POKEMON=btn.dataset.editPokemonRoles;refresh();}));
     document.getElementById('loadRoleCatalogueBtn')?.addEventListener('click',async e=>{
@@ -3558,7 +3543,7 @@ function renderDraft(){ return drawDraft(); }
         <h2>Published Free Agency <span class="badge">${current.length} Pokémon</span></h2>
         ${current.length?`<div class="note">${SBL.pokemon.escapeHtml(STATE.settings?.freeAgency?.source||'Workbook')} · ${tiers.length} point tiers</div><div style="max-height:380px;overflow:auto;margin-top:12px"><table><thead><tr><th>Pokémon</th><th>Points</th><th>Roles</th></tr></thead><tbody>${current.map(m=>`<tr><td>${SBL.pokemon.spriteMarkup(m.name,'sprite')} ${SBL.pokemon.escapeHtml(m.name)}</td><td class="num">${Number(m.points)||0}</td><td>${rolesForAdmin(m.name).map(r=>SBL.pokemon.escapeHtml(roleLabelAdmin(r))).join(' · ')||'<span class="note">Unassigned</span>'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">No Free Agency pool published yet.</div>'}
       </div>
-      ${renderRoleAssignmentPanel(current)}`;
+      `;
 
     document.getElementById('importFreeAgency').onclick=async()=>{
       const file=document.getElementById('freeAgencyFile').files?.[0];
@@ -3574,6 +3559,15 @@ function renderDraft(){ return drawDraft(); }
       }catch(e){status.innerHTML='<div class="note danger">'+SBL.pokemon.escapeHtml(e.message)+'</div>'}
       finally{btn.disabled=false}
     };
+  }
+
+  // Dedicated Pokémon Roles workspace. Reuse the existing role-management
+  // renderer and handlers, but present only the role tools rather than making
+  // admins navigate through the Free Agency workbook importer.
+  function renderPokemonRoles(){
+    const current=Array.isArray(STATE.settings?.freeAgency?.mons)?STATE.settings.freeAgency.mons:[];
+    contentEl.innerHTML=`<section class="admin-section pokemon-roles-workspace"><div class="admin-section-title"><div><div class="admin-dashboard-kicker">COMPETITIVE CLASSIFICATION</div><h2>Pokémon Roles</h2><p class="note">Manage the competitive role catalogue, automatic suggestions and protected manual assignments independently of workbook publishing.</p></div></div>${roleSettingsPanelHtml()}${renderRoleAssignmentPanel(current)}</section>`;
+    wireRoleSettings();
     wireRoleAssignmentPanel(current);
   }
 
@@ -7028,7 +7022,7 @@ function renderDraft(){ return drawDraft(); }
     const showSystem = mode === 'system';
     contentEl.innerHTML = `
       ${showFranchises ? `
-      <div class="admin-section"><div class="admin-section-title"><div><h2>Franchises &amp; Users</h2><div class="note">Manage the mapping between Showdown usernames and league franchises, then clean up likely duplicates.</div></div></div>
+      <div class="admin-section"><div class="admin-section-title"><div><h2>Showdown Team Mapping</h2><div class="note">Manage the mapping between Showdown usernames and league franchises, then clean up likely duplicates.</div></div></div>
       <div class="panel"><div class="admin-subsection"><h3>Showdown → franchise mapping</h3><div class="note">Map each Pokémon Showdown username to a franchise in the currently selected league. Replay imports use this mapping to attribute results to the correct SBL franchise.</div><div id="mapRows" style="margin-top:12px;"></div><div class="map-row"><input type="text" id="newUser" placeholder="Showdown username"><select id="newTeam"><option value="">Loading league franchises…</option></select><button class="ghost small" id="addMap">Add mapping</button></div></div></div>
       <div class="panel"><div class="admin-subsection"><h3>Duplicate users</h3><div class="note">Review usernames that look like the same person typed differently and merge them into the canonical mapping.</div><div id="dupPlayers" style="margin-top:12px;"></div></div></div>
       <div class="panel"><div class="admin-subsection"><h3>Duplicate franchises</h3><div class="note">Review likely duplicate team tags whose rosters overlap heavily and merge them under the established franchise name.</div><div id="dupTeams" style="margin-top:12px;"></div></div></div></div>` : ''}

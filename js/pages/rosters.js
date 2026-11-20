@@ -50,7 +50,9 @@
 
   // CP4.63: team colours, owner usernames and the roster pop-out.
   let TEAM_SETTINGS = {}, TEAM_MAP = {}, TEAM_ROSTERS = {};
-  function ownerTag(team){ const o = SBL.teamColors?.ownerLabel(TEAM_MAP, team); return o ? `<span class="owner-tag">@${esc(o)}</span>` : ''; }
+  function ownerTag(team){ const o = SBL.teamColors?.ownerLabel?.(TEAM_MAP, team); return o ? `<span class="owner-tag">@${esc(o)}</span>` : ''; }
+  function teamTintClass(settings,team){ return SBL.teamColors?.get?.(settings,team) ? ' team-tinted' : ''; }
+  function teamTintStyle(settings,team){ return SBL.teamColors?.styleAttr?.(settings,team) || ''; }
   const FALLBACK_BUDGET = 115;
   let DRAFT_BUDGETS = {defaultBudget: FALLBACK_BUDGET, budgets: {}};
   function teamBudget(team){
@@ -166,7 +168,7 @@
         const totalMons = selectedTeams.reduce((sum, name) => sum + (rosters[name]?.length || 0), 0);
         rosterSummary.textContent = team === '__all__' ? `${teams.length} franchises · ${totalMons} Pokémon` : `${rosters[team]?.length || 0} Pokémon · ${rosterPoints(rosters[team])} pts spent`;
         content.innerHTML = `${draftNotice}<div class="grid${team === '__all__' ? '' : ' single'}">${selectedTeams.map(name => `
-          <section class="card${SBL.teamColors.get(settings,name)?' team-tinted':''}"${SBL.teamColors.styleAttr(settings,name)}>
+          <section class="card${teamTintClass(settings,name)}"${teamTintStyle(settings,name)}>
             <div class="head"><div><h2><span class="team-link" role="button" tabindex="0" data-team-popup="${esc(name)}" title="Open ${esc(name)} roster">${esc(name)}</span>${ownerTag(name)}</h2><span class="count">${rosters[name].length} Pokémon</span></div>${budgetMarkup(name, rosters[name])}</div>
             <div class="mons">${rosters[name].map(mon => renderPokemon(name, mon)).join('')}</div>${analysisMarkup(name,rosters[name],settings)}
           </section>`).join('')}</div>`;
