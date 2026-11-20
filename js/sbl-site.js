@@ -344,7 +344,6 @@
 
     let lastScrollY = Math.max(0, window.scrollY || window.pageYOffset || 0);
     let scrollTicking = false;
-    const NAV_SCROLL_THRESHOLD = 8;
     const NAV_TOP_REVEAL = 100;
 
     function setNavHidden(hidden) {
@@ -353,15 +352,11 @@
 
     function updateForScroll() {
       const currentY = Math.max(0, window.scrollY || window.pageYOffset || 0);
-      const delta = currentY - lastScrollY;
       if (currentY <= NAV_TOP_REVEAL) {
         setNavHidden(false);
-      } else if (delta > NAV_SCROLL_THRESHOLD) {
-        // Scrolling down: get the navigation out of the way.
+      } else if (!nav.matches(':hover') && !hover.matches(':hover')) {
+        // Once below the top, only pointer hover can reveal navigation.
         setNavHidden(true);
-      } else if (delta < -NAV_SCROLL_THRESHOLD) {
-        // Scrolling up: reveal navigation so it remains easy to reach.
-        setNavHidden(false);
       }
       lastScrollY = currentY;
       scrollTicking = false;
@@ -376,9 +371,15 @@
 
     nav.addEventListener('mouseenter', () => setNavHidden(false));
     hover.addEventListener('mouseenter', () => setNavHidden(false));
-    document.addEventListener('mousemove', e => {
-      if (e.clientY <= 12) setNavHidden(false);
-    }, { passive: true });
+    const hideAfterHover = () => {
+      if ((window.scrollY || window.pageYOffset || 0) > NAV_TOP_REVEAL) {
+        requestAnimationFrame(() => {
+          if (!nav.matches(':hover') && !hover.matches(':hover')) setNavHidden(true);
+        });
+      }
+    };
+    nav.addEventListener('mouseleave', hideAfterHover);
+    hover.addEventListener('mouseleave', hideAfterHover);
 
     // No DOM observer is needed for scroll visibility. In particular, avoid
     // observing nav class mutations and then writing to that same class from
