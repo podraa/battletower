@@ -106,11 +106,39 @@
 
   /* Per-user planning queue: stored per user per season (draft_queues), with a
      localStorage copy so a missing table never loses the plan. */
-  const QKEY=id=>'sbl_draft_queue:'+id;
+  const QKEY=(leagueId,seasonId,uid)=>'sbl_draft_queue:'+leagueId+':'+seasonId+':'+uid;
+  // CP4.141: draft reset invalidates browser-only copies, too. This token is
+  // written by the commissioner reset RPC in the selected season's draft state.
+  // The user's browser clears its OWN named handoffs when they next visit;
+  // those browser-local plans cannot be remotely enumerated by a commissioner.
+  function applyQueueResetToken(c,uid,token,mode){
+    if(!token||!c?.leagueId||!c?.seasonId||!uid)return false;
+    const marker='sbl_draft_queue_reset_seen:'+c.leagueId+':'+c.seasonId+':'+uid;
+    try{
+      if(localStorage.getItem(marker)===token)return false;
+      localStorage.removeItem(QKEY(c.leagueId,c.seasonId,uid));
+      localStorage.removeItem('sbl_draft_queue:'+c.seasonId); // old unscoped fallback
+      if(mode==='clear') localStorage.removeItem('sbl_planner_handoffs_v1:'+uid+':'+c.leagueId+':'+c.seasonId);
+      localStorage.setItem(marker,token);
+      return true;
+    }catch(_){return false;}
+  }
+  function queueResetTokenFromDraft(d){return String(d?.queueResetToken||'');}
+  async function syncQueueReset(){
+    const state=await read();
+    const c=await ensureCtx();
+    const uid=await userId();
+    const token=queueResetTokenFromDraft(state.settings?.draft);
+    const mode=String(state.settings?.draft?.queueResetMode||'clear');
+    const changed=applyQueueResetToken(c,uid,token,mode);
+    return {token,changed};
+  }
   async function userId(){ try{ const {data}=await db().auth.getSession(); return data?.session?.user?.id||''; }catch(_){ return ''; } }
   async function loadQueue(){
     const c=await ensureCtx(); if(!c) return [];
     let ids=null;
+    let resetToken='';
+    try{ const reset=await syncQueueReset();resetToken=reset.token; }catch(e){console.warn('Draft queue reset check unavailable:',e);}
     try{
       const uid=await userId();
       if(uid){
@@ -118,13 +146,17 @@
         if(!error && data) ids=Array.isArray(data.pool_ids)?data.pool_ids:[];
       }
     }catch(_){ }
-    if(ids===null){ try{ ids=JSON.parse(localStorage.getItem(QKEY(c.seasonId))||'null'); }catch(_){ ids=null; } }
+    // After a commissioner reset, a deleted server row means EMPTY, not a
+    // reason to resurrect an obsolete browser cache.
+    if(ids===null && resetToken) ids=[];
+    if(ids===null){ try{ ids=JSON.parse(localStorage.getItem(QKEY(c.leagueId,c.seasonId,await userId()))||'null'); }catch(_){ ids=null; } }
     return Array.isArray(ids)?ids.map(String):[];
   }
   async function saveQueue(ids){
     const c=await ensureCtx(); if(!c) return {ok:false,local:false};
     const list=(ids||[]).map(String);
-    try{ localStorage.setItem(QKEY(c.seasonId),JSON.stringify(list)); }catch(_){ }
+    try{await syncQueueReset();}catch(_){ }
+    try{ localStorage.setItem(QKEY(c.leagueId,c.seasonId,await userId()),JSON.stringify(list)); }catch(_){ }
     try{
       const uid=await userId(); if(!uid) return {ok:false,local:true};
       const {error}=await db().from('draft_queues').upsert(
@@ -399,6 +431,9 @@
       draft.picks=[];
       draft.pool.forEach(m=>{m.drafted=false;m.draftedBy=null;m.pickNumber=null;});
       draft.preDraftRosters=clone(rosters||{});
+      // Freeze the published Free Agency upload before the first pick mutates it.
+      const fa=snapshot.settings.freeAgency||{};
+      draft.preDraftFreeAgency=clone(fa.uploadedMons?.length?fa.uploadedMons:(fa.mons||[]));
       snapshot.settings.rosters=clone(rosters||{});
       return {kind:'open_lobby'};
     },{attempts:4});
@@ -424,17 +459,54 @@
     },{attempts:4});
   }
 
-  async function resetDraft(){
+  async function resetDraft(queueAction){
+    if(!['restore','clear','keep'].includes(queueAction))throw new Error('Choose what to do with draft plans first.');
+    const c=await ensureCtx();
+    if(c){
+      const {data,error}=await db().rpc('sbl_draft_reset',{
+        p_league_id:c.leagueId,p_season_id:c.seasonId,p_queue_action:queueAction
+      });
+      if(!error){
+        const state=await read();
+        return {changed:true,state,result:data||{kind:'reset'}};
+      }
+      if(!isMissingFn(error))throw error;
+      throw new Error('Install the CP4.142 Supabase migration before resetting drafts. The old reset cannot safely clear every coach’s plan.');
+    }
     return mutate((draft,snapshot)=>{
+      // Picks may have removed entries from Free Agency. Restore the uploaded
+      // pool BEFORE discarding pick history; never overwrite point values.
+      const fa=snapshot.settings.freeAgency||{};
+      const saved=Array.isArray(draft.preDraftFreeAgency)?draft.preDraftFreeAgency:
+        (Array.isArray(fa.uploadedMons)?fa.uploadedMons:null);
+      let recovered=false;
+      let restored=[];
+      if(saved){
+        restored=clone(saved);
+      }else{
+        // Legacy draft without a saved upload snapshot: put back only picks
+        // that vanished from Free Agency. Leave every surviving row intact.
+        restored=clone(Array.isArray(fa.mons)?fa.mons:[]);
+        const key=x=>String(typeof x==='string'?x:(x?.name||x?.species||''))
+          .toLowerCase().replace(/[^a-z0-9]/g,'');
+        const present=new Set(restored.map(key));
+        for(const pick of draft.picks||[]){
+          const mon=(draft.pool||[]).find(m=>String(m.id)===String(pick.poolId));
+          const name=mon?.name||pick.name;
+          if(!name||present.has(key(name)))continue;
+          restored.push({name,points:Number(mon?.points??pick.points)||0,...(mon?.isMega?{isMega:true}:{})});
+          present.add(key(name));recovered=true;
+        }
+      }
+      snapshot.settings.freeAgency={...fa,mons:restored};
       draft.pool.forEach(m=>{m.drafted=false;m.draftedBy=null;m.pickNumber=null;});
       draft.picks=[];
       draft.currentPick=0;
       draft.status='setup';
-      if(draft.preDraftRosters){
-        snapshot.settings.rosters=clone(draft.preDraftRosters);
-      }
+      if(draft.preDraftRosters){snapshot.settings.rosters=clone(draft.preDraftRosters);}
       draft.preDraftRosters=null;
-      return {kind:'reset'};
+      draft.preDraftFreeAgency=null;
+      return {kind:'reset',freeAgencyRestored:restored.length,recoveredFromPicks:recovered,usedUploadSnapshot:!!saved};
     },{attempts:4});
   }
 
@@ -469,5 +541,28 @@
     },{attempts:4});
   }
 
-  SBL.draft={STATE_ID,read,version,queue:{load:loadQueue,save:saveQueue},subscribe,subscribeLive,applyPickToState,applyRevertToState,rowToPick,subscribe,mutate,replaceDraft,applyPick,revertLastPick,saveDraftState,openLobby,startDraft,endDraft,resetDraft,normaliseDraft};
+  async function trackerStatus(){
+    const c=await ensureCtx();if(!c)throw new Error('No league season selected.');
+    const {data,error}=await db().rpc('sbl_draft_tracker_status',{p_league_id:c.leagueId,p_season_id:c.seasonId});
+    if(error)throw error;
+    return data;
+  }
+  async function trackerExport(){
+    const c=await ensureCtx();if(!c)throw new Error('No league season selected.');
+    // The database policy forbids the download until the season's draft is
+    // complete. Do not bypass this with privileged credentials in the browser.
+    const all=[];let offset=0;
+    for(;;){
+      const {data,error}=await db().from('draft_tracker_events')
+        .select('*').eq('league_id',c.leagueId).eq('season_id',c.seasonId)
+        .order('pick_id',{ascending:true}).range(offset,offset+499);
+      if(error)throw error;
+      all.push(...(data||[]));
+      if(!data||data.length<500)break;
+      offset+=500;
+    }
+    return {format:'draft-tracker-v1',league_id:c.leagueId,season_id:c.seasonId,exported_at:new Date().toISOString(),events:all};
+  }
+
+  SBL.draft={STATE_ID,read,version,queue:{load:loadQueue,save:saveQueue,syncReset:syncQueueReset},tracker:{status:trackerStatus,export:trackerExport},subscribe,subscribeLive,applyPickToState,applyRevertToState,rowToPick,subscribe,mutate,replaceDraft,applyPick,revertLastPick,saveDraftState,openLobby,startDraft,endDraft,resetDraft,normaliseDraft};
 })();

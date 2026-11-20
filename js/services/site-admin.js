@@ -12,6 +12,30 @@
     return data === true;
   }
 
+  async function trackerSeasons(leagueId){
+    const db=client();if(!db)throw new Error('Supabase client unavailable.');
+    const {data,error}=await db.rpc('sbl_site_admin_tracker_seasons',{p_league_id:leagueId});
+    if(error)throw error;return Array.isArray(data)?data:[];
+  }
+  async function inspectDraftQueues(leagueId,seasonId){
+    const db=client();if(!db)throw new Error('Supabase client unavailable.');
+    const {data,error}=await db.rpc('sbl_site_admin_draft_queue_inspect',{p_league_id:leagueId,p_season_id:seasonId});
+    if(error)throw error;return Array.isArray(data)?data:[];
+  }
+  async function trackerHistory(leagueId,seasonId){
+    const db=client();if(!db)throw new Error('Supabase client unavailable.');
+    // Site-admin RLS is enforced by the database. Publication is NOT implied.
+    const all=[];
+    for(let offset=0;;offset+=500){
+      const {data,error}=await db.from('draft_tracker_events').select('*')
+        .eq('league_id',leagueId).eq('season_id',seasonId)
+        .order('pick_id',{ascending:true}).range(offset,offset+499);
+      if(error)throw error;
+      all.push(...(data||[]));if(!data||data.length<500)break;
+    }
+    return all;
+  }
+
   async function health(){
     const db=client();
     if(!db) throw new Error('Supabase client unavailable.');
@@ -102,5 +126,5 @@
     return data;
   }
 
-  SBL.siteAdmin={isSiteAdmin,isSuperAdmin,health,users,leagues,testAccounts,setTestAccount,setAdmin,deleteLeague,changeLog,addChangeLog};
+  SBL.siteAdmin={isSiteAdmin,isSuperAdmin,health,users,leagues,testAccounts,setTestAccount,setAdmin,deleteLeague,changeLog,addChangeLog,trackerSeasons,inspectDraftQueues,trackerHistory};
 })();

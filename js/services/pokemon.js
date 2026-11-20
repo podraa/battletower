@@ -406,6 +406,108 @@
     'meowstic-mmega':'https://assets.pokestats.gg/pokeapi/orig/pokemon/other/home/10314.png',
     'meowstic-fmega':'https://assets.pokestats.gg/pokeapi/orig/pokemon/other/home/10326.png'
   };
+  // PokeAPI form-specific identifiers for new Mega Pokémon. Never substitute base-form art.
+  // The official-artwork asset may be absent; the image fallback then tries its HOME render.
+  const PRESENTATION_MEGA_IDS={
+    // Verified canonical presentation filenames, including compact X/Y keys.
+    'venusaur-mega':10033,
+    'charizard-megax':10034,
+    'charizard-megay':10035,
+    'blastoise-mega':10036,
+    'alakazam-mega':10037,
+    'gengar-mega':10038,
+    'kangaskhan-mega':10039,
+    'pinsir-mega':10040,
+    'gyarados-mega':10041,
+    'aerodactyl-mega':10042,
+    'mewtwo-megax':10043,
+    'mewtwo-megay':10044,
+    'ampharos-mega':10045,
+    'scizor-mega':10046,
+    'heracross-mega':10047,
+    'houndoom-mega':10048,
+    'tyranitar-mega':10049,
+    'blaziken-mega':10050,
+    'gardevoir-mega':10051,
+    'mawile-mega':10052,
+    'aggron-mega':10053,
+    'medicham-mega':10054,
+    'manectric-mega':10055,
+    'banette-mega':10056,
+    'absol-mega':10057,
+    'garchomp-mega':10058,
+    'lucario-mega':10059,
+    'abomasnow-mega':10060,
+    'latias-mega':10062,
+    'latios-mega':10063,
+    'swampert-mega':10064,
+    'sceptile-mega':10065,
+    'sableye-mega':10066,
+    'altaria-mega':10067,
+    'gallade-mega':10068,
+    'audino-mega':10069,
+    'sharpedo-mega':10070,
+    'slowbro-mega':10071,
+    'steelix-mega':10072,
+    'pidgeot-mega':10073,
+    'glalie-mega':10074,
+    'diancie-mega':10075,
+    'metagross-mega':10076,
+    'rayquaza-mega':10079,
+    'camerupt-mega':10087,
+    'lopunny-mega':10088,
+    'salamence-mega':10089,
+    'beedrill-mega':10090,
+    'clefable-mega':10278,
+    'victreebel-mega':10279,
+    'starmie-mega':10280,
+    'dragonite-mega':10281,
+    'meganium-mega':10282,
+    'feraligatr-mega':10283,
+    'skarmory-mega':10284,
+    'froslass-mega':10285,
+    'emboar-mega':10286,
+    'excadrill-mega':10287,
+    'scolipede-mega':10288,
+    'scrafty-mega':10289,
+    'eelektross-mega':10290,
+    'chandelure-mega':10291,
+    'chesnaught-mega':10292,
+    'delphox-mega':10293,
+    'greninja-mega':10294,
+    'pyroar-mega':10295,
+    'floette-mega':10296,
+    'malamar-mega':10297,
+    'barbaracle-mega':10298,
+    'dragalge-mega':10299,
+    'hawlucha-mega':10300,
+    'zygarde-mega':10301,
+    'drampa-mega':10302,
+    'falinks-mega':10303,
+    'raichu-megax':10304,
+    'raichu-megay':10305,
+    'chimecho-mega':10306,
+    'absol-megaz':10307,
+    'staraptor-mega':10308,
+    'garchomp-megaz':10309,
+    'lucario-megaz':10310,
+    'heatran-mega':10311,
+    'darkrai-mega':10312,
+    'golurk-mega':10313,
+    'meowstic-mmega':10314,
+    'crabominable-mega':10315,
+    'golisopod-mega':10316,
+    'magearna-mega':10317,
+    'magearna-original-mega':10318,
+    'zeraora-mega':10319,
+    'scovillain-mega':10320,
+    'glimmora-mega':10321,
+    'tatsugiri-curly-mega':10322,
+    'tatsugiri-droopy-mega':10323,
+    'tatsugiri-stretchy-mega':10324,
+    'baxcalibur-mega':10325,
+    'meowstic-fmega':10326
+  };
   const MEGA_BASE_FILES={
     'meowstic-male':'meowstic',
     'meowstic-female':'meowstic-f',
@@ -458,7 +560,14 @@
       // base species. Newer ZA/Champions forms use verified static HOME renders.
       const megaKey=String(MEGA_FORM_FILES[mega.base] || (mega.base+'-'+mega.suffix)).toLowerCase();
       const staticAsset=MEGA_STATIC_ASSETS[megaKey];
-      if(staticAsset){urls.push(staticAsset);return urls;}
+      const formId=PRESENTATION_MEGA_IDS[megaKey];
+      if(showcase&&formId){
+        // Try form-specific full artwork before the 512px HOME render.
+        // Missing artwork automatically falls through via handleSpriteError().
+        urls.push(`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${formId}.png`);
+        urls.push(`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/${formId}.png`);
+      }
+      if(staticAsset) urls.push(staticAsset);
       const roots=showcase?[SPRITE_ROOTS['3d'],SPRITE_ROOTS['2d']]:[SPRITE_ROOTS[style],SPRITE_ROOTS[style==='3d'?'2d':'3d']];
       // Pokémon Showdown HOME's verified convention is <species>-mega.png,
       // or <species>-megax / -megay for lettered variants.
