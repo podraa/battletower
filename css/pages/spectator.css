@@ -1,0 +1,21 @@
+/* CP4.140 spectator workspace — restrained information architecture.
+   All colors come from the user-selected theme. */
+.spectator-dashboard{max-width:1050px;margin:0 auto;padding:16px 0 56px;color:var(--sbl-text,var(--text,#fff))}
+.spectator-head{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin:14px 0 26px}
+.spectator-overline{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--sbl-muted,var(--text-dim));margin-bottom:8px}
+.spectator-head h2{font-size:clamp(25px,3vw,34px);letter-spacing:-.035em;line-height:1.15;margin:0;font-weight:760}
+.spectator-state{color:var(--sbl-theme-accent,var(--accent));background:color-mix(in srgb,var(--sbl-theme-accent,var(--accent)) 8%,transparent);border:1px solid var(--sbl-card-border,var(--border));border-radius:5px;font-size:12px;padding:7px 10px;font-weight:650;white-space:nowrap}
+.spectator-current{background:var(--sbl-card-bg,var(--panel));border:1px solid var(--sbl-card-border,var(--border));border-radius:9px;padding:22px 24px;margin-bottom:26px}
+.spectator-section-label,.spectator-section-head span{font:650 10px/1.2 system-ui,sans-serif;letter-spacing:.12em;color:var(--sbl-muted,var(--text-dim))}
+.spectator-current-line{display:flex;justify-content:space-between;gap:18px;align-items:center;margin-top:12px}
+.spectator-current-line strong{font-size:20px;letter-spacing:-.02em}.spectator-current-line p{font-size:13px;color:var(--sbl-muted,var(--text-dim));line-height:1.5;margin:6px 0 0}
+.spectator-state-mark{flex:0 0 33px;width:33px;height:33px;border:2px solid var(--sbl-card-border,var(--border));border-radius:8px;background:linear-gradient(135deg,transparent 42%,var(--sbl-theme-accent,var(--accent)) 43%,var(--sbl-theme-accent,var(--accent)) 54%,transparent 55%);opacity:.75}
+.spectator-reserved{display:flex;align-items:center;gap:14px;border-top:1px solid var(--sbl-card-border,var(--border));margin-top:21px;padding-top:13px;font-size:13px;flex-wrap:wrap}.spectator-reserved span{color:var(--sbl-muted,var(--text-dim));min-width:125px}.spectator-reserved strong{font-size:13px}
+.spectator-section-head{display:flex;justify-content:space-between;align-items:center;margin:0 0 12px}.spectator-section-head h3{font-size:15px;margin:0;letter-spacing:-.01em}
+.spectator-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-bottom:24px}
+.spectator-tile{display:flex;gap:16px;align-items:center;text-decoration:none!important;padding:17px 19px;border:1px solid var(--sbl-card-border,var(--border));border-radius:8px;background:var(--sbl-card-bg,var(--panel));color:var(--sbl-text,#fff)!important;min-width:0;transition:border-color .15s,background .15s}
+.spectator-tile:hover,.spectator-tile:focus-visible{border-color:var(--sbl-theme-accent,var(--accent));background:var(--sbl-card-alt,var(--panel2));transform:none;outline-offset:2px}
+.spectator-tile-index{display:grid;place-items:center;color:var(--sbl-muted,var(--text-dim));border:1px solid var(--sbl-card-border,var(--border));width:35px;height:35px;flex:0 0 35px;border-radius:6px;font:650 12px/1 system-ui,sans-serif}
+.spectator-tile-copy{flex:1;min-width:0}.spectator-tile strong{display:block;font-size:14px;font-weight:700}.spectator-tile small{display:block;color:var(--sbl-muted,var(--text-dim));font-size:12px;margin-top:3px;line-height:1.4}.spectator-tile-arrow{margin-left:auto;color:var(--sbl-muted,var(--text-dim));font-size:18px}
+.spectator-membership{display:flex;justify-content:space-between;align-items:center;gap:18px;border-top:1px solid var(--sbl-card-border,var(--border));padding:18px 0 0;margin-top:10px}.spectator-membership h3{font-size:14px;margin:0 0 5px}.spectator-membership p{font-size:12px;line-height:1.5;max-width:660px;margin:0;color:var(--sbl-muted,var(--text-dim))}.spectator-membership button{white-space:nowrap}
+@media(max-width:650px){.spectator-dashboard{padding-inline:12px}.spectator-grid{grid-template-columns:1fr}.spectator-head{align-items:flex-start;flex-wrap:wrap}.spectator-current{padding:18px}.spectator-membership{align-items:flex-start;flex-direction:column}.spectator-tile{padding:14px}}

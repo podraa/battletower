@@ -496,3 +496,43 @@ body{
 .roster-empty-state p{max-width:540px;margin:0 auto;color:var(--text-dim);line-height:1.7}
 .roster-draft-notice{margin:0 0 20px;padding:13px 16px;border:1px solid rgba(105,169,232,.35);border-radius:12px;background:rgba(105,169,232,.09);color:var(--text-dim);line-height:1.55}
 .roster-draft-notice strong{color:var(--text)}
+
+/* CP4.135: compact franchise directory; the actual roster is only in the dialog. */
+.roster-directory-intro{display:flex;align-items:end;justify-content:space-between;gap:16px;margin:18px 0 20px}
+.roster-directory-intro h2{margin:0 0 5px;font-size:clamp(21px,2.5vw,30px);color:#fff}
+.roster-directory-intro p{margin:0;color:var(--text-dim)}
+.roster-directory-intro>span{color:#d6b5ec;font-size:12px;white-space:nowrap}
+.roster-franchise-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr));gap:14px}
+.roster-franchise-tile{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:190px;width:100%;padding:22px 16px;color:#fff;text-align:center;cursor:pointer;border:1px solid #41416c;border-radius:18px;background:linear-gradient(145deg,#191e3b,#101a33);box-shadow:0 9px 24px #02041240;transition:transform .16s,border-color .16s,box-shadow .16s}
+.roster-franchise-tile:hover{transform:translateY(-3px);border-color:#cd8bc4;box-shadow:0 14px 34px #03041288}
+.roster-franchise-tile:focus-visible{outline:3px solid #ec9cce;outline-offset:3px}
+.roster-franchise-tile.team-tinted{border-top:3px solid var(--team-color,#c689c5)}
+.roster-franchise-logo{width:76px;height:76px;border-radius:20px;display:grid;place-items:center;background:linear-gradient(140deg,#41446b,#2a2e58);border:1px solid #8886b34d;font-weight:900;font-size:25px;letter-spacing:.06em;color:#f7d7ff;box-shadow:inset 0 1px #ffffff1a}
+.roster-franchise-name{font-size:clamp(15px,1.6vw,19px);font-weight:850;line-height:1.2;overflow-wrap:anywhere}
+.roster-franchise-hint{font-size:11px;font-weight:750;color:#caa5e7;text-transform:uppercase;letter-spacing:.08em}
+@media(max-width:580px){.roster-directory-intro{align-items:start;flex-direction:column}.roster-franchise-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.roster-franchise-tile{min-height:160px;padding:14px 8px}.roster-franchise-logo{width:60px;height:60px;font-size:20px}}
+
+/* CP4.136: franchise identity cards show their signature Pokémon, not initials. */
+.roster-franchise-tile{min-height:225px;gap:7px;padding:18px 14px 16px}
+.roster-franchise-name{font-size:clamp(15px,1.5vw,19px);min-height:2.25em;display:grid;place-items:center}
+.roster-franchise-signature-art{width:112px;height:112px;display:grid;place-items:center;overflow:hidden;border-radius:18px;background:radial-gradient(circle at 50% 50%,#5552843d,transparent 74%)}
+.roster-franchise-signature-art .sprite,.roster-franchise-signature-art img{display:block;width:104px!important;height:104px!important;max-width:100%;object-fit:contain;image-rendering:auto}
+.roster-franchise-empty-mark{font-size:44px;color:#a6a0c9;font-weight:700}
+.roster-franchise-signature-caption{color:#bc9dce;font-size:9px;font-weight:850;letter-spacing:.13em}
+.roster-franchise-signature-name{font-size:12px;color:#f0dbf6;font-weight:750;line-height:1.2}
+@media(max-width:580px){.roster-franchise-tile{min-height:202px;padding:12px 8px}.roster-franchise-signature-art{width:88px;height:88px}.roster-franchise-signature-art .sprite,.roster-franchise-signature-art img{width:82px!important;height:82px!important}}
+
+/* CP4.137 — Clean, image-led franchise directory. One heading, no redundant prompts. */
+.roster-directory-intro{margin:6px 0 18px;align-items:center}
+.roster-directory-intro h1{margin:0;color:var(--text,#fff);font-size:clamp(23px,2.8vw,34px);letter-spacing:-.025em}
+.roster-directory-intro>span{color:var(--text-dim,#b8a4bb);font-size:12px}
+.roster-franchise-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,225px),1fr));gap:14px}
+.roster-franchise-tile{--tile-accent:var(--team-color,#a883ca);min-height:205px;gap:6px;padding:17px 13px 15px;border:1px solid color-mix(in srgb,var(--tile-accent) 58%,#262037);border-radius:18px;background:radial-gradient(ellipse at 50% 63%,color-mix(in srgb,var(--tile-accent) 13%,transparent),transparent 72%),linear-gradient(145deg,#1f1830,#171321);box-shadow:0 6px 18px #0004;transition:transform .18s,border-color .18s,box-shadow .18s}
+.roster-franchise-tile.team-tinted{border-top:1px solid color-mix(in srgb,var(--tile-accent) 58%,#262037);border-left:3px solid var(--tile-accent)}
+.roster-franchise-tile:hover{transform:translateY(-3px);border-color:var(--tile-accent);box-shadow:0 10px 30px #0007,0 0 0 1px color-mix(in srgb,var(--tile-accent) 55%,transparent),-5px 0 22px color-mix(in srgb,var(--tile-accent) 22%,transparent)}
+.roster-franchise-tile:focus-visible{outline:2px solid var(--tile-accent);outline-offset:3px;border-color:var(--tile-accent)}
+.roster-franchise-name{font-size:clamp(15px,1.35vw,18px);font-weight:850;min-height:2.35em;max-width:100%;line-height:1.15}
+.roster-franchise-signature-art{width:112px;height:112px;background:radial-gradient(circle,color-mix(in srgb,var(--tile-accent) 12%,transparent),transparent 76%)}
+.roster-franchise-signature-art .sprite,.roster-franchise-signature-art img{width:108px!important;height:108px!important;object-fit:contain}
+.roster-franchise-signature-name{font-size:11px;font-weight:650;color:var(--text-dim,#cab6d1);line-height:1.2}
+@media(max-width:580px){.roster-directory-intro{flex-direction:row;align-items:center}.roster-franchise-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.roster-franchise-tile{min-height:178px;padding:12px 8px}.roster-franchise-signature-art{width:88px;height:88px}.roster-franchise-signature-art .sprite,.roster-franchise-signature-art img{width:86px!important;height:86px!important}.roster-franchise-name{font-size:14px}}
