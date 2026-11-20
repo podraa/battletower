@@ -1,0 +1,10 @@
+/* CP4.93: portrait-first responsive scrolling safety net. */
+html,body{min-height:100%;max-width:100%;}
+@media(max-width:760px){
+  html,body{width:100%;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+  body{touch-action:pan-y pan-x;}
+  main,#content,.page,.page-content,.workspace,.panel,.card,.modal,.modalbox,.modal-content,.admin-log-list,.table-wrap,.table-scroll{min-width:0;max-width:100%;}
+  .table-wrap,.table-scroll,.table-responsive{overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;}
+  .panel,.card,.modal-content,.modalbox{overflow-wrap:anywhere;}
+  img,svg,canvas,video{max-width:100%;}
+}

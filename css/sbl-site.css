@@ -40,7 +40,7 @@ html {
 }
 
 .page-nav.nav-hidden {
-  transform: translateY(-100%);
+  transform: translateY(-110%);
   box-shadow: none;
 }
 

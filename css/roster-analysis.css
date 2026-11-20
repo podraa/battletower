@@ -183,3 +183,64 @@
 .my-team-planner-analysis .ra-mon-tags,.my-team-planner-analysis .ra-role-tags{margin-top:4px;gap:5px}
 .my-team-planner-analysis .ra-role-tag{background:var(--panel-alt);border-color:var(--border)}
 @media(max-width:560px){.my-team-planner-analysis .ra-mon-grid{grid-template-columns:minmax(0,1fr)}.my-team-planner-analysis .ra-mon{padding:10px}.my-team-planner-analysis .ra-mon-title{align-items:flex-start;flex-direction:column;gap:5px}}
+
+/* CP4.94 — unmistakable drafted vs planned status treatment. */
+.my-team-planner-analysis .ra-mon.is-actual{border:1px solid color-mix(in srgb,#27c5a0 68%,var(--border));background:linear-gradient(100deg,color-mix(in srgb,#27c5a0 10%,var(--panel)),var(--panel) 42%);box-shadow:inset 3px 0 #27c5a0,0 2px 8px rgba(0,0,0,.08)}
+.my-team-planner-analysis .ra-mon.is-planned{border:1px solid color-mix(in srgb,#e5a23b 72%,var(--border));background:linear-gradient(100deg,color-mix(in srgb,#e5a23b 12%,var(--panel)),var(--panel) 42%);box-shadow:inset 3px 0 #e5a23b,0 2px 8px rgba(0,0,0,.08)}
+.my-team-planner-analysis .ra-status.actual{color:#75e5c5;background:rgba(20,155,122,.2);border-color:rgba(39,197,160,.58)}
+.my-team-planner-analysis .ra-status.planned{color:#ffd18a;background:rgba(190,119,28,.22);border-color:rgba(229,162,59,.62)}
+.my-team-planner-analysis .ra-key-dot.actual{background:#27c5a0;box-shadow:0 0 0 3px rgba(39,197,160,.18)}
+.my-team-planner-analysis .ra-key-dot.planned{background:#e5a23b;box-shadow:0 0 0 3px rgba(229,162,59,.2)}
+
+/* CP4.98 — user-selectable Team Analysis pick-card highlights. */
+
+/* Team Analysis status colours are changed only from the two legend controls. */
+.ra-colour-control{display:inline-flex;align-items:center;gap:7px;padding:3px 6px;border:1px solid transparent;border-radius:7px;background:transparent;color:inherit;font:inherit;cursor:pointer}
+.ra-colour-control:hover,.ra-colour-control:focus-visible{border-color:var(--border);outline:none}
+.roster-analysis{--ra-drafted:#27c5a0;--ra-planned:#e5a23b}
+.roster-analysis[data-drafted-colour=rose]{--ra-drafted:#e879a8}.roster-analysis[data-drafted-colour=blue]{--ra-drafted:#60a5fa}.roster-analysis[data-drafted-colour=green]{--ra-drafted:#4ade80}.roster-analysis[data-drafted-colour=purple]{--ra-drafted:#a78bfa}.roster-analysis[data-drafted-colour=orange]{--ra-drafted:#fb923c}.roster-analysis[data-drafted-colour=teal]{--ra-drafted:#27c5a0}
+.roster-analysis[data-planned-colour=rose]{--ra-planned:#e879a8}.roster-analysis[data-planned-colour=blue]{--ra-planned:#60a5fa}.roster-analysis[data-planned-colour=green]{--ra-planned:#4ade80}.roster-analysis[data-planned-colour=purple]{--ra-planned:#a78bfa}.roster-analysis[data-planned-colour=orange]{--ra-planned:#fb923c}.roster-analysis[data-planned-colour=teal]{--ra-planned:#27c5a0}
+.ra-key-dot.actual{background:var(--ra-drafted)}.ra-key-dot.planned{background:var(--ra-planned)}
+.ra-mon.is-actual{border-color:color-mix(in srgb,var(--ra-drafted) 68%,var(--border));background:linear-gradient(100deg,color-mix(in srgb,var(--ra-drafted) 10%,var(--panel)),var(--panel) 42%);box-shadow:inset 3px 0 var(--ra-drafted),0 2px 8px rgba(0,0,0,.08)}
+.ra-mon.is-planned{border-color:color-mix(in srgb,var(--ra-planned) 72%,var(--border));background:linear-gradient(100deg,color-mix(in srgb,var(--ra-planned) 12%,var(--panel)),var(--panel) 42%);box-shadow:inset 3px 0 var(--ra-planned),0 2px 8px rgba(0,0,0,.08)}
+.ra-status.actual{color:var(--ra-drafted);background:color-mix(in srgb,var(--ra-drafted) 20%,transparent);border-color:color-mix(in srgb,var(--ra-drafted) 58%,transparent)}
+.ra-status.planned{color:color-mix(in srgb,var(--ra-planned) 65%,white);background:color-mix(in srgb,var(--ra-planned) 22%,transparent);border-color:color-mix(in srgb,var(--ra-planned) 62%,transparent)}
+.my-team-planner-analysis .ra-key-dot.actual{background:var(--ra-drafted);box-shadow:0 0 0 3px color-mix(in srgb,var(--ra-drafted) 18%,transparent)}
+.my-team-planner-analysis .ra-key-dot.planned{background:var(--ra-planned);box-shadow:0 0 0 3px color-mix(in srgb,var(--ra-planned) 20%,transparent)}
+.my-team-planner-analysis .ra-mon.is-actual{border:1px solid color-mix(in srgb,var(--ra-drafted) 68%,var(--border));background:linear-gradient(100deg,color-mix(in srgb,var(--ra-drafted) 10%,var(--panel)),var(--panel) 42%);box-shadow:inset 3px 0 var(--ra-drafted),0 2px 8px rgba(0,0,0,.08)}
+.my-team-planner-analysis .ra-mon.is-planned{border:1px solid color-mix(in srgb,var(--ra-planned) 72%,var(--border));background:linear-gradient(100deg,color-mix(in srgb,var(--ra-planned) 12%,var(--panel)),var(--panel) 42%);box-shadow:inset 3px 0 var(--ra-planned),0 2px 8px rgba(0,0,0,.08)}
+.my-team-planner-analysis .ra-status.actual{color:var(--ra-drafted);background:color-mix(in srgb,var(--ra-drafted) 20%,transparent);border-color:color-mix(in srgb,var(--ra-drafted) 58%,transparent)}
+.my-team-planner-analysis .ra-status.planned{color:color-mix(in srgb,var(--ra-planned) 65%,white);background:color-mix(in srgb,var(--ra-planned) 22%,transparent);border-color:color-mix(in srgb,var(--ra-planned) 62%,transparent)}
+
+/* CP4.102 — explicit colour pickers and cleaner Draft Room roster cards. */
+.ra-colour-setting{position:relative;display:inline-flex;align-items:center}
+.ra-colour-control{min-height:30px;padding:5px 9px;border:1px solid var(--border);border-radius:8px;background:var(--panel-alt);font-size:11px;font-weight:750;gap:8px}
+.ra-colour-chevron{color:var(--text-dim);font-size:10px}
+.ra-colour-picker{position:absolute;z-index:30;top:calc(100% + 6px);left:0;display:grid;grid-template-columns:repeat(3,minmax(82px,1fr));gap:5px;min-width:270px;padding:9px;border:1px solid var(--border);border-radius:11px;background:var(--panel);box-shadow:0 12px 30px rgba(0,0,0,.28)}
+.ra-colour-picker[hidden]{display:none!important}
+.ra-swatch{display:flex;align-items:center;gap:6px;padding:6px 7px;border:1px solid var(--border);border-radius:7px;background:var(--panel-alt);color:var(--text);font:inherit;font-size:10px;cursor:pointer}
+.ra-swatch span{width:11px;height:11px;flex:0 0 11px;border-radius:50%;background:var(--swatch)}
+.ra-swatch.teal{--swatch:#27c5a0}.ra-swatch.rose{--swatch:#e879a8}.ra-swatch.blue{--swatch:#60a5fa}.ra-swatch.green{--swatch:#4ade80}.ra-swatch.purple{--swatch:#a78bfa}.ra-swatch.orange{--swatch:#fb923c}
+.ra-swatch:hover,.ra-swatch:focus-visible{border-color:var(--teal);outline:none}
+/* Compact, consistent cards replace the busy dotted treatment in Draft Room. */
+.draft-projected-roster .dash-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.draft-projected-roster .dash-card{min-width:0;grid-template-columns:48px minmax(0,1fr) auto auto;gap:10px;padding:10px 12px;border:1px solid var(--border)!important;border-radius:11px;background:var(--panel-alt)!important;box-shadow:none}
+.draft-projected-roster .dash-card.projected-plan-card{border-left:3px solid var(--ra-planned)!important}
+.draft-projected-roster .dash-card:not(.projected-plan-card){border-left:3px solid var(--ra-drafted)!important}
+.draft-projected-roster .dash-card .projected-state{padding:4px 7px;border-radius:7px;font-size:9px}
+.ra-mon-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:8px}
+.ra-mon{padding:10px 12px;border:1px solid var(--border)!important;border-radius:11px;background:var(--panel-alt)!important;box-shadow:none!important}
+.ra-mon.is-planned{border-left:3px solid var(--ra-planned)!important;border-style:solid!important}
+.ra-mon.is-actual{border-left:3px solid var(--ra-drafted)!important}
+.ra-mon-title>strong{font-size:12px;letter-spacing:-.01em}
+.ra-role-tag{padding:3px 7px;font-size:9px}
+@media(max-width:700px){.draft-projected-roster .dash-list{grid-template-columns:1fr}}
+@media(max-width:480px){.ra-colour-picker{min-width:240px;grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Apply the same clean two-column card system to the Draft Room Roster tab. */
+.draft-projection-roster .dash-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.draft-projection-roster .dash-card{min-width:0;grid-template-columns:48px minmax(0,1fr) auto auto;gap:10px;padding:10px 12px;border:1px solid var(--border)!important;border-radius:11px;background:var(--panel-alt)!important;box-shadow:none}
+.draft-projection-roster .dash-card.projected-plan-card{border-left:3px solid var(--ra-planned)!important}
+.draft-projection-roster .dash-card:not(.projected-plan-card){border-left:3px solid var(--ra-drafted)!important}
+.draft-plan-queue .dash-qcard{grid-template-columns:18px 48px minmax(0,1fr) auto;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:11px;background:var(--panel-alt)}
+@media(max-width:700px){.draft-projection-roster .dash-list{grid-template-columns:1fr}}
