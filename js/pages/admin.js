@@ -329,14 +329,16 @@
     const clearFreeAgency = confirm(`Also clear the Free Agency pool (${freeAgencyCount} Pokémon)?
 
 Choose Cancel to keep Free Agency unchanged.`);
-    const resetDraft = confirm(`Also reset draft status? This clears ${pickCount} recorded pick${pickCount===1?'':'s'}, returns drafted Pokémon to available status, and resets the draft to setup.
+    const resetDraft = confirm(`Also reset draft status? This clears ${pickCount} recorded pick${pickCount===1?'':'s'} and returns drafted Pokémon to available status. You will choose separately whether to restore, clear or keep personal draft plans.
 
 Choose Cancel to keep draft status unchanged.`);
 
     let draftResetResult = null;
     if(resetDraft){
       if(!SBL.draft?.resetDraft) throw new Error('Draft reset service is unavailable; no roster or Free Agency changes were saved.');
-      draftResetResult = await SBL.draft.resetDraft();
+      const queueAction=await showDraftResetOptions();
+      if(!queueAction)return false;
+      draftResetResult = await SBL.draft.resetDraft(queueAction);
       if(draftResetResult?.state){
         STATE.teamMap = draftResetResult.state.teamMap || STATE.teamMap || {};
         STATE.settings = Object.assign(STATE.settings, draftResetResult.state.settings || {});
@@ -549,6 +551,33 @@ Choose Cancel to keep draft status unchanged.`);
       overlay.querySelector('[data-dialog-confirm]').addEventListener('click',()=>finish(true));
       document.addEventListener('keydown',onKey);
       overlay.querySelector('[data-dialog-confirm]').focus();
+    });
+  }
+
+  function showDraftResetOptions(){
+    return new Promise(resolve=>{
+      document.getElementById('sblAdminDialog')?.remove();
+      const overlay=document.createElement('div');
+      overlay.id='sblAdminDialog';overlay.className='sbl-admin-dialog-overlay';
+      overlay.innerHTML=`<section class="sbl-admin-dialog" role="dialog" aria-modal="true" aria-labelledby="sblAdminDialogTitle">
+        <div class="sbl-admin-dialog-kicker">DRAFT RESET</div>
+        <h2 id="sblAdminDialogTitle">Reset draft</h2>
+        <p class="sbl-admin-dialog-description">Official picks and Free Agency will reset. What should happen to coaches' personal draft plans?</p>
+        <div class="sbl-draft-reset-choices" role="group" aria-label="Draft plan reset behaviour" style="display:grid;gap:10px;margin:18px 0">
+          <label style="display:flex;align-items:flex-start;gap:10px"><input type="radio" name="draftQueueResetMode" value="restore" checked><span><strong>Restore pre-draft plans</strong><span class="note" style="display:block">Return queues to the snapshot captured when this draft started. Not available for older drafts without a snapshot.</span></span></label>
+          <label style="display:flex;align-items:flex-start;gap:10px"><input type="radio" name="draftQueueResetMode" value="clear"><span><strong>Clear all plans</strong><span class="note" style="display:block">Remove everyone's personal queues; also invalidate device-local handoff plans when reopened.</span></span></label>
+          <label style="display:flex;align-items:flex-start;gap:10px"><input type="radio" name="draftQueueResetMode" value="keep"><span><strong>Keep plans unchanged</strong><span class="note" style="display:block">Reset draft picks and Free Agency only.</span></span></label>
+        </div>
+        <div class="sbl-admin-dialog-actions"><button class="ghost" type="button" data-dialog-cancel>Cancel</button><button class="ghost danger-btn" type="button" data-dialog-confirm>Continue</button></div>
+      </section>`;
+      document.body.appendChild(overlay);
+      const finish=v=>{overlay.remove();document.removeEventListener('keydown',onKey);resolve(v);};
+      const onKey=e=>{if(e.key==='Escape')finish(null);};
+      overlay.addEventListener('click',e=>{if(e.target===overlay)finish(null);});
+      overlay.querySelector('[data-dialog-cancel]').addEventListener('click',()=>finish(null));
+      overlay.querySelector('[data-dialog-confirm]').addEventListener('click',()=>finish(overlay.querySelector('input[name="draftQueueResetMode"]:checked')?.value||null));
+      document.addEventListener('keydown',onKey);
+      overlay.querySelector('input:checked')?.focus();
     });
   }
 
@@ -2878,9 +2907,11 @@ function renderDraft(){ return drawDraft(); }
     });
     document.getElementById('resetDraftBtn')?.addEventListener('click', async () => {
       const err = document.getElementById('draftStatusErr');
-      if(!confirm('Reset the draft? This clears every pick made so far. Pokémon return to the board as available. The draft board, budgets, and order stay as configured.')) return;
+      const queueAction=await showDraftResetOptions();
+      if(!queueAction)return;
+      if(!await showAdminConfirmDialog({title:'Confirm draft reset',description:'Reset all official picks and restore the original uploaded Free Agency pool?',warning:queueAction==='restore'?'Personal queues will be restored from the pre-draft snapshot.':queueAction==='clear'?'All personal queues will be emptied.':'Personal queues will be left unchanged.',confirmLabel:'Reset draft',danger:true}))return;
       try{
-        const result = await SBL.draft.resetDraft();
+        const result = await SBL.draft.resetDraft(queueAction);
         if(result?.state){
           STATE.teamMap = result.state.teamMap || STATE.teamMap || {};
           STATE.settings = Object.assign(STATE.settings, result.state.settings || {});
@@ -2888,7 +2919,10 @@ function renderDraft(){ return drawDraft(); }
           STATE.settings.draft = normalizeDraftState(STATE.settings.draft);
           d = STATE.settings.draft;
         }
-        await logAdminAction('reset_draft', 'Reset the draft; all picks were cleared.', {status:d.status});
+        await logAdminAction('reset_draft', 'Reset draft and restored Free Agency; personal queues: '+queueAction+'.', {status:d.status,freeAgencyRestored:result?.result?.freeAgencyRestored||0,usedUploadSnapshot:!!result?.result?.usedUploadSnapshot,queueAction,clearedQueues:result?.result?.clearedQueues||0,restoredQueues:result?.result?.restoredQueues||0});
+        if(!result?.result?.usedUploadSnapshot){
+          alert('Draft reset complete. Free Agency was rebuilt from the surviving pool and previous picks because this draft predates the upload snapshot. Verify the restored list against the workbook before starting another draft.');
+        }
         drawDraft();
       }catch(e){ err.textContent = e.message; }
     });
@@ -3340,7 +3374,7 @@ function renderDraft(){ return drawDraft(); }
     protectedRoles.pokemonRoleManual=mergeAssignments(protectedRoles.pokemonRoleManual);
     protectedRoles.pokemonRoleAuto=mergeAssignments(protectedRoles.pokemonRoleAuto);
 
-    STATE.settings.freeAgency={mons,source:String(sourceName||'Workbook'),updatedAt:new Date().toISOString()};
+    STATE.settings.freeAgency={mons,uploadedMons:mons.map(m=>({...m})),source:String(sourceName||'Workbook'),updatedAt:new Date().toISOString()};
     Object.assign(STATE.settings,protectedRoles);
     ROLE_EDITOR_POKEMON='';ROLE_STATUS_MESSAGE='';
     await saveSharedState();

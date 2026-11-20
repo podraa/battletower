@@ -190,6 +190,94 @@
     }));
   }
 
+  // CP4.129: private inspection is scoped to PLATFORM administrators.
+  // Permission is independently enforced by sbl_site_admin_draft_queue_inspect.
+  let inspectorSeasons=[];
+  function setInspectorStatus(message){const el=$('#trackerInspectorStatus');if(el)el.textContent=message||'';}
+  function clearInspection(){const result=$('#trackerInspectorResults');if(result)result.replaceChildren();}
+  function refreshInspectorLeagues(){
+    const select=$('#trackerLeagueSelect');if(!select)return;
+    const selected=select.value;
+    select.innerHTML='<option value="">Choose a league…</option>'+leagues.map(l=>`<option value="${esc(l.id)}">${esc(l.name)}</option>`).join('');
+    if(leagues.some(l=>String(l.id)===selected))select.value=selected;
+  }
+  async function loadInspectorSeasons(){
+    clearInspection();inspectorSeasons=[];const replayLink=$('#trackerReplayLink');if(replayLink)replayLink.hidden=true;
+    const l=$('#trackerLeagueSelect')?.value||'';
+    const select=$('#trackerSeasonSelect');if(!select)return;
+    select.innerHTML='<option value="">Choose a season…</option>';
+    if(!l){setInspectorStatus('Select a league.');return;}
+    setInspectorStatus('Loading seasons…');
+    try{
+      inspectorSeasons=await SBL.siteAdmin.trackerSeasons(l);
+      select.innerHTML='<option value="">Choose a season…</option>'+inspectorSeasons.map(x=>`<option value="${esc(x.id)}">${esc(x.name)} (${esc(x.draft_status||x.status||'unknown')})</option>`).join('');
+      setInspectorStatus(inspectorSeasons.length+' seasons found. Select a season and inspect.');
+    }catch(e){setInspectorStatus('Could not load seasons: '+(e?.message||e));}
+  }
+  function saveJson(filename,payload){
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+  function wireQueueInspector(){
+    $('#trackerLeagueSelect')?.addEventListener('change',loadInspectorSeasons);
+    $('#trackerSeasonSelect')?.addEventListener('change',()=>{
+      clearInspection();setInspectorStatus('Ready to inspect.');
+      const league=$('#trackerLeagueSelect')?.value,season=$('#trackerSeasonSelect')?.value;
+      const complete=inspectorSeasons.some(x=>String(x.id)===String(season)&&x.draft_status==='complete');
+      const link=$('#trackerReplayLink');if(link){link.hidden=!complete||!league||!season;if(!link.hidden)link.href='tracker.html?league='+encodeURIComponent(league)+'&season_id='+encodeURIComponent(season);}
+    });
+    $('#inspectQueuesBtn')?.addEventListener('click',async()=>{
+      const league=$('#trackerLeagueSelect')?.value,season=$('#trackerSeasonSelect')?.value;
+      if(!league||!season){setInspectorStatus('Choose a league and season first.');return;}
+      clearInspection();setInspectorStatus('Loading private queues…');
+      try{
+        const queues=await SBL.siteAdmin.inspectDraftQueues(league,season);
+        const wrap=$('#trackerInspectorResults');if(!wrap)return;
+        if(!queues.length){wrap.textContent='No saved personal queues for this season.';}
+        else{
+          const table=document.createElement('table');
+          table.innerHTML='<thead><tr><th>Coach</th><th>Franchise</th><th>Pokémon</th><th>Last saved</th><th>Priorities</th></tr></thead>';
+          const body=document.createElement('tbody');
+          for(const q of queues){
+            const row=document.createElement('tr');
+            for(const text of [q.username||'Unknown',q.franchise||'Unassigned',String(q.queue_length||0),formatTime(q.updated_at)]){
+              const td=document.createElement('td');td.textContent=text;row.appendChild(td);
+            }
+            const details=document.createElement('details');
+            const summary=document.createElement('summary');summary.textContent='Show queue';details.appendChild(summary);
+            const list=document.createElement('ol');
+            for(const id of Array.isArray(q.priority_pool_ids)?q.priority_pool_ids:[]){
+              const item=document.createElement('li');item.textContent=String(id);list.appendChild(item);
+            }
+            if(!list.children.length){const note=document.createElement('p');note.textContent='Empty queue';details.appendChild(note);}
+            else details.appendChild(list);
+            const td=document.createElement('td');td.appendChild(details);row.appendChild(td);body.appendChild(row);
+          }
+          table.appendChild(body);wrap.appendChild(table);
+        }
+        setInspectorStatus(queues.length+' saved personal queues. This information must remain private during drafting.');
+      }catch(e){setInspectorStatus('Inspection denied/unavailable: '+(e?.message||e));}
+    });
+    $('#exportTrackerHistoryBtn')?.addEventListener('click',async()=>{
+      const league=$('#trackerLeagueSelect')?.value,season=$('#trackerSeasonSelect')?.value;
+      if(!league||!season){setInspectorStatus('Choose a league and season first.');return;}
+      const selected=inspectorSeasons.find(x=>String(x.id)===season);
+      if(selected?.draft_status!=='complete'){
+        setInspectorStatus('History export is only available after the draft has finished.');return;
+      }
+      setInspectorStatus('Preparing site-admin-only history export…');
+      try{
+        const events=await SBL.siteAdmin.trackerHistory(league,season);
+        saveJson('draft-tracker-'+league+'-'+season+'.json',{
+          format:'draft-tracker-v1',league_id:league,season_id:season,exported_at:new Date().toISOString(),events
+        });
+        setInspectorStatus('Exported '+events.length+' recorded pick events. Keep this file private.');
+      }catch(e){setInspectorStatus('Export unavailable: '+(e?.message||e));}
+    });
+  }
+
   async function load(){
     $('#refreshHealth').disabled=true;
     try{
@@ -198,7 +286,7 @@
       const results=await Promise.all(base);
       [healthData,leagues,users,testAccounts]=results;
       if(superAdmin) changeLogEntries=results[4]||[];
-      renderHealth(); renderLeagues(); renderRegisteredAccounts(); renderTestAccounts(); renderAdmins();
+      renderHealth(); renderLeagues(); refreshInspectorLeagues(); renderRegisteredAccounts(); renderTestAccounts(); renderAdmins();
       if(superAdmin) renderChangeLog();
     }catch(e){setError(e.message||'Could not load site administration data.');}
     finally{$('#refreshHealth').disabled=false;}
@@ -218,6 +306,7 @@
       $('#refreshHealth').addEventListener('click',load);
       if(superAdmin) wireChangeLog();
       wireTestAccounts();
+      wireQueueInspector();
       await load();
     }catch(e){
       setError(e.message||'You are not authorized to access the Admin Hub.');

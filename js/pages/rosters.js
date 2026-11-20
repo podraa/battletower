@@ -65,15 +65,6 @@
       return sum + (Number.isFinite(points) ? points : 0);
     }, 0);
   }
-  function roleKey(name){return String(name||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/♀/g,'-f').replace(/♂/g,'-m').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');}
-  function roleAssignments(settings){const value=settings?.pokemonRoleAssignments;return value&&typeof value==='object'?value:{};}
-  function rolesFor(name,settings){const value=roleAssignments(settings)[roleKey(name)];const roles=Array.isArray(value)?value:[];return SBL.rosterAnalysis?.uniqueRoles?SBL.rosterAnalysis.uniqueRoles(roles):[...new Set(roles)];}
-  function allRoles(settings){const values=[...(Array.isArray(settings?.pokemonRoleCatalog)?settings.pokemonRoleCatalog:[]),...Object.values(roleAssignments(settings)).flatMap(v=>Array.isArray(v)?v:[])];const roles=SBL.rosterAnalysis?.uniqueRoles?SBL.rosterAnalysis.uniqueRoles(values):[...new Set(values)];return roles.sort((a,b)=>(SBL.rosterAnalysis?.roleLabel?.(a)||a).localeCompare(SBL.rosterAnalysis?.roleLabel?.(b)||b));}
-  function analysisMarkup(team,list,settings){
-    if(!window.SBL?.rosterAnalysis?.render)return '';
-    const entries=(Array.isArray(list)?list:[]).map(mon=>({name:canonicalName(mon?.name||mon),types:Array.isArray(mon?.types)&&mon.types.length?mon.types:(SBL.pokemonTypes?.lookupTypes(mon?.name||mon)||[]),roles:rolesFor(mon?.name||mon,settings)}));
-    return SBL.rosterAnalysis.render({team,entries,roles:allRoles(settings),sprite:name=>sprite(name)});
-  }
   function budgetMarkup(team, list){
     const spent = rosterPoints(list);
     const remaining = teamBudget(team) - spent;
@@ -150,33 +141,41 @@
       TEAM_SETTINGS = settings; TEAM_MAP = result?.state?.teamMap || {}; TEAM_ROSTERS = rosters;
       SBL.teamPopup?.bind(document, () => ({settings: TEAM_SETTINGS, teamMap: TEAM_MAP, rosters: TEAM_ROSTERS}));
       const teams = Object.keys(rosters).sort((a,b)=>a.localeCompare(b));
-      const hasPublishedPokemon = teams.some(team => Array.isArray(rosters[team]) && rosters[team].length>0);
       const draftStatus=String(settings?.draft?.status||'').trim().toLowerCase();
-      if(!hasPublishedPokemon){
+      if(!teams.length){
         content.innerHTML = emptyRosterMessage(result?.snapshot, settings);
         return;
       }
 
-      toolbar.style.display = '';
-      rosterSelect.innerHTML = ['<option value="__all__">All rosters</option>', ...teams.map(team => `<option value="${esc(team)}">${esc(team)}</option>`)].join('');
-
+      // Franchise directory: roster contents remain out of sight until a tile is opened.
+      // Reuse the shared, keyboard-accessible roster dialog; no Team Analysis here.
+      if(toolbar) toolbar.style.display='none';
       const draftNotice = ['setup','lobby','live'].includes(draftStatus)
-        ? `<div class="roster-draft-notice" role="status"><strong>Draft ${draftStatus==='live'?'in progress':'not yet complete'}:</strong> These rosters may change. Final rosters will be available after the draft.</div>`
-        : '';
-      function renderSelection(team){
-        const selectedTeams = team === '__all__' ? teams : [team];
-        const totalMons = selectedTeams.reduce((sum, name) => sum + (rosters[name]?.length || 0), 0);
-        rosterSummary.textContent = team === '__all__' ? `${teams.length} franchises · ${totalMons} Pokémon` : `${rosters[team]?.length || 0} Pokémon · ${rosterPoints(rosters[team])} pts spent`;
-        content.innerHTML = `${draftNotice}<div class="grid${team === '__all__' ? '' : ' single'}">${selectedTeams.map(name => `
-          <section class="card${teamTintClass(settings,name)}"${teamTintStyle(settings,name)}>
-            <div class="head"><div><h2><span class="team-link" role="button" tabindex="0" data-team-popup="${esc(name)}" title="Open ${esc(name)} roster">${esc(name)}</span>${ownerTag(name)}</h2><span class="count">${rosters[name].length} Pokémon</span></div>${budgetMarkup(name, rosters[name])}</div>
-            <div class="mons">${rosters[name].map(mon => renderPokemon(name, mon)).join('')}</div>${analysisMarkup(name,rosters[name],settings)}
-          </section>`).join('')}</div>`;
-        SBL.rosterAnalysis?.bind(content);
-      }
-
-      rosterSelect.onchange = () => renderSelection(rosterSelect.value);
-      renderSelection('__all__');
+        ? `<div class="roster-draft-notice" role="status"><strong>Draft ${draftStatus==='live'?'in progress':'not yet complete'}:</strong> Rosters may still change.</div>` : '';
+      // Signature pick is the first officially selected Pokémon for the franchise.
+      // If the draft order is not available, show the highest-point published
+      // roster entry as a clearly-presented fallback; never invent a Pokémon.
+      const recordedPicks=Array.isArray(draftSettings?.picks)?draftSettings.picks:[];
+      const teamKey=value=>String(value||'').trim().toLowerCase();
+      const signatureFor=team=>{
+        const members=Array.isArray(rosters[team])?rosters[team]:[];
+        if(!members.length)return null;
+        const picked=recordedPicks.filter(p=>teamKey(p.team||p.franchise||p.franchiseName)===teamKey(team))
+          .sort((a,b)=>(Number(a.pickNumber)||999999)-(Number(b.pickNumber)||999999));
+        for(const p of picked){
+          const found=members.find(m=>SBL.pokemon?.sameSpeciesForm?.(m?.name,p?.name) || teamKey(m?.name)===teamKey(p?.name));
+          if(found)return found;
+        }
+        return members.slice().sort((a,b)=>(Number(b?.points)||0)-(Number(a?.points)||0))[0];
+      };
+      content.innerHTML=`${draftNotice}<div class="roster-directory-intro"><h1>Franchises</h1><span>${teams.length} teams</span></div><div class="roster-franchise-grid">${teams.map(name=>{
+        const signature=signatureFor(name);
+        return `<button type="button" class="roster-franchise-tile${teamTintClass(settings,name)}"${teamTintStyle(settings,name)} data-team-popup="${esc(name)}" aria-label="Open ${esc(name)} roster">
+          <span class="roster-franchise-name">${esc(name)}</span>
+          <span class="roster-franchise-signature-art" aria-hidden="true">${signature?sprite(signature.name):'<span class="roster-franchise-empty-mark">?</span>'}</span>
+          <span class="roster-franchise-signature-name">${signature?esc(canonicalName(signature.name)):'Awaiting draft'}</span>
+        </button>`;
+      }).join('')}</div>`;
     }catch(err){
       console.error('Roster load failed:', err);
       showError(`Could not load rosters: ${err?.message || err}`);

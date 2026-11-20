@@ -5,6 +5,9 @@ const $=id=>document.getElementById(id), content=$('content');
 const ROUTE_PARAMS=new URLSearchParams(location.search);
 const ROUTE_LEAGUE_ID=(ROUTE_PARAMS.get('league')||'').trim();
 const MOCK_DRAFT_ID=String(ROUTE_PARAMS.get('mock_draft')||'').trim();
+// Replay navigation is safe to expose as a link; the database RPC gates all data.
+function updatePostDraftReplayLink(){const link=document.getElementById('postDraftReplayLink');if(!link)return;const d=state?.settings?.draft;const league=ROUTE_LEAGUE_ID||SBL.leagueDb?.selectedLeagueId?.();const season=ROUTE_PARAMS.get('season_id')||SBL.leagueDb?.selectedSeasonId?.(league);link.hidden=MOCK_DRAFT_MODE||d?.status!=='complete'||!league||!season;if(!link.hidden)link.href='tracker.html?league='+encodeURIComponent(league)+'&season_id='+encodeURIComponent(season);}
+
 const MOCK_DRAFT_MODE=!!MOCK_DRAFT_ID;
 const MOCK_DRAFT_STORAGE_KEY=MOCK_DRAFT_MODE?'sbl_admin_mock_draft_v1:'+MOCK_DRAFT_ID:'';
 let MOCK_DRAFT_UPDATED_AT='';
@@ -46,6 +49,8 @@ function draftPokemonSlug(name){return draftPokemonSlugs(name)[0]||'';}
 function draftHasUsableStats(mon){return ['hp','atk','def','spa','spd','spe'].every(k=>DD()?.statValue?.(mon,k)!=null)}
 async function enrichDraftPoolMetadata(){
   const pool=state.settings.draft?.pool||[];
+  // Pokémon Champions form data: Mega Absol Z has Sharpness; PokeAPI does not yet expose this form.
+  for(const mon of pool){if(/^mega[ -]absol[ -]z$|^absol[ -]mega[ -]z$/i.test(String(mon.name||'').trim())&&!mon.abilities?.length)mon.abilities=['Sharpness'];}
   const missing=pool.filter(m=>!draftHasUsableStats(m)||!Array.isArray(m.abilities)||!m.abilities.length||!Array.isArray(m.types)||!m.types.length);
   if(!missing.length){if($('dashRoot')&&dash.tab==='pool')drawDashList(state.settings.draft);else if($('dashRoot')&&dash.tab==='queue')drawDashBody(state.settings.draft,true);return;}
   let cursor=0;const failures=[];
@@ -139,7 +144,7 @@ function displayMonName(name){return SBL.pokemon.displayNameWithForm?.(name)||St
 function canPickFor(t){const d=state.settings.draft;if(!isAdmin()||d.status!=='live'||!t)return false;if(MOCK_DRAFT_MODE&&d.mode==='ordered'&&!sameTeam(t,onClock()))return false;if(pickCount(d,t)>=d.maxPicks)return false;return true}
 function sprite(name){try{return SBL.pokemon.spriteMarkup(name,'sprite','hd')}catch{return ''}}
 function showError(title,msg){content.innerHTML='<div class="errorbox"><strong>'+esc(title)+'</strong><div class="note" style="margin-top:6px">'+esc(msg)+'</div><div class="actions"><button class="ghost" id="retry">Retry</button></div></div>';$('retry').onclick=boot}
-function render(){
+function render(){updatePostDraftReplayLink();
   if(PRESENT){renderPresent();return}
   const d=state.settings.draft,ts=teams();
   const seasonEl=$('seasonLabel'),teamEl=$('myTeamLabel'),roleEl=$('roleLabel');
@@ -610,7 +615,24 @@ function renderCommissioner(d,ts){
   const focused=document.activeElement?.id==='cmdSearch',pos=focused?document.activeElement.selectionStart:0;
   body.innerHTML=(franchiseLoadError?'<div class="note danger">The league franchise list could not be loaded: '+esc(franchiseLoadError)+'</div>':'')+consoleHtml(d,ts)+boardView(d);
   wireConsole(ts);
+  if(!MOCK_DRAFT_MODE)wireTrackerDiagnostics(d);
   if(focused){const x=$('cmdSearch');if(x){x.focus();x.setSelectionRange(pos,pos)}}
+}
+// CP4.128: private commissioner-only recording health, not the published tracker.
+function wireTrackerDiagnostics(d){
+  const root=$('cmdBody');if(!root||!isAdmin())return;
+  const panel=document.createElement('div');panel.className='panel';
+  panel.innerHTML='<h3>Private draft recording</h3><div class="note">Only a recording health check is visible during the draft. Coach queues and snipe results stay hidden until the draft finishes.</div><div class="actions"><button class="ghost" id="trackerCheckBtn" type="button">Check recording</button>'+
+    '</div><div class="note" id="trackerStatusText" aria-live="polite">Press Check recording to verify the database capture.</div>';
+  root.appendChild(panel);
+  $('trackerCheckBtn')?.addEventListener('click',async()=>{
+    const out=$('trackerStatusText');if(!out)return;out.textContent='Checking…';
+    try{const r=await SBL.draft.tracker.status();
+      out.textContent=`${Number(r.recorded_picks)||0} of ${Number(r.active_picks)||0} active picks recorded · ${Number(r.personal_queues)||0} saved personal queues`+
+        ((Number(r.recorded_picks)||0)<(Number(r.active_picks)||0)?' · Warning: recorded picks are missing.':'.');
+    }catch(e){out.textContent='Recording check unavailable: '+(e?.message||String(e));}
+  });
+
 }
 /* ---- END DRAFT BOARD + COMMISSIONER CONSOLE ---- */
 
@@ -618,6 +640,49 @@ function renderCommissioner(d,ts){
 const DASHVIEW=new URLSearchParams(location.search).get('view')==='dashboard';
 const dash={tab:'queue',f:{q:'',types:[],ability:'',role:'',stat:'',statMin:'',statMax:'',minPts:'',maxPts:'',mega:'all',affordable:true,showDrafted:false,queuedOnly:false},sort:'pts-desc',groupBy:'points',limit:60,queue:[],queueLoaded:false,saveMsg:'',showAbilities:false};
 let dashSaveT=null,dashSearchT=null;
+// CP4.127: Draft Room uses the same per-user, per-league, per-season handoff
+// store as My Team. Only the 'mine' queue is ever written to Supabase.
+dash.planId='mine';
+function dashHandoffKey(){
+  const uid=String(session?.user?.id||'anonymous');
+  const league=String(ROUTE_LEAGUE_ID||SBL.leagueDb?.selectedLeagueId?.()||'');
+  const season=String(SBL.leagueDb?.selectedSeasonId?.()||ROUTE_PARAMS.get('season_id')||'');
+  return 'sbl_planner_handoffs_v1:'+uid+':'+league+':'+season;
+}
+function dashHandoffPlans(){
+  try{const p=JSON.parse(localStorage.getItem(dashHandoffKey())||'{}');return p&&typeof p==='object'&&!Array.isArray(p)?p:{};}catch(_){return {};}
+}
+function dashSaveHandoff(){
+  if(dash.planId==='mine')return;
+  const plans=dashHandoffPlans();
+  if(!Object.prototype.hasOwnProperty.call(plans,dash.planId))return;
+  plans[dash.planId].queue=dash.queue.map(String);
+  localStorage.setItem(dashHandoffKey(),JSON.stringify(plans));
+}
+function dashPlanSelector(){
+  const plans=dashHandoffPlans();
+  const options='<option value="mine">My Plan · Draft Room synced</option>'+Object.entries(plans).map(([id,p])=>'<option value="'+esc(id)+'"'+(id===dash.planId?' selected':'')+'>'+esc(p.name||'Unnamed plan')+' · local</option>').join('');
+  return '<label class="dash-plan-select-label">Active plan <select id="dashPlanSelect" aria-label="Choose draft plan">'+options+'</select></label><span class="dash-plan-scope">'+(dash.planId==='mine'?'Synced with My Team':'Handoff plan · saved on this device only')+'</span>';
+}
+async function dashSwitchPlan(id){
+  if(id===dash.planId)return;
+  const plans=dashHandoffPlans();
+  if(id!=='mine'&&!Object.prototype.hasOwnProperty.call(plans,id))return;
+  // Finish any queued personal save before changing the active queue.
+  if(dashSaveT){clearTimeout(dashSaveT);dashSaveT=null;if(dash.planId==='mine')await SBL.draft.queue.save(dash.queue).catch(()=>({ok:false}));else dashSaveHandoff();}
+  if(dash.planId!=='mine')dashSaveHandoff();
+  dash.planId=id;
+  if(id==='mine'){
+    const q=await SBL.draft.queue.load().catch(()=>[]);
+    dash.queue=Array.isArray(q)?q.map(String):[];
+    dash.saveMsg='Personal plan · synced';
+  }else{
+    dash.queue=Array.isArray(plans[id].queue)?plans[id].queue.map(String):[];
+    dash.saveMsg='Handoff plan · local';
+  }
+  pruneTakenQueue(state.settings.draft);
+  drawDashTabs();drawDashBody(state.settings.draft,true);
+}
 dash.queueReady=false;dash.pruneNote='';dash.dragId=null;dash.dropBefore=null;dash.redrawQueue=false;
 dash.sheet={view:'grid',q:'',hideDrafted:false,sort:'row',dir:'asc'};
 const DD=()=>SBL.draftDash;
@@ -829,8 +894,13 @@ function drawDashTabs(){
 function dashQueueChanged(){
   dash.saveMsg='Saving…';const s=$('dashSave');if(s)s.textContent=dash.saveMsg;drawDashTabs();
   clearTimeout(dashSaveT);dashSaveT=setTimeout(async()=>{
-    const r=await SBL.draft.queue.save(dash.queue).catch(()=>({ok:false,local:true}));
-    dash.saveMsg=r.ok?'Saved':'Saved on this device only';const e=$('dashSave');if(e)e.textContent=dash.saveMsg;
+    if(dash.planId!=='mine'){
+      dashSaveHandoff();dash.saveMsg='Handoff plan saved on this device';
+    }else{
+      const r=await SBL.draft.queue.save(dash.queue).catch(()=>({ok:false,local:true}));
+      dash.saveMsg=r.ok?'Saved':'Saved on this device only';
+    }
+    const e=$('dashSave');if(e)e.textContent=dash.saveMsg;
   },500);
 }
 function dashCard(d,t,m,opts={}){
@@ -899,7 +969,7 @@ function drawDashBody(d,rebuild){
     const note=dash.pruneNote?`<div class="dash-prune-note" role="status"><span>${esc(dash.pruneNote)}</span><button type="button" class="dash-mini" data-act="dismissPrune" aria-label="Dismiss">✕</button></div>`:'';
     const projection=projectedRosterEntries(t,d),actualCount=projection.filter(m=>m.status==='actual').length,plannedCount=projection.filter(m=>m.status==='planned').length;
     const analysis=SBL.rosterAnalysis?.render?SBL.rosterAnalysis.render({team:t,heading:'Team Analysis',entries:projection,roles:allAssignedRoles(),showAbilities:dash.showAbilities,sprite:name=>sprite(name)}):'';
-    body.innerHTML=`<div class="dash-save" id="dashSave">${esc(dash.saveMsg)}</div>${note}<section class="draft-plan-queue"><div class="draft-plan-toolbar"><div><span class="dash-kicker">YOUR PRIORITIES</span><h2>Draft Plan</h2><p>Drag Pokémon or use the arrows to change priority. Picks taken by another franchise are removed automatically.</p></div><div class="draft-plan-actions"><label class="draft-ability-toggle"><input type="checkbox" id="dashShowAbilities" ${dash.showAbilities?'checked':''}> Show Abilities</label><button type="button" class="dash-clear-plan" data-act="clearPlan" ${items.length?'':'disabled'}>Clear Draft Plan</button></div></div>${items.length?`<div class="dash-list" id="dashQueueList">${items.map(m=>dashCard(d,t,m,{queueTab:true,next:String(m.id)===String(nextId)})).join('')}</div>`:'<div class="note">Your Draft Plan is empty. Add Pokémon from Free Agency to build your priorities. Taken Pokémon are removed from your queue automatically.</div>'}</section><section class="draft-projected-roster"><div class="draft-projected-head"><div><span class="dash-kicker">CURRENT ROSTER + REMAINING PLAN</span><h2>Projected Roster</h2><p>Your drafted Pokémon plus every available Pokémon in your saved plan. Picks already taken are excluded automatically.</p></div><div class="draft-projection-counts"><span><strong>${actualCount}</strong> Drafted</span><span><strong>${plannedCount}</strong> Planned</span><span><strong>${projection.length}</strong> Projected</span></div></div>${analysis}</section>`;return}
+    body.innerHTML=`<div class="dash-save" id="dashSave">${esc(dash.saveMsg)}</div>${note}<section class="draft-plan-queue"><div class="dash-plan-switcher">${dashPlanSelector()}</div><div class="draft-plan-toolbar"><div><span class="dash-kicker">YOUR PRIORITIES</span><h2>Draft Plan</h2><p>Drag Pokémon or use the arrows to change priority. Picks taken by another franchise are removed automatically.</p></div><div class="draft-plan-actions"><label class="draft-ability-toggle"><input type="checkbox" id="dashShowAbilities" ${dash.showAbilities?'checked':''}> Show Abilities</label><button type="button" class="dash-clear-plan" data-act="clearPlan" ${items.length?'':'disabled'}>Clear Draft Plan</button></div></div>${items.length?`<div class="dash-list" id="dashQueueList">${items.map(m=>dashCard(d,t,m,{queueTab:true,next:String(m.id)===String(nextId)})).join('')}</div>`:'<div class="note">Your Draft Plan is empty. Add Pokémon from Free Agency to build your priorities. Taken Pokémon are removed from your queue automatically.</div>'}</section><section class="draft-projected-roster"><div class="draft-projected-head"><div><span class="dash-kicker">CURRENT ROSTER + REMAINING PLAN</span><h2>Projected Roster</h2><p>Your drafted Pokémon plus every available Pokémon in your saved plan. Picks already taken are excluded automatically.</p></div><div class="draft-projection-counts"><span><strong>${actualCount}</strong> Drafted</span><span><strong>${plannedCount}</strong> Planned</span><span><strong>${projection.length}</strong> Projected</span></div></div>${analysis}</section>`;return}
   if(dash.tab==='roster'){
     const combined=projectedRosterEntries(t,d);
     const actual=combined.filter(m=>m.status==='actual');
@@ -924,12 +994,12 @@ function bindDash(){
     else if(a==='q'){const i=dash.queue.indexOf(String(id));if(i<0)dash.queue.push(String(id));else dash.queue.splice(i,1);b.classList.toggle('on',i<0);dashQueueChanged();if(dash.f.queuedOnly)drawDashList(d);if(dash.tab==='sheet')drawSheet(d)}
     else if(a==='up'||a==='down'){const i=dash.queue.indexOf(String(id)),j=a==='up'?i-1:i+1;if(i>=0&&j>=0&&j<dash.queue.length){[dash.queue[i],dash.queue[j]]=[dash.queue[j],dash.queue[i]];dashQueueChanged();drawDashBody(d,true)}}
     else if(a==='rm'){dash.queue=dash.queue.filter(x=>x!==String(id));dashQueueChanged();drawDashBody(d,true)}
-    else if(a==='clearPlan'){if(!dash.queue.length||!window.confirm('Clear your entire Draft Plan? This removes all planned picks synced with My Team. Your actual drafted Pokémon will not be affected.'))return;dash.queue=[];dashQueueChanged();drawDashBody(d,true)}
+    else if(a==='clearPlan'){if(!dash.queue.length||!window.confirm(dash.planId==='mine'?'Clear your personal Draft Plan? This removes planned picks synced with My Team. Drafted Pokémon are unaffected.':'Clear this handoff plan? Your personal plan will not change.'))return;dash.queue=[];dashQueueChanged();drawDashBody(d,true)}
     else if(a==='dismissPrune'){dash.pruneNote='';drawDashBody(d,true)}
     else if(a==='sheetView'){dash.sheet.view=b.dataset.view;drawSheet(d)}
     else if(a==='sheetSort'){const c=b.dataset.col;if(dash.sheet.sort===c)dash.sheet.dir=dash.sheet.dir==='asc'?'desc':'asc';else{dash.sheet.sort=c;dash.sheet.dir=(c==='name'||c==='row'||c==='type')?'asc':'desc'}drawSheet(d)}
   });
-  root.addEventListener('change',e=>{if(e.target.matches('#dashShowAbilities')){dash.showAbilities=!!e.target.checked;drawDashBody(state.settings.draft,true);}});
+  root.addEventListener('change',e=>{if(e.target.matches('#dashPlanSelect')){void dashSwitchPlan(e.target.value);return;}if(e.target.matches('#dashShowAbilities')){dash.showAbilities=!!e.target.checked;drawDashBody(state.settings.draft,true);}});
   root.addEventListener('input',e=>{
     const id=e.target.id,d=state.settings.draft;
     if(id==='sheetQ'){clearTimeout(dashSearchT);dashSearchT=setTimeout(()=>{dash.sheet.q=e.target.value;drawSheet(d,true)},120)}
@@ -1032,7 +1102,7 @@ function renderDashboard(d){
   document.body.classList.add('draft-user-dashboard');
   dashStyles();
   const host=$('cmdBody')||content;
-  if(!dash.queueLoaded){dash.queueLoaded=true;SBL.draft.queue.load().then(q=>{dash.queue=q;dash.queueReady=true;pruneTakenQueue(state.settings.draft);if($('dashRoot')){drawDashTabs();if(dash.tab!=='pool')drawDashBody(state.settings.draft,true);else drawDashList(state.settings.draft)}}).catch(()=>{})}
+  if(!dash.queueLoaded){dash.queueLoaded=true;SBL.draft.queue.load().then(q=>{if(dash.planId!=='mine')return;dash.queue=q;dash.queueReady=true;pruneTakenQueue(state.settings.draft);if($('dashRoot')){drawDashTabs();if(dash.tab!=='pool')drawDashBody(state.settings.draft,true);else drawDashList(state.settings.draft)}}).catch(()=>{})}
   if(!$('dashRoot')){host.innerHTML='<div id="dashRoot" class="dash"><div id="dashHead"></div><div class="dash-tabs" id="dashTabs"></div><div id="dashBody"></div></div>';bindDash();drawDashHead(d);drawDashTabs();drawDashBody(d,true);return}
   /* Live update: refresh numbers and lists in place so typing/scrolling is never lost. */
   pruneTakenQueue(d);
@@ -1056,7 +1126,13 @@ function presentationHeroSprite(name){
   const candidates=pokemon.spriteUrlCandidates(name,'hd').slice();
   if(!candidates.length)return pokemon.spriteMarkup(name,'pr-hero','hd');
   const isAlternate=!!pokemon.hasAlternateForm?.(name);
-  return `<img class="pr-hero${isAlternate?' pr-hero-form':''} sbl-remote-sprite" data-sbl-sprite-style="hd" src="${prEsc(candidates[0])}" alt="${prEsc(displayMonName(name))}" title="${prEsc(displayMonName(name))}" width="475" height="475" decoding="async" fetchpriority="high" data-sbl-sprite-candidates='${prEsc(JSON.stringify(candidates))}' data-sbl-sprite-index="0" onerror="SBL.pokemon.handleSpriteError(this)">`;
+  const isMega=!!pokemon.isMega?.(name);
+  const primary=String(candidates[0]||'');
+  const usesOfficialArtwork=/\/other\/official-artwork\//.test(primary);
+  const className='pr-hero'
+    +(isAlternate?' pr-hero-form':'')
+    +(isMega&&!usesOfficialArtwork?' pr-hero-fallback-form':'');
+  return `<img class="${className} sbl-remote-sprite" data-sbl-sprite-style="hd" src="${prEsc(primary)}" alt="${prEsc(displayMonName(name))}" title="${prEsc(displayMonName(name))}" width="475" height="475" decoding="async" fetchpriority="high" data-sbl-sprite-candidates='${prEsc(JSON.stringify(candidates))}' data-sbl-sprite-index="0" onload="this.classList.toggle('pr-hero-fallback-form',this.classList.contains('pr-hero-form') && !this.currentSrc.includes('/official-artwork/'))" onerror="SBL.pokemon.handleSpriteError(this)">`;
 }
 
 function presentStyles(){if(document.getElementById('presentStyle'))return;const st=document.createElement('style');st.id='presentStyle';st.textContent=`
@@ -1086,11 +1162,27 @@ body.present #content{width:100%;min-height:100svh;margin:0;padding:0}
 .pr-art{grid-column:1;grid-row:1;min-width:0;min-height:0;display:grid;place-items:center;position:relative;isolation:isolate}
 .pr-art:before{content:"";position:absolute;width:min(48vw,68vh,760px);aspect-ratio:1;border-radius:50%;background:radial-gradient(circle,hsl(var(--h) 75% 48%/.22),hsl(var(--h) 70% 38%/.07) 58%,transparent 72%);z-index:-1}
 .pr-card .pr-hero{display:block;justify-self:center;align-self:center;margin-inline:auto;width:min(100%,min(54vw,70vh,760px))!important;height:auto!important;max-width:760px!important;max-height:70vh!important;aspect-ratio:1;object-fit:contain;object-position:50% 50%;filter:drop-shadow(0 18px 38px hsl(var(--h) 95% 60%/.32));opacity:0;transform:scale(.72) translateY(3vmin);animation:prHero .95s cubic-bezier(.2,.9,.2,1.1) .6s forwards}
-/* Form sprites often contain more transparent canvas than default species. Enlarge the visible artwork while preserving the same centred image box. */
-.pr-card .pr-hero-form{animation-name:prHeroForm}
+/* Mega/form artwork is contained within the image column: never upscale to 150%.
+   Many newer forms are 512px HOME renders; overscaling makes them visibly blurry. */
+.pr-card .pr-hero-form{animation-name:prHero;width:min(100%,min(46vw,58vh,560px))!important;max-width:560px!important;max-height:58vh!important}
+/* Some exact-form Mega fallbacks (usually HOME/static renders) appear visually
+   undersized because the artwork sits inside large transparent bounds. Give
+   those fallback-only reveals a little more room without affecting the newer
+   Megas already mapped to clean official artwork. */
+.pr-card .pr-hero-fallback-form{width:min(100%,min(50vw,62vh,620px))!important;max-width:620px!important;max-height:62vh!important}
 @keyframes prHero{to{opacity:1;transform:scale(1) translateY(0)}}
-@keyframes prHeroForm{to{opacity:1;transform:scale(1.5) translateY(0)}}
 .pr-info{grid-column:2;grid-row:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:clamp(10px,1.8vmin,24px);text-align:left}
+/* Presentation typography: one clear announcement, dominant Pokémon, compact metadata. */
+.pr-info{gap:clamp(12px,2vmin,22px);max-width:580px}
+.pr-picked-label{font-size:clamp(17px,2.3vmin,32px)!important;letter-spacing:.015em!important;text-transform:none!important;line-height:1.2;color:#edc8ee!important;max-width:100%;overflow-wrap:anywhere}
+.pr-mon{font-size:clamp(40px,6.2vmin,94px)!important;line-height:1!important;letter-spacing:-.035em}
+.pr-reveal-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;animation:prUp .6s ease-out 1.65s both}
+.pr-reveal-meta .pr-badge,.pr-reveal-meta .pr-pts,.pr-reveal-meta .pr-extra{font-size:clamp(12px,1.65vmin,19px)!important;letter-spacing:0;line-height:1.3;margin:0}
+.pr-reveal-meta .pr-badge{animation:none!important;opacity:1!important;transform:none!important}
+.pr-reveal-meta .pr-pts{color:#f6cbdc;padding:7px 12px;border:1px solid #ffffff35;border-radius:999px;animation:none!important;opacity:1!important;transform:none!important}
+.pr-reveal-meta .pr-extra{color:#d6d8e5;animation:none!important;opacity:1!important;transform:none!important}
+.pr-stats{max-width:520px;gap:6px!important}.pr-stat{padding:5px 8px!important;letter-spacing:0;opacity:.8}
+
 .pr-info>*{opacity:0;transform:translateY(2vmin);animation:prUp .6s ease-out forwards}
 @keyframes prUp{to{opacity:1;transform:none}}
 .pr-pickno{letter-spacing:.22em;text-transform:uppercase;font-size:clamp(12px,1.7vmin,22px);color:#c4d0e2;animation-delay:1.45s!important}
@@ -1115,13 +1207,14 @@ body.present #content{width:100%;min-height:100svh;margin:0;padding:0}
  .pr-art{grid-column:1;grid-row:1;min-height:0;}
  .pr-art:before{width:min(68vw,42vh,390px);}
  .pr-card .pr-hero{width:min(66vw,42vh,390px)!important;max-height:42vh!important;}
+ .pr-card .pr-hero-form{width:min(62vw,38vh,360px)!important;max-height:38vh!important;}
  .pr-info{grid-column:1;grid-row:2;align-items:center;text-align:center;gap:9px;}
  .pr-info .pr-team{font-size:clamp(20px,5vw,36px);}
  .pr-mon{font-size:clamp(30px,7vw,52px);}
  .pr-stats{justify-content:center;}
  .pr-strip{max-height:16svh;}
 }
-@media(max-width:420px){.pr-card{gap:8px;padding:14px}.pr-card .pr-hero{width:min(58vw,32vh,260px)!important;max-height:32vh!important}.pr-info{gap:7px}.pr-pickno{font-size:10px}.pr-extra{font-size:12px}.pr-stat{padding:6px 7px;font-size:10px}}
+@media(max-width:420px){.pr-card{gap:8px;padding:14px}.pr-card .pr-hero{width:min(58vw,32vh,260px)!important;max-height:32vh!important}.pr-card .pr-hero-form{width:min(56vw,30vh,240px)!important;max-height:30vh!important}.pr-info{gap:7px}.pr-pickno{font-size:10px}.pr-extra{font-size:12px}.pr-stat{padding:6px 7px;font-size:10px}}
 @media(prefers-reduced-motion:reduce){.pr-wipe,.pr-flare{display:none}.pr-reveal *{animation-duration:.01s!important;animation-delay:0s!important}}
 `;document.head.appendChild(st);document.body.classList.add('present')}
 function teamLeft(d,t){const total=Number(keyedValue(d.budgets,t,d.defaultBudget))||0;return total-d.picks.filter(p=>sameTeam(p.team,t)).reduce((a,p)=>a+(Number(p.points)||0),0)}
@@ -1153,7 +1246,7 @@ function nextReveal(){
   const o=document.createElement('div');o.className='pr-reveal';o.style.setProperty('--h',hueOf(p.team));
   const statPills=rawStats&&typeof rawStats==='object'?['hp','atk','def','spa','spd','spe'].filter(k=>Number.isFinite(Number(rawStats[k]))).map(k=>`<span class="pr-stat">${k.toUpperCase()} ${Number(rawStats[k])}</span>`).join(''):'';
   const typeLine=types.length?types.join(' / '):'';
-  o.innerHTML=`<div class="pr-wipe"></div><div class="pr-flare"></div><div class="pr-card"><div class="pr-art">${presentationHeroSprite(p.name)}</div><div class="pr-info"><div class="pr-pickno">Round ${round} · Pick ${p.pickNumber||d.picks.length}</div><div class="pr-picked-label">Team picked</div><div class="pr-mon">${prEsc(displayMonName(p.name))}</div>${SBL.pokemon.isMega?.(p.name)?'<div class="pr-badge">MEGA</div>':''}<div class="pr-pts">${Number(p.points??mon.points)||0} points</div><div class="pr-team">${prEsc(p.team)}</div>${typeLine?`<div class="pr-extra">${prEsc(typeLine)}</div>`:''}${statPills?`<div class="pr-stats">${statPills}</div>`:''}</div></div>`;
+  o.innerHTML=`<div class="pr-wipe"></div><div class="pr-flare"></div><div class="pr-card"><div class="pr-art">${presentationHeroSprite(p.name)}</div><div class="pr-info"><div class="pr-pickno">Round ${round} · Pick ${p.pickNumber||d.picks.length}</div><div class="pr-picked-label">${prEsc(p.team)} picked</div><div class="pr-mon">${prEsc(displayMonName(p.name))}</div><div class="pr-reveal-meta">${SBL.pokemon.isMega?.(p.name)?'<span class="pr-badge">MEGA</span>':''}<span class="pr-pts">${Number(p.points??mon.points)||0} pts</span>${typeLine?`<span class="pr-extra">${prEsc(typeLine)}</span>`:''}</div>${statPills?`<div class="pr-stats">${statPills}</div>`:''}</div></div>`;
   document.body.appendChild(o);
   let done=false;
   const finish=()=>{if(done)return;done=true;document.removeEventListener('keydown',onKey);o.classList.add('out');setTimeout(()=>{o.remove();nextReveal()},revealQueue.length?120:450)};

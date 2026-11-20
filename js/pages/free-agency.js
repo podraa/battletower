@@ -387,8 +387,27 @@ function getDexEntry(name){
   return null;
 }
 function getLearnset(name){
-  const k=dexKey(name);
-  return dexData.learnsets[k]?.learnset || dexData.learnsets[k] || {};
+  const all=dexData.learnsets||{};
+  for(const id of (SBL.pokemon.showdownStatsIdCandidates?.(name)||[dexKey(name)])){
+    const entry=all[id]?.learnset||all[id];
+    if(entry&&Object.keys(entry).length)return entry;
+  }
+  // Showdown often lists moves only for the original species, not a separate
+  // Mega. Inherit ONLY when the Pokémon is confirmed to be a Mega form.
+  if(SBL.pokemon.isMega?.(name)){
+    const normalized=SBL.pokemon.normalizeName?.(name)||key(name);
+    let base=normalized.match(/^mega-(.+?)(?:-[xyz])?$/)?.[1]
+      ||normalized.match(/^(.+?)-mega(?:-[xyz]|[xyz])?$/)?.[1]||'';
+    if(base){
+      const aliases=[base.replace(/-male$/,'').replace(/-female$/,''),base];
+      for(const a of aliases){
+        const id=a.replace(/[^a-z0-9]/g,'');
+        const entry=all[id]?.learnset||all[id];
+        if(entry&&Object.keys(entry).length)return entry;
+      }
+    }
+  }
+  return {};
 }
 const filterMemo=new Map();
 function memoFilter(key,value){if(filterMemo.size>=25000)filterMemo.clear();filterMemo.set(key,value);return value;}
@@ -616,11 +635,11 @@ function render(){
       <div class="toolbar-wide stat-help note" id="statHelp">Pick a stat, then set a minimum and/or maximum value for it (a single stat tops out around 255). <strong>BST</strong> is the base stat total: HP + Atk + Def + SpA + SpD + Spe (usually 300\u2013780).</div>
 
       </div></details>
-    </div>
     <details class="type-filter-wrap" id="typeFilterPanel" ${filterTypes.size?'open':''}>
       <summary><span class="type-filter-title">Filter by type</span><span class="type-filter-count" id="typeFilterCount">${filterTypes.size?`${filterTypes.size} selected`:'All types'}</span></summary>
       <div class="type-filter-content"><p class="type-filter-hint">Choose one or more types. Pokémon matching any selected type will be shown.</p><div class="type-chips">${ALL_TYPES.map(t=>`<button type="button" class="type-chip type-${t}${filterTypes.has(t)?' active':''}" data-type="${t}" aria-pressed="${filterTypes.has(t)}">${t}</button>`).join('')}</div></div>
     </details>
+    </div>
     <div id="results"></div>`;
 
   const schedule=()=>scheduleFilterRender();

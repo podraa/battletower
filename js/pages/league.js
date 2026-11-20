@@ -26,6 +26,7 @@
   let session = null;
   let profile = null;
   let currentMembership = null;
+  let currentSeasonParticipation = 'participating';
   let currentFranchise = null;
   let requestedFranchise = null;
   let pendingFranchiseRequest = null;
@@ -39,12 +40,13 @@
   let tradeLimits = [];
   let activeTradeSeason = new Date().getFullYear();
   let activeTab = 'myteam';
+  let spectatorClaimOpen = false;
   let themePickerState = { group:'All' };
   let draft = { target:'', offered:new Set(), requested:new Set(), faQuery:'' };
   let statusMsg = '';
   let rosterRefreshBusy = false;
   let rosterRealtimeChannel = null;
-  let preDraftPlan = { seasonId:'', queue:[], loaded:false, saving:false, message:'', query:'', typeFilter:'', roleFilter:'',hideMegas:false,showAbilities:false };
+  let preDraftPlan = { planId:'mine', seasonId:'', queue:[], loaded:false, saving:false, message:'', query:'', typeFilter:'', roleFilter:'',hideMegas:false,showAbilities:false };
   let preDraftSaveChain=Promise.resolve(), preDraftSaveVersion=0;
     // Shared trade status helper. The trade composer is rendered dynamically,
     // so keep this helper independent of the auth form's local setMsg().
@@ -230,6 +232,24 @@
     if(!leagueId || !userId || !SBL.leagueDb?.getMembership || !SBL.franchiseOwnership?.getUserFranchise) return;
     currentMembership = await SBL.leagueDb.getMembership(leagueId, userId, supabase);
     currentFranchise = await SBL.franchiseOwnership.getUserFranchise(leagueId, userId, supabase);
+    // Season participation is distinct from league membership and persistent
+    // franchise ownership. A sit-out preserves the franchise assignment but
+    // must render Spectator Overview rather than the owner's active-season UI.
+    currentSeasonParticipation = 'participating';
+    const seasonId = String(DASH.seasonId || '').trim();
+    if(seasonId && String(currentMembership?.status || '').toLowerCase() === 'active'){
+      const {data:seasonParticipation,error:seasonParticipationError} = await supabase
+        .from('league_season_memberships')
+        .select('status')
+        .eq('league_id', leagueId)
+        .eq('season_id', seasonId)
+        .eq('user_id', userId)
+        .maybeSingle();
+      // Do not silently show an assigned sit-out the active team tools if the
+      // authoritative participation lookup fails.
+      if(seasonParticipationError) throw seasonParticipationError;
+      currentSeasonParticipation = String(seasonParticipation?.status || 'participating').toLowerCase();
+    }
 
     const {data:pendingRequest,error:pendingRequestError} = await supabase
       .from('franchise_requests')
@@ -1124,6 +1144,68 @@
     await Promise.all(Array.from({length:Math.min(3,queued.length)},worker));
     if(preDraftPlan.showAbilities)renderDraftPlannerBody();
   }
+  // Named handoff plans are separate from the user's Draft Room queue.
+  // They are device-local until exported; never write them to draft.queue.save().
+  function plannerStorageKey(){
+    const uid=String(session?.user?.id||'anonymous');
+    const league=String(DASH.leagueId||SBL.leagueDb?.selectedLeagueId?.()||'');
+    return 'sbl_planner_handoffs_v1:'+uid+':'+league+':'+String(preDraftPlan.seasonId||'');
+  }
+  function plannerNamedPlans(){
+    try{const value=JSON.parse(localStorage.getItem(plannerStorageKey())||'{}');return value&&typeof value==='object'&&!Array.isArray(value)?value:{};}catch(_){return {};}
+  }
+  function plannerStoreNamedPlans(plans){localStorage.setItem(plannerStorageKey(),JSON.stringify(plans));}
+  function plannerPersistNamed(){
+    if(preDraftPlan.planId==='mine')return;
+    const plans=plannerNamedPlans();
+    if(!plans[preDraftPlan.planId])return;
+    plans[preDraftPlan.planId].queue=preDraftPlan.queue.map(String);
+    plannerStoreNamedPlans(plans);
+  }
+  function plannerPlanSelector(){
+    const select=contentEl?.querySelector('[data-plan-select]');if(!select)return;
+    const plans=plannerNamedPlans();const esc=SBL.pokemon.escapeHtml;
+    select.innerHTML='<option value="mine">My Plan · Draft Room synced</option>'+Object.entries(plans).map(([id,p])=>'<option value="'+esc(id)+'">'+esc(p.name||'Unnamed plan')+' · local</option>').join('');
+    select.value=preDraftPlan.planId;
+    const deleteButton=contentEl.querySelector('[data-plan-delete]');if(deleteButton)deleteButton.disabled=preDraftPlan.planId==='mine';
+    const note=contentEl.querySelector('[data-plan-scope-note]');
+    if(note)note.textContent=preDraftPlan.planId==='mine'?'Your personal plan syncs with Draft Room.':'Handoff plan saved on this device only. Export it to share; it will not alter your Draft Room queue.';
+  }
+  async function plannerSwitchPlan(id){
+    if(id===preDraftPlan.planId)return;
+    await preDraftSaveChain;
+    if(preDraftPlan.planId!=='mine')plannerPersistNamed();
+    const plans=plannerNamedPlans();
+    if(id!=='mine'&&!Object.prototype.hasOwnProperty.call(plans,id)){plannerPlanSelector();return;}
+    preDraftPlan.planId=id;
+    if(id==='mine'){
+      let ids=[];try{ids=await SBL.draft.queue.load();}catch(error){console.warn('Personal draft plan load failed:',error);}
+      preDraftPlan.queue=normalizePlannerQueue(Array.isArray(ids)?ids:[]);
+      preDraftPlan.message='Personal plan · Draft Room synced';
+    }else{
+      preDraftPlan.queue=normalizePlannerQueue(plans[id].queue||[]);
+      preDraftPlan.message='Handoff plan · saved on this device';
+    }
+    plannerPlanSelector();renderDraftPlannerBody();
+  }
+  async function plannerCreatePlan(){
+    const name=window.prompt('Name this draft plan (for example, Alex’s draft)');
+    if(name===null)return;
+    const trimmed=name.trim().slice(0,70);
+    if(!trimmed){window.alert('Enter a plan name.');return;}
+    const plans=plannerNamedPlans();
+    if(Object.values(plans).some(p=>String(p.name).toLowerCase()===trimmed.toLowerCase())){window.alert('A plan with that name already exists.');return;}
+    const id='plan-'+(window.crypto?.randomUUID?.()||Date.now().toString(36));
+    plans[id]={name:trimmed,queue:[]};plannerStoreNamedPlans(plans);
+    await plannerSwitchPlan(id);
+  }
+  async function plannerDeletePlan(){
+    if(preDraftPlan.planId==='mine')return;
+    const plans=plannerNamedPlans();const name=plans[preDraftPlan.planId]?.name||'this plan';
+    if(!window.confirm('Delete '+name+' from this device? Export it first if you need to keep it.'))return;
+    delete plans[preDraftPlan.planId];plannerStoreNamedPlans(plans);
+    await plannerSwitchPlan('mine');
+  }
   async function loadPreDraftPlan(){
     const seasonId=String(DASH.seasonId||SBL.leagueDb.selectedSeasonId?.()||'');
     if(!seasonId)return [];
@@ -1132,10 +1214,11 @@
       if(JSON.stringify(clean)!==JSON.stringify(preDraftPlan.queue)){preDraftPlan.queue=clean;savePreDraftPlan();}
       return preDraftPlan.queue;
     }
-    preDraftPlan={seasonId,queue:[],loaded:false,saving:false,message:'Loading your saved plan…',query:'',typeFilter:'',roleFilter:'',hideMegas:false,showAbilities:false};
+    preDraftPlan={planId:'mine',seasonId,queue:[],loaded:false,saving:false,message:'Loading your saved plan…',query:'',typeFilter:'',roleFilter:'',hideMegas:false,showAbilities:false};
     let ids=null;
     try{ ids=await SBL.draft.queue.load(); }
     catch(error){ console.warn('Draft plan load failed:',error); }
+    // Do not resurrect stale season-only local queue storage after a reset.
     if(!Array.isArray(ids)){try{ids=JSON.parse(localStorage.getItem('sbl_draft_queue:'+seasonId)||'null')}catch(_){ids=null}}
     const original=Array.isArray(ids)?ids.map(String):[];
     preDraftPlan.queue=normalizePlannerQueue(original);
@@ -1148,6 +1231,7 @@
   }
   async function savePreDraftPlan(){
     const ids=preDraftPlan.queue.map(String),version=++preDraftSaveVersion;
+    if(preDraftPlan.planId!=='mine'){plannerPersistNamed();preDraftPlan.message='Handoff plan saved on this device';preDraftPlan.saving=false;renderDraftPlannerBody();return;}
     preDraftPlan.saving=true;preDraftPlan.message='Saving…';
     const write=async()=>{
       try{
@@ -1168,6 +1252,67 @@
     const types=Array.isArray(mon.types)&&mon.types.length?mon.types:(SBL.pokemonTypes?.lookupTypes(mon.name)||[]);
     const abilities=Array.isArray(mon.abilities)?mon.abilities:[];
     return `<article class="pre-draft-mon" ${queued?`draggable="true" data-plan-drag-id="${SBL.pokemon.escapeHtml(id)}"`:''}><div class="pre-draft-mon-art">${sprite}</div><div class="pre-draft-mon-info"><strong>${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(mon.name)||mon.name)}</strong><span>${Number(mon.points)||0} pts${types.length?' · '+types.join(' / '):''}</span>${queued&&preDraftPlan.showAbilities?`<small class="pre-draft-abilities">Abilities: ${abilities.length?abilities.map(x=>SBL.pokemon.escapeHtml(String(x).replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase()))).join(' · '):(mon.abilityLookupFailed?'Unavailable for this form':'Loading…')}</small>`:''}</div>${queued?`<div class="pre-draft-order">#${index+1}</div><div class="pre-draft-actions"><button type="button" data-plan-action="up" data-plan-id="${SBL.pokemon.escapeHtml(id)}" ${index===0?'disabled':''} aria-label="Move up">↑</button><button type="button" data-plan-action="down" data-plan-id="${SBL.pokemon.escapeHtml(id)}" ${index===preDraftPlan.queue.length-1?'disabled':''} aria-label="Move down">↓</button><button type="button" data-plan-action="remove" data-plan-id="${SBL.pokemon.escapeHtml(id)}" aria-label="Remove">×</button></div>`:`<div class="pre-draft-candidate-actions"><button type="button" class="pre-draft-add" data-plan-action="add" data-plan-id="${SBL.pokemon.escapeHtml(id)}">Add to plan</button></div>`}</article>`;
+  }
+  // CP4.123: Portable draft handoff. No server writes occur during export.
+  function plannerHandoffData(){
+    const assignments=plannerRoleData().assignments;
+    const picks=preDraftPlan.queue.map(plannerMon).filter(Boolean).map((mon,index)=>({
+      priority:index+1,id:plannerQueueId(mon),name:String(mon.name),points:Number(mon.points)||0,
+      types:(Array.isArray(mon.types)&&mon.types.length?mon.types:(SBL.pokemonTypes?.lookupTypes(mon.name)||[])).map(String),
+      roles:(Array.isArray(assignments[analysisRoleKey(mon.name)])?assignments[analysisRoleKey(mon.name)]:[]).map(String)
+    }));
+    return {format:'sbl-draft-plan',version:1,exportedAt:new Date().toISOString(),
+      leagueId:String(DASH.leagueId||SBL.leagueDb?.selectedLeagueId?.()||''),
+      seasonId:String(preDraftPlan.seasonId||''),
+      planName:preDraftPlan.planId==='mine'?'My Plan':(plannerNamedPlans()[preDraftPlan.planId]?.name||'Handoff Plan'),
+      picks,totalPoints:picks.reduce((sum,p)=>sum+p.points,0)};
+  }
+  function plannerDownload(filename,content,mime){
+    const url=URL.createObjectURL(new Blob([content],{type:mime}));
+    try { const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove(); }
+    finally { setTimeout(()=>URL.revokeObjectURL(url),30000); }
+  }
+  function plannerExport(format){
+    const data=plannerHandoffData();
+    if(!data.picks.length){window.alert('Add Pokémon to your Draft Plan before exporting.');return;}
+    const filename='SBL-draft-plan-'+(String(data.planName||'plan').replace(/[^a-z0-9_-]/gi,'-')||'plan')+'-'+(data.seasonId.replace(/[^a-z0-9_-]/gi,'-')||'season');
+    if(format==='json'){
+      plannerDownload(filename+'.json',JSON.stringify(data,null,2),'application/json;charset=utf-8');return;
+    }
+    const esc=value=>SBL.pokemon.escapeHtml(String(value??''));
+    const rows=data.picks.map(p=>'<tr><td>'+p.priority+'</td><td><strong>'+esc(p.name)+'</strong></td><td>'+esc(p.points)+'</td><td>'+esc(p.types.join(' / ')||'—')+'</td><td>'+esc(p.roles.join(', ')||'—')+'</td></tr>').join('');
+    const html='<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SBL Draft Plan</title><style>body{font:15px system-ui,Arial,sans-serif;max-width:1100px;margin:40px auto;padding:0 20px;color:#172034}h1{margin-bottom:4px}p{color:#52617a}table{width:100%;border-collapse:collapse;margin-top:22px}th,td{padding:11px;text-align:left;border-bottom:1px solid #dce2eb;vertical-align:top}th{background:#f0f3f9}td:first-child{font-weight:700}footer{margin-top:24px;color:#52617a;font-size:12px}@media print{body{margin:0;padding:0}tr{break-inside:avoid}}</style></head><body><h1>SBL Draft Plan</h1><p>Season: '+esc(data.seasonId)+' · Exported: '+esc(data.exportedAt.slice(0,10))+' · '+data.picks.length+' priorities · '+data.totalPoints+' planned points</p><table><thead><tr><th>Priority</th><th>Pokémon</th><th>Points</th><th>Types</th><th>Assigned roles</th></tr></thead><tbody>'+rows+'</tbody></table><footer>This is a snapshot, not a live draft queue. Availability and point values may change. Open in a browser and use Print → Save as PDF to share a PDF.</footer></body></html>';
+    plannerDownload(filename+'.html',html,'text/html;charset=utf-8');
+  }
+  async function plannerImport(file){
+    if(!file)return;
+    let data;
+    try{data=JSON.parse(await file.text());}catch(_){window.alert('This is not a valid JSON draft plan.');return;}
+    if(data?.format!=='sbl-draft-plan'||data.version!==1||!Array.isArray(data.picks)||data.picks.length>500){window.alert('Unsupported draft plan file.');return;}
+    const season=String(preDraftPlan.seasonId||'');
+    if(String(data.seasonId||'')!==season){window.alert('This plan belongs to a different season. Import it in the matching season.');return;}
+    const currentLeague=String(DASH.leagueId||SBL.leagueDb?.selectedLeagueId?.()||'');
+    if(data.leagueId&&currentLeague&&String(data.leagueId)!==currentLeague){window.alert('This plan belongs to another league.');return;}
+    const raw=data.picks.map(p=>typeof p?.id==='string'?p.id:typeof p?.name==='string'?p.name:'').filter(Boolean);
+    const resolved=normalizePlannerQueue(raw);
+    if(!resolved.length){window.alert('None of the imported Pokémon are currently available in this draft pool.');return;}
+    const skipped=raw.length-resolved.length;
+    // Imported handoffs always become a NEW named plan. Never replace the active
+    // plan or write into the user's Draft Room queue as a side effect of import.
+    const plans=plannerNamedPlans();
+    const base=String(data.planName||file.name.replace(/\.json$/i,'')||'Imported plan').trim().slice(0,60)||'Imported plan';
+    let name=base, suffix=2;
+    while(Object.values(plans).some(p=>String(p.name||'').toLowerCase()===name.toLowerCase()))name=base+' ('+(suffix++)+')';
+    if(!window.confirm('Import '+resolved.length+' Pokémon as a separate plan named "'+name+'"? Your current plan and Draft Room queue will remain unchanged.'+(skipped?' '+skipped+' unavailable or duplicate entries will be skipped.':'')))return;
+    await preDraftSaveChain;
+    if(preDraftPlan.planId!=='mine')plannerPersistNamed();
+    const id='plan-'+(window.crypto?.randomUUID?.()||Date.now().toString(36));
+    plans[id]={name,queue:resolved.map(String)};
+    try{plannerStoreNamedPlans(plans);}catch(error){window.alert('Could not save imported plan on this device: '+error.message);return;}
+    preDraftPlan.planId=id;
+    preDraftPlan.queue=resolved;
+    preDraftPlan.message='Imported '+resolved.length+' Pokémon into '+name+'. Your personal plan is unchanged.';
+    plannerPlanSelector();renderDraftPlannerBody();
   }
   function plannerRoleData(){
     const assignments=DASH.settings?.pokemonRoleAssignments&&typeof DASH.settings.pokemonRoleAssignments==='object'?DASH.settings.pokemonRoleAssignments:{};
@@ -1216,8 +1361,8 @@
 
   }
   async function renderDraftPlanner(){
-    contentEl.innerHTML=`<section class="pre-draft-hero"><div><div class="myteam-kicker">PRE-SEASON WORKSPACE</div><h2>Draft Planner</h2><p>Build and evaluate your draft priorities. Your saved plan syncs with the Draft Room, where your actual picks and remaining plan are combined into one live projection.</p></div><div class="pre-draft-hero-stat"><strong data-planner-count>0 Pokémon planned</strong><span>Priority order is yours to change</span></div></section><div id="preDraftProjectedBudget" class="pre-draft-projected-budget" aria-live="polite"></div><nav class="planner-workspace-tabs" aria-label="Draft Planner sections"><button type="button" class="is-active" data-planner-view="plan" aria-pressed="true">Draft Plan &amp; Search</button><button type="button" data-planner-view="analysis" aria-pressed="false">Team Analysis</button></nav><section class="pre-draft-layout" id="preDraftPlanner" data-planner-view-panel="plan"><div class="pre-draft-panel"><div class="pre-draft-panel-head"><div><h3>Your Draft Plan</h3><p>Drag Pokémon to reorder, or use the up/down controls. The first Pokémon is your highest priority.</p></div><div class="pre-draft-head-tools"><label class="pre-draft-ability-toggle"><input type="checkbox" data-plan-abilities ${preDraftPlan.showAbilities?'checked':''}> Show Abilities</label><button type="button" class="pre-draft-clear" data-plan-clear ${preDraftPlan.queue.length?'':'disabled'}>Clear Draft Plan</button><span class="pre-draft-save" data-planner-status>Loading your saved plan…</span></div></div><div data-planner-queue class="pre-draft-list"><div class="pre-draft-empty">Loading your plan…</div></div></div><div class="pre-draft-panel"><div class="pre-draft-panel-head"><div><h3>Available Draft Pool</h3><p>Search and filter the pool, then add Pokémon to your plan.</p></div></div><input class="pre-draft-search" type="search" placeholder="Search Pokémon…" aria-label="Search draft pool" value="${SBL.pokemon.escapeHtml(preDraftPlan.query)}"><div class="pre-draft-filter-row"><select class="pre-draft-type-filter" aria-label="Filter pool by type"><option value="">All types</option>${['Normal','Fire','Water','Electric','Grass','Ice','Fighting','Poison','Ground','Flying','Psychic','Bug','Rock','Ghost','Dragon','Dark','Steel','Fairy'].map(t=>`<option value="${t.toLowerCase()}" ${preDraftPlan.typeFilter===t.toLowerCase()?'selected':''}>${t}</option>`).join('')}</select><select class="pre-draft-role-filter" aria-label="Filter pool by competitive role"><option value="">All roles</option>${plannerRoleData().roles.map(r=>`<option value="${SBL.pokemon.escapeHtml(r)}" ${preDraftPlan.roleFilter===r?'selected':''}>${SBL.pokemon.escapeHtml(SBL.rosterAnalysis?.roleLabel?.(r)||r)}</option>`).join('')}</select><label class="pre-draft-mega-toggle"><input type="checkbox" data-plan-hide-megas ${preDraftPlan.hideMegas?'checked':''}> Hide Megas</label></div><div data-planner-available class="pre-draft-list"><div class="pre-draft-empty">Loading available Pokémon…</div></div></div></section><div id="myTeamPlannerAnalysis" class="my-team-planner-analysis" data-planner-view-panel="analysis"><section class="roster-analysis"><h2>Team Analysis</h2><p>Loading your roster and draft plan analysis…</p></section></div>`;
-    await loadPreDraftPlan();renderDraftPlannerBody();
+    contentEl.innerHTML=`<section class="pre-draft-hero"><div><div class="myteam-kicker">PRE-SEASON WORKSPACE</div><h2>Draft Planner</h2><p>Build your own draft priorities or switch to a separate plan for another coach. Only My Plan syncs with your Draft Room.</p></div><div class="pre-draft-hero-stat"><strong data-planner-count>0 Pokémon planned</strong><span>Priority order is yours to change</span></div></section><div id="preDraftProjectedBudget" class="pre-draft-projected-budget" aria-live="polite"></div><nav class="planner-workspace-tabs" aria-label="Draft Planner sections"><button type="button" class="is-active" data-planner-view="plan" aria-pressed="true">Draft Plan &amp; Search</button><button type="button" data-planner-view="analysis" aria-pressed="false">Team Analysis</button></nav><section class="pre-draft-layout" id="preDraftPlanner" data-planner-view-panel="plan"><div class="pre-draft-panel"><div class="pre-draft-panel-head planner-header"><div class="planner-title-row"><div><h3>Your Draft Plan</h3><p class="planner-intro">Build and reorder your Pokémon priorities.</p></div><div class="pre-draft-head-tools"><label class="pre-draft-ability-toggle"><input type="checkbox" data-plan-abilities ${preDraftPlan.showAbilities?'checked':''}> Show Abilities</label><button type="button" class="pre-draft-clear" data-plan-clear ${preDraftPlan.queue.length?'':'disabled'}>Clear Plan</button></div></div><div class="planner-management"><div class="planner-management-top"><label class="planner-plan-label">Active plan <select data-plan-select aria-label="Choose draft plan"><option value="mine">My Plan · Draft Room synced</option></select></label><div class="planner-plan-actions"><button type="button" data-plan-new>+ New plan</button><button type="button" data-plan-delete>Delete plan</button></div></div><div class="planner-share-row"><span class="planner-share-label">Transfer</span><button type="button" class="pre-draft-export" data-plan-export="html">Report</button><button type="button" class="pre-draft-export" data-plan-export="json">Export JSON</button><button type="button" class="pre-draft-export" data-plan-import-trigger>Import as new plan</button><input type="file" data-plan-import-file accept=".json,application/json" hidden></div><div class="planner-feedback"><span class="planner-scope-note" data-plan-scope-note>Your personal plan syncs with Draft Room.</span><span class="pre-draft-save" role="status" data-planner-status>Loading your saved plan…</span></div></div></div></div><div data-planner-queue class="pre-draft-list"><div class="pre-draft-empty">Loading your plan…</div></div></div><div class="pre-draft-panel"><div class="pre-draft-panel-head"><div><h3>Available Draft Pool</h3><p>Search and filter the pool, then add Pokémon to your plan.</p></div></div><input class="pre-draft-search" type="search" placeholder="Search Pokémon…" aria-label="Search draft pool" value="${SBL.pokemon.escapeHtml(preDraftPlan.query)}"><div class="pre-draft-filter-row"><select class="pre-draft-type-filter" aria-label="Filter pool by type"><option value="">All types</option>${['Normal','Fire','Water','Electric','Grass','Ice','Fighting','Poison','Ground','Flying','Psychic','Bug','Rock','Ghost','Dragon','Dark','Steel','Fairy'].map(t=>`<option value="${t.toLowerCase()}" ${preDraftPlan.typeFilter===t.toLowerCase()?'selected':''}>${t}</option>`).join('')}</select><select class="pre-draft-role-filter" aria-label="Filter pool by competitive role"><option value="">All roles</option>${plannerRoleData().roles.map(r=>`<option value="${SBL.pokemon.escapeHtml(r)}" ${preDraftPlan.roleFilter===r?'selected':''}>${SBL.pokemon.escapeHtml(SBL.rosterAnalysis?.roleLabel?.(r)||r)}</option>`).join('')}</select><label class="pre-draft-mega-toggle"><input type="checkbox" data-plan-hide-megas ${preDraftPlan.hideMegas?'checked':''}> Hide Megas</label></div><div data-planner-available class="pre-draft-list"><div class="pre-draft-empty">Loading available Pokémon…</div></div></div></section><div id="myTeamPlannerAnalysis" class="my-team-planner-analysis" data-planner-view-panel="analysis"><section class="roster-analysis"><h2>Team Analysis</h2><p>Loading your roster and draft plan analysis…</p></section></div>`;
+    await loadPreDraftPlan();plannerPlanSelector();renderDraftPlannerBody();
     const plannerTabs=contentEl.querySelector('.planner-workspace-tabs');
     if(plannerTabs){
       plannerTabs.addEventListener('click',event=>{
@@ -1233,6 +1378,7 @@
     }
     const root=document.getElementById('preDraftPlanner');
     if(root&&!root.dataset.abilitiesBound){root.dataset.abilitiesBound='1';root.addEventListener('change',e=>{if(e.target.matches('[data-plan-abilities]')){preDraftPlan.showAbilities=!!e.target.checked;renderDraftPlannerBody();if(preDraftPlan.showAbilities)void loadPlannerAbilities();}});}
+    root?.querySelector('[data-plan-import-file]')?.addEventListener('change',async event=>{const file=event.target.files?.[0];event.target.value='';await plannerImport(file);});
     if(root&&!root.dataset.dragBound){
       root.dataset.dragBound='1';let dragging='';
       root.addEventListener('dragstart',e=>{const card=e.target.closest('[data-plan-drag-id]');if(!card)return;dragging=card.dataset.planDragId;e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',dragging);card.classList.add('is-dragging');});
@@ -1242,9 +1388,14 @@
     }
   }
   function handleDraftPlannerClick(event){
+    if(event.target.closest('[data-plan-new]')){void plannerCreatePlan();return;}
+    if(event.target.closest('[data-plan-delete]')){void plannerDeletePlan();return;}
+    const exportButton=event.target.closest('[data-plan-export]');
+    if(exportButton){plannerExport(exportButton.dataset.planExport);return;}
+    if(event.target.closest('[data-plan-import-trigger]')){document.querySelector('#preDraftPlanner [data-plan-import-file]')?.click();return;}
     const clearButton=event.target.closest('[data-plan-clear]');
     if(clearButton){
-      if(!preDraftPlan.queue.length||!window.confirm('Clear your entire Draft Plan? This removes all planned picks from My Team and the Draft Room. Your actual drafted Pokémon will not be affected.'))return;
+      if(!preDraftPlan.queue.length||!window.confirm(preDraftPlan.planId==='mine'?'Clear your personal Draft Plan? This removes planned picks from My Team and Draft Room. Actual drafted Pokémon are unaffected.':'Clear this handoff plan? Your personal Draft Room queue will not be affected.'))return;
       preDraftPlan.queue=[];preDraftPlan.message='Clearing your Draft Plan…';renderDraftPlannerBody();queuePreDraftPlan();return;
     }
     const button=event.target.closest('[data-plan-action]');if(!button)return;
@@ -1266,7 +1417,45 @@
     return SBL.rosterAnalysis.render({team:myLeagueTeam(),heading:'Team Analysis',entries,roles,sprite:name=>SBL.pokemon.spriteMarkup(name,'sprite','hd')});
   }
 
+  // A league member may follow a season without holding a franchise.
+  // Do not infer an assignment from profile/team_name or snapshot roster names.
+  function isSittingOutThisSeason(){
+    return authoritativeClaimStatus()==='active' && currentSeasonParticipation==='sitting_out';
+  }
+  function isSeasonSpectator(){
+    return authoritativeClaimStatus()==='active' && (isSittingOutThisSeason() || !currentFranchise?.franchiseId);
+  }
+  function spectatorLink(file){
+    return `${file}?league=${encodeURIComponent(DASH.leagueId)}`;
+  }
+  function renderSpectatorDashboard(){
+    const sittingOut=isSittingOutThisSeason();
+    const name=SBL.pokemon.escapeHtml(DASH.leagueName||'League');
+    const reservedFranchise=String(currentFranchise?.franchise?.name||'').trim();
+    const hasRequest=!sittingOut&&!!pendingFranchiseRequest;
+    const requestName=String(pendingFranchiseRequest?.franchise?.name||'').trim();
+    const title=document.querySelector('#app > header h1');
+    const subtitle=document.querySelector('#app > header .sub');
+    if(title)title.textContent='Season Overview';
+    if(subtitle)subtitle.textContent=`${DASH.leagueName||'League'} · Spectator`;
+    const tiles=[
+      ['01','Standings','Season table and results','season.html'],
+      ['02','Rosters','Current franchises and picks','rosters.html'],
+      ['03','Statistics','League performance','stats.html'],
+      ['04','Fixtures','Upcoming matches','match-prep.html']
+    ];
+    contentEl.innerHTML=`<div class="spectator-dashboard">
+      <header class="spectator-head"><div><span class="spectator-overline">${name} / Season hub</span><h2>Season overview</h2></div><span class="spectator-state">${sittingOut?'Sitting out':'Spectating'}</span></header>
+      <section class="spectator-current"><span class="spectator-section-label">YOUR STATUS</span><div class="spectator-current-line"><div><strong>${sittingOut?'Not participating this season':'Following this league'}</strong><p>${sittingOut?'Your franchise remains reserved. You can still follow the season.':'You can follow this season without managing a franchise.'}</p></div><span class="spectator-state-mark" aria-hidden="true"></span></div>${sittingOut&&reservedFranchise?`<div class="spectator-reserved"><span>Reserved franchise</span><strong>${SBL.pokemon.escapeHtml(reservedFranchise)}</strong></div>`:''}</section>
+      <div class="spectator-section-head"><h3>Explore the season</h3><span>LEAGUE LINKS</span></div>
+      <nav class="spectator-grid" aria-label="Season links">${tiles.map(([num,label,desc,file])=>`<a class="spectator-tile" href="${spectatorLink(file)}"><span class="spectator-tile-index" aria-hidden="true">${num}</span><span class="spectator-tile-copy"><strong>${label}</strong><small>${desc}</small></span><span class="spectator-tile-arrow" aria-hidden="true">→</span></a>`).join('')}</nav>
+      <section class="spectator-membership"><div><h3>${sittingOut?'Participation':hasRequest?'Request pending':'Franchise access'}</h3><p>${sittingOut?'Your assignment is reserved for a future season. Ask a league admin to update your participation when you return.':hasRequest?`Your request${requestName?' for '+SBL.pokemon.escapeHtml(requestName):''} is awaiting approval.`:'You can request a franchise when one is available.'}</p></div>${!sittingOut?`<button type="button" class="ghost" id="spectatorFranchiseAction">${hasRequest?'View request':'Request franchise'}</button>`:''}</section>
+    </div>`;
+    if(!sittingOut)document.getElementById('spectatorFranchiseAction')?.addEventListener('click',()=>{spectatorClaimOpen=true;renderTeamClaim();});
+  }
+
   function renderMyTeam(){
+    if(isSeasonSpectator()){ renderSpectatorDashboard(); return; }
     const pageTitle=document.querySelector('#app > header h1');
     const pageSub=document.querySelector('#app > header .sub');
     if(pageTitle) pageTitle.textContent='My Team';
@@ -1898,6 +2087,14 @@
       nav.id = 'tabs';
       contentEl.before(nav);
     }
+    // Spectators have no team trade or match-history controls.
+    if(isSeasonSpectator()){
+      const tabs=[['myteam','Overview'],['updates','Updates'],['feedback','Suggestions'],['account','Account']];
+      if(!tabs.some(([id])=>id===activeTab))activeTab='myteam';
+      nav.innerHTML=tabs.map(([id,label])=>`<button data-tab="${id}" class="${activeTab===id?'active':''}">${label}</button>`).join('');
+      nav.querySelectorAll('button').forEach(b=>b.onclick=()=>{activeTab=b.dataset.tab;render();});
+      return;
+    }
     const unread = unreadTradeCounts();
     const totalUnread = unread.incoming + unread.history;
     const tabs = [
@@ -2171,9 +2368,12 @@
     // Case 2: ordinary active member with no authoritative assignment is a
     // valid member state and must enter the franchise request flow.
     else if(authoritativeStatus === 'active' && !hasAuthoritativeFranchise){
-      document.getElementById('tabs')?.remove();
-      if(pendingFranchiseRequest) return renderPendingOrRejected();
-      return renderTeamClaim();
+      // Valid spectator membership is not a claim failure. The optional
+      // request flow is accessible from the overview instead of blocking entry.
+      if(spectatorClaimOpen && !isSittingOutThisSeason()){
+        document.getElementById('tabs')?.remove();
+        return pendingFranchiseRequest?renderPendingOrRejected():renderTeamClaim();
+      }
     }
     // Case 3: non-active membership states use the claim/status UI.
     else if(['pending','rejected','cancelled'].includes(authoritativeStatus) && !hasAuthoritativeFranchise){
@@ -2202,7 +2402,7 @@
   }
 
   contentEl.addEventListener('input',e=>{if(e.target.matches('.pre-draft-search')){preDraftPlan.query=e.target.value;renderDraftPlannerBody();const input=contentEl.querySelector('.pre-draft-search');if(input){input.focus();input.setSelectionRange(input.value.length,input.value.length);}}});
-  contentEl.addEventListener('change',e=>{if(e.target.matches('.pre-draft-type-filter')){preDraftPlan.typeFilter=e.target.value;renderDraftPlannerBody();}if(e.target.matches('.pre-draft-role-filter')){preDraftPlan.roleFilter=e.target.value;renderDraftPlannerBody();}if(e.target.matches('[data-plan-hide-megas]')){preDraftPlan.hideMegas=!!e.target.checked;renderDraftPlannerBody();}});
+  contentEl.addEventListener('change',e=>{if(e.target.matches('[data-plan-select]')){void plannerSwitchPlan(e.target.value);return;}if(e.target.matches('.pre-draft-type-filter')){preDraftPlan.typeFilter=e.target.value;renderDraftPlannerBody();}if(e.target.matches('.pre-draft-role-filter')){preDraftPlan.roleFilter=e.target.value;renderDraftPlannerBody();}if(e.target.matches('[data-plan-hide-megas]')){preDraftPlan.hideMegas=!!e.target.checked;renderDraftPlannerBody();}});
 
   async function boot(){
     contentEl.innerHTML = '<div class="empty-state">Loading…</div>';
@@ -2215,7 +2415,7 @@
   }
 
   contentEl.addEventListener('click',e=>{
-    if(e.target.closest('[data-plan-action],[data-plan-clear]')){handleDraftPlannerClick(e);return;}
+    if(e.target.closest('[data-plan-action],[data-plan-clear],[data-plan-new],[data-plan-delete],[data-plan-export],[data-plan-import-trigger]')){e.preventDefault();handleDraftPlannerClick(e);return;}
     const matchBtn=e.target.closest('[data-myteam-match]');
     if(matchBtn){e.preventDefault();openMyTeamReplaySummary(matchBtn.dataset.myteamMatch);return;}
     const recordBtn=e.target.closest('[data-record-adjust]');
