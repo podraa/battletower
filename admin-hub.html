@@ -6,14 +6,14 @@
 <title>Battle Tower Admin Hub</title>
 <script id="sbl-global-theme-loader" src="js/sbl-themes.js?v=20260913-admin-hub"></script>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<link href="css/sbl-site.css?v=cp4100-scroll-hide" rel="stylesheet">
+<link href="css/sbl-site.css?v=cp4125-hover-only-nav" rel="stylesheet">
 <link href="css/sbl-components.css?v=cp463" rel="stylesheet">
 <link href="css/sbl-sprites-layout.css?v=cp454-contained-sprites" rel="stylesheet">
 <link href="css/sbl-ui.css?v=cp463-gutters" rel="stylesheet">
 <link href="css/pages/admin-hub.css?v=cp458-site-testaccounts" rel="stylesheet">
 <link href="css/sbl-standard-ui.css?v=cp435-ui-standardization" rel="stylesheet">
   <link rel="stylesheet" href="css/sbl-mobile-scroll.css?v=cp493">
-<link rel="stylesheet" href="css/sbl-ux-sweep.css?v=cp4110">
+<link rel="stylesheet" href="css/sbl-ux-sweep.css?v=cp4125-planner-controls">
 </head>
 <body data-site-admin="true">
 <nav aria-label="Site navigation" class="page-nav" id="pageNav"></nav>
@@ -48,6 +48,23 @@
       </div>
       <div id="leagueTable" class="site-admin-table-wrap"></div>
       <div id="leagueDeleteStatus" class="site-admin-muted" aria-live="polite"></div>
+    </section>
+
+    <section class="site-admin-section" id="queueInspectorSection">
+      <div class="site-admin-section-heading">
+        <div><div class="site-admin-eyebrow">Private · Site admins only</div><h2>Draft queue inspector</h2></div>
+        <span class="site-admin-muted">Never accessible to league administrators or commissioners</span>
+      </div>
+      <p class="site-admin-muted">Sensitive player priorities. Select a league and season, then explicitly load the private queues. Do not share during an active draft.</p>
+      <div class="test-account-form">
+        <div><label for="trackerLeagueSelect">League</label><select id="trackerLeagueSelect"><option value="">Choose a league…</option></select></div>
+        <div><label for="trackerSeasonSelect">Season</label><select id="trackerSeasonSelect"><option value="">Choose a season…</option></select></div>
+        <div><label>&nbsp;</label><button class="site-admin-button primary" type="button" id="inspectQueuesBtn">Inspect private queues</button></div>
+        <div><label>&nbsp;</label><button class="site-admin-button" type="button" id="exportTrackerHistoryBtn">Export history (after draft)</button></div>
+      </div>
+      <div><a class="site-admin-button" id="trackerReplayLink" href="#" hidden>Open post-draft replay</a></div>
+      <div id="trackerInspectorStatus" class="site-admin-muted" aria-live="polite"></div>
+      <div id="trackerInspectorResults" class="site-admin-table-wrap"></div>
     </section>
 
     <section class="site-admin-section">
@@ -103,8 +120,8 @@
 <script src="js/services/profiles.js?v=cp422-active-members" defer></script>
 <script src="js/services/franchise-ownership.js?v=cp461-request-approval" defer></script>
 <script src="js/auth.js" defer></script>
-<script src="js/services/site-admin.js?v=cp462-archive-safe-delete" defer></script>
-<script src="js/sbl-site.js?v=cp4100-scroll-direction" defer></script>
-<script src="js/pages/admin-hub.js?v=cp462-archive-safe-delete" defer></script>
+<script src="js/services/site-admin.js?v=cp4129-queue-inspector" defer></script>
+<script src="js/sbl-site.js?v=cp4125-hover-only-nav" defer></script>
+<script src="js/pages/admin-hub.js?v=cp4129-queue-inspector" defer></script>
 </body>
 </html>
