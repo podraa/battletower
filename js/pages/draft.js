@@ -1307,7 +1307,9 @@ function subscribeDraft(){
   }catch(e){console.warn('Draft realtime subscription unavailable',e)}
 }
 boot().then(()=>{seedSeenPicks();subscribeDraft();pollDraft()});
-setInterval(pollDraft,MOCK_DRAFT_MODE?700:15000);
+// CP4.149: During a live draft, check for missed realtime updates every 3s.
+// Background tabs resume immediately on visibility/focus; avoid unnecessary DB traffic.
+setInterval(()=>{if(MOCK_DRAFT_MODE||!document.hidden)pollDraft()},MOCK_DRAFT_MODE?700:3000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){if(!MOCK_DRAFT_MODE)refreshIdentity();pollDraft()}});
 window.addEventListener('focus',()=>{if(!MOCK_DRAFT_MODE)refreshIdentity();pollDraft()});
 })();
