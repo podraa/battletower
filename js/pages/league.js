@@ -1,7 +1,7 @@
 (function(){
   const SUPABASE_STATE_ID = '__dashboard_state__';
   
-  const ROSTER_BUDGET = 115; // keep in sync with the `budget` constant in accept_trade()
+  // League/season trade rules are loaded from Supabase; no local salary cap.
   function currentSeason(){ return new Date().getFullYear(); }
   const supabase = window.SBL.getSupabase();
 
@@ -307,7 +307,7 @@
       .eq('league_id', selectedLeagueId)
       .eq('season', activeTradeSeason);
     if(limitErr){
-      console.warn('Franchise trade limits unavailable; using 8-trade defaults:', limitErr.message);
+      console.warn('Franchise trade overrides unavailable; using configured league limits:', limitErr.message);
       tradeLimits = [];
     }else{
       tradeLimits = limits || [];
@@ -316,7 +316,9 @@
 
   function tradeLimitFor(team, kind){
     const row = tradeLimits.find(x => x.team_name === team);
-    if(!row) return 8;
+    if(!row){const rules=SBL.tradeRules.current();
+      return rules ? (kind==='freeagency' ? rules.free_agency_trade_limit : rules.team_trade_limit) : 0;
+    }
     return kind === 'freeagency' ? Math.max(0, Number(row.free_agency_trade_limit) || 0) : Math.max(0, Number(row.team_trade_limit) || 0);
   }
 
@@ -330,13 +332,15 @@
     // Commissioner-granted credits belong to the player account. They are
     // shown on the player's dashboard and added to the normal allowance.
     // For a franchise-level display we leave the franchise limit itself intact.
-    const credits = myLeagueTeam() === team ? Math.max(0, Number(profile?.trade_credits) || 0) : 0;
+    const credits = myLeagueTeam() === team ? Math.max(0, Number(profile?.trade_credits) || 0)+Math.max(0,Number(DASH.settings?.tradeCredits?.[profile?.id])||0) : 0;
     return {limit,used,credits,remaining:Math.max(0,limit+credits-used)};
   }
 
   async function refreshAll(){
     await Promise.all([loadDashboardState(), loadProfile(), loadTrades()]);
     await loadAuthoritativeFranchiseContext();
+    if(SBL.leagueDb?.selectedLeagueId?.() && SBL.leagueDb?.selectedSeasonId?.())
+      await SBL.tradeRules.load(supabase);
     const rawRosters = DASH.settings.rosters || {};
     DASH.settings.rosters = SBL.trades.getEffectiveRosters(rawRosters, trades);
     DASH.settings.freeAgency = DASH.settings.freeAgency || {mons:[]};
@@ -652,7 +656,8 @@
           const myAfter=myPts-(Number(give.points)||0)+(Number(get.points)||0);
           const theirAfter=rosterPoints(theirs)-(Number(get.points)||0)+(Number(give.points)||0);
           if(mine.length < 10 || theirs.length < 10) continue;
-          if(myAfter>ROSTER_BUDGET || theirAfter>ROSTER_BUDGET) continue;
+          if((SBL.tradeRules.capFor(myLeagueTeam())!==null && myAfter>SBL.tradeRules.capFor(myLeagueTeam())) ||
+             (SBL.tradeRules.capFor(team)!==null && theirAfter>SBL.tradeRules.capFor(team))) continue;
           candidates.push({team,give,get});
         }
       }
@@ -1467,8 +1472,10 @@
     }
     const roster=myRoster();
     const pts=rosterPoints(roster);
-    const remaining=Math.max(0,ROSTER_BUDGET-pts);
-    const pct=Math.min(100,Math.round((pts/ROSTER_BUDGET)*100));
+    const configuredTradeRules=SBL.tradeRules.current();
+    const cap=SBL.tradeRules.capFor(myLeagueTeam());
+    const remaining=cap===null?null:Math.max(0,cap-pts);
+    const pct=cap===null?0:Math.min(100,Math.round((pts/Math.max(1,cap))*100));
     const rec=myTeamRecord();
     const stats=roster.map(m=>({m,s:myPokemonStats(m.name)}));
     const played=stats.filter(x=>x.s?.games>0);
@@ -1502,9 +1509,9 @@
               <div class="next-battle-meta" id="nextBattleMeta">Open Match Prep →</div>
             </a>
             <div class="myteam-budget">
-              <div class="myteam-budget-head"><span class="myteam-budget-label">Draft Budget</span><span class="myteam-budget-value">${pts}<span style="color:var(--text-dim);font-size:13px"> / ${ROSTER_BUDGET}</span></span></div>
+              <div class="myteam-budget-head"><span class="myteam-budget-label">Roster Points / Trade Cap</span><span class="myteam-budget-value">${pts}<span style="color:var(--text-dim);font-size:13px"> / ${!configuredTradeRules?'Rules not configured':cap===null?'No cap':cap}</span></span></div>
               <div class="myteam-budget-bar"><div class="myteam-budget-fill" style="width:${pct}%"></div></div>
-              <div class="myteam-budget-remaining"><span>Spent</span><span>${remaining} pts remaining</span></div>
+              <div class="myteam-budget-remaining"><span>Spent</span><span>${!configuredTradeRules?'Ask an admin to configure trade rules':remaining===null?'Cap-free league':remaining+' pts remaining'}</span></div>
             </div>
           </div>
         </div>
@@ -1600,7 +1607,7 @@
 
     el.innerHTML = `
       <h2>Propose a Trade</h2>
-      <div class="note">You can offer multiple Pokémon for multiple Pokémon. Point totals do not have to match, but after the trade neither roster may exceed 115 points or fall below 10 Pokémon. Each team gets 8 completed trades per season.</div>
+      <div class="note">You can offer multiple Pokémon for multiple Pokémon. Point totals need not match. The configured league/season rules below govern salary caps, roster size and trade allowances. Supabase checks the same rules when accepting.</div>
       <div class="row">
         <div>
           <label>Trade with</label>
@@ -1612,7 +1619,7 @@
       </div>
       <div class="trade-cols">
         <div class="trade-col">
-          <h4>You give ${targetIsFA?'(optional for a free-agency pickup)':''}</h4>
+          <h4>You give ${targetIsFA?'(required for a Free Agency swap)':''}</h4>
           <div class="selected-row" id="offeredSelected">${chipsHtml('offered')}</div>
           <div class="pick-grid" id="offeredPicks">
             ${roster.length ? roster.map(m=>pickCard(m,'offered')).join('') : '<div class="empty-state">Your roster is empty.</div>'}
@@ -1664,10 +1671,11 @@
       const targetAfter = targetIsFA ? null : ((targetRoster||[]).length - draft.requested.size + draft.offered.size);
       const pointDelta = reqPts - offPts;
       const bits = [`Give ${offPts} pts / Get ${reqPts} pts${pointDelta===0 ? ' — balanced' : pointDelta>0 ? ` — you gain ${pointDelta} pts` : ` — you lose ${Math.abs(pointDelta)} pts`}`];
-      bits.push(`Your roster after: ${proposerAfter}${proposerAfter<10?' (below 10 minimum)':''}`);
+      const minMons=SBL.tradeRules?.current?.()?.min_roster_size;
+      bits.push(`Your roster after: ${proposerAfter}${minMons!=null&&proposerAfter<minMons?` (below ${minMons} minimum)`:''}`);
       bits.push(`${tradeLimitMessage(myLeagueTeam(), targetIsFA ? 'freeagency' : 'team')}`);
       if(!targetIsFA){
-        bits.push(`${SBL.pokemon.escapeHtml(draft.target)} roster after: ${targetAfter}${targetAfter<10?' (below 10 minimum)':''}`);
+        bits.push(`${SBL.pokemon.escapeHtml(draft.target)} roster after: ${targetAfter}${minMons!=null&&targetAfter<minMons?` (below ${minMons} minimum)`:''}`);
         bits.push(`${tradeLimitMessage(draft.target, 'team')}`);
       }
       summaryEl.textContent = bits.join(' · ');
@@ -1746,54 +1754,19 @@
       const msgEl = document.getElementById('tradeMsg');
       if(draft.offered.size < 1 || draft.requested.size < 1){ msgEl.className='note danger'; msgEl.textContent='Select at least one Pokémon on each side.'; return; }
       const offPts = totalPts('offered'), reqPts = totalPts('requested');
-      const proposerAfter = roster.length - draft.offered.size + draft.requested.size;
-      const proposerPointsAfter = rosterPoints(roster) - offPts + reqPts;
-
-      // Each team gets 8 completed trades per season. Team trades consume a
-      // slot for both teams; Free Agency trades consume a slot for the team
-      // making the pickup. Pending trades do not consume a slot.
-      const proposerAllowance = tradeAllowance(myLeagueTeam(), targetIsFA ? 'freeagency' : 'team');
-      if(proposerAllowance.remaining <= 0){
-        msgEl.className='note danger';
-        msgEl.textContent=`You don't have any ${targetIsFA ? 'Free Agency' : 'team-to-team'} trades remaining.`;
-        return;
-      }
-
-      if(proposerAfter < 10){
-        msgEl.className='note danger';
-        msgEl.textContent=`Invalid trade: your roster would have ${proposerAfter} Pokémon. Both sides must have at least 10.`;
-        return;
-      }
-
-      if(proposerPointsAfter > ROSTER_BUDGET){
-        msgEl.className='note danger';
-        msgEl.textContent=`Invalid trade: your roster would be ${proposerPointsAfter}/${ROSTER_BUDGET} points, which is ${proposerPointsAfter-ROSTER_BUDGET} over the limit. You give ${offPts} points and receive ${reqPts} points.`;
-        return;
-      }
-
-      if(!targetIsFA){
-        const targetAfter = (targetRoster||[]).length - draft.requested.size + draft.offered.size;
-        const targetPointsAfter = rosterPoints(targetRoster||[]) - reqPts + offPts;
-        const targetAllowance = tradeAllowance(draft.target, 'team');
-
-        if(targetAllowance.remaining <= 0){
-          msgEl.className='note danger';
-          msgEl.textContent=`${draft.target} doesn't have any team-to-team trades remaining.`;
-          return;
-        }
-
-        if(targetAfter < 10){
-          msgEl.className='note danger';
-          msgEl.textContent=`Invalid trade: ${draft.target}'s roster would have ${targetAfter} Pokémon. Both sides must have at least 10.`;
-          return;
-        }
-
-        if(targetPointsAfter > ROSTER_BUDGET){
-          msgEl.className='note danger';
-          msgEl.textContent=`Invalid trade: ${draft.target}'s roster would be ${targetPointsAfter}/${ROSTER_BUDGET} points, which is ${targetPointsAfter-ROSTER_BUDGET} over the limit. They give ${reqPts} points and receive ${offPts} points.`;
-          return;
-        }
-      }
+      const rules=SBL.tradeRules.current();
+      if(!rules){msgEl.className='note danger';msgEl.textContent='Trade rules are unavailable for this league/season. Contact an administrator.';return;}
+      const proposerAllowance=tradeAllowance(myLeagueTeam(),targetIsFA?'freeagency':'team');
+      if(proposerAllowance.remaining<=0){msgEl.className='note danger';msgEl.textContent='No trades remaining for this franchise.';return;}
+      // Recipient credits are account-scoped and checked by the authoritative server RPC.
+      // Do not incorrectly block a proposal because this browser cannot see their credits.
+      const preview=SBL.tradeRules.previewSwap({
+        proposerTeam:myLeagueTeam(),targetTeam:targetIsFA?null:draft.target,
+        proposerRoster:roster,targetRoster:targetRoster||[],
+        offeredCount:draft.offered.size,requestedCount:draft.requested.size,
+        offeredPoints:offPts,requestedPoints:reqPts,rules
+      });
+      if(preview.errors.length){msgEl.className='note danger';msgEl.textContent=preview.errors.join(' ');return;}
       const btn = document.getElementById('submitTradeBtn'); btn.disabled = true;
       msgEl.className='note'; msgEl.textContent='Sending…';
       try{

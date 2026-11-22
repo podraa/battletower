@@ -3710,6 +3710,7 @@ function renderDraft(){ return drawDraft(); }
   let ADMIN_TRADE_SEASON = new Date().getFullYear();
 
   let COMM_TRADE_LIMITS = [];
+  let COMM_TRADE_RULES = null;
   let COMM_MULLIGAN_SETTINGS = null;
   let COMM_MULLIGAN_ALLOWANCES = [];
   let COMM_MULLIGAN_EVENTS = [];
@@ -3730,14 +3731,15 @@ function renderDraft(){ return drawDraft(); }
     // renders when franchise_trade_limits is missing/empty or profiles fail.
     const currentLeagueId = String(SBL.leagueDb?.selectedLeagueId?.() || STATE.settings.activeLeagueId || '').trim();
     const currentSeasonId = String(SBL.leagueDb?.selectedSeasonId?.() || '').trim();
-    const [profilesResult, tradeResult, limitResult, mulliganSettingsResult, mulliganAllowancesResult, mulliganEventsResult, rosterTransactionsResult] = await Promise.allSettled([
+    const [profilesResult, tradeResult, limitResult, mulliganSettingsResult, mulliganAllowancesResult, mulliganEventsResult, rosterTransactionsResult, tradeRulesResult] = await Promise.allSettled([
       currentLeagueId ? supabase.rpc('sbl_admin_list_league_users',{p_league_id:currentLeagueId}) : Promise.resolve({data:[],error:null}),
       SBL.trades.load(supabase,{force:true}),
       supabase.from('franchise_trade_limits').select('*').eq('season', ADMIN_TRADE_SEASON).eq('league_id', currentLeagueId).order('team_name'),
       currentLeagueId && currentSeasonId ? supabase.from('franchise_mulligan_settings').select('*').eq('league_id',currentLeagueId).eq('season_id',currentSeasonId).maybeSingle() : Promise.resolve({data:null,error:null}),
       currentLeagueId && currentSeasonId ? supabase.from('franchise_mulligan_allowances').select('*').eq('league_id',currentLeagueId).eq('season_id',currentSeasonId) : Promise.resolve({data:[],error:null}),
       currentLeagueId && currentSeasonId ? supabase.from('franchise_mulligan_events').select('franchise_id,user_id,outgoing_name,incoming_name,created_at').eq('league_id',currentLeagueId).eq('season_id',currentSeasonId).order('created_at',{ascending:false}) : Promise.resolve({data:[],error:null}),
-      currentLeagueId && currentSeasonId ? supabase.from('admin_roster_transactions').select('*').eq('league_id',currentLeagueId).eq('season_id',currentSeasonId).order('created_at',{ascending:false}).limit(25) : Promise.resolve({data:[],error:null})
+      currentLeagueId && currentSeasonId ? supabase.from('admin_roster_transactions').select('*').eq('league_id',currentLeagueId).eq('season_id',currentSeasonId).order('created_at',{ascending:false}).limit(25) : Promise.resolve({data:[],error:null}),
+      currentLeagueId && currentSeasonId ? SBL.tradeRules.load(supabase,{force:true}) : Promise.resolve(null)
     ]);
 
     if(profilesResult.status === 'fulfilled' && !profilesResult.value?.error) COMM_PROFILES = profilesResult.value?.data || [];
@@ -3766,6 +3768,8 @@ function renderDraft(){ return drawDraft(); }
     COMM_MULLIGAN_EVENTS = mulliganEventsResult.status==='fulfilled' && !mulliganEventsResult.value?.error ? (mulliganEventsResult.value?.data||[]).filter(ev=>!ACTIVE_SEASON_SITOUT_USERS.has(String(ev.user_id||''))) : [];
     COMM_ADMIN_ROSTER_TRANSACTIONS = rosterTransactionsResult.status==='fulfilled' && !rosterTransactionsResult.value?.error ? (rosterTransactionsResult.value?.data||[]) : [];
     if(rosterTransactionsResult.status!=='fulfilled' || rosterTransactionsResult.value?.error) console.warn('Admin roster transaction audit is unavailable; apply migration 044 if this is a new deployment.',rosterTransactionsResult.reason || rosterTransactionsResult.value?.error);
+    COMM_TRADE_RULES=tradeRulesResult.status==='fulfilled'?tradeRulesResult.value:null;
+    if(tradeRulesResult.status==='rejected')console.warn('League trade rules unavailable. Apply migration 060.',tradeRulesResult.reason);
   }
 
   async function loadFranchiseRequests(){
@@ -4029,11 +4033,12 @@ function renderDraft(){ return drawDraft(); }
   }
 
   function tradeManagerRows(){
-    const season = new Date().getFullYear();
+    const currentSeasonId=String(SBL.leagueDb?.selectedSeasonId?.()||'');
+    const season = Number(COMM_TRADES.find(t=>String(t.season_id)===currentSeasonId)?.season)||new Date().getFullYear();
     const teams = [...new Set((COMM_MEMBER_FRANCHISES||[]).map(x=>x.franchise?.name).filter(Boolean))].sort();
     const rows = teams.map(team=>{
-      const row = COMM_TRADE_LIMITS.find(x=>x.team_name===team) || {team_trade_limit:8, free_agency_trade_limit:8};
-      const accepted = COMM_TRADES.filter(t=>t.status==='accepted' && new Date(t.created_at).getFullYear()===season);
+      const row = COMM_TRADE_LIMITS.find(x=>x.team_name===team) || {team_trade_limit:COMM_TRADE_RULES?.team_trade_limit??0,free_agency_trade_limit:COMM_TRADE_RULES?.free_agency_trade_limit??0};
+      const accepted = COMM_TRADES.filter(t=>t.status==='accepted' && (t.season_id ? String(t.season_id)===currentSeasonId : Number(t.season||new Date(t.created_at).getFullYear())===season));
       const teamUsed = accepted.filter(t=>(t.target_team != null && String(t.target_team).trim() !== '') && (t.proposer_team===team || t.target_team===team)).length;
       const faUsed = accepted.filter(t=>t.target_team===null && t.proposer_team===team).length;
       const teamLimit = Math.max(0, Number(row.team_trade_limit) || 0);
@@ -4055,9 +4060,34 @@ function renderDraft(){ return drawDraft(); }
     </div>`;
   }
 
-  function drawTradeAllowancesView(){
-    return `${tradeManagerRows()}<div style="margin-top:14px">${drawManualTradeCredits()}</div>`;
-  }
+  function drawTradeRulesEditor(){
+   const existing=Boolean(COMM_TRADE_RULES);
+   const r=COMM_TRADE_RULES||{salary_cap:null,team_salary_caps:{},min_roster_size:0,max_roster_size:null,team_trade_limit:0,free_agency_trade_limit:0};
+   const missing=!existing;
+   
+   const escape=SBL.pokemon.escapeHtml;
+   const capFree=existing ? r.salary_cap==null : false;
+   const overrides=Object.entries(r.team_salary_caps||{}).map(([team,cap])=>`${team}=${cap}`).join('\n');
+   return `<section class="panel" aria-label="League trade rules">
+     <h3>Authoritative league / season trade rules</h3>
+      ${missing?'<div class="note danger">No rules are configured yet. Apply migration 060, then explicitly enter your cap and roster/trade limits here.</div>':''}
+     <div class="note">These values are enforced by Supabase at acceptance, not just the trade composer. Saved per season; archived seasons cannot be changed.</div>
+     <div class="admin-roster-controls">
+       <div><label for="leagueTradeCapFree"><input id="leagueTradeCapFree" type="checkbox" ${capFree?'checked':''}> Cap-free league</label></div>
+       <div><label for="leagueTradeSalaryCap">Salary cap (points)</label><input id="leagueTradeSalaryCap" type="number" min="0" step="1" value="${capFree?'':escape(r.salary_cap)}" ${capFree?'disabled':''}></div>
+       <div><label for="leagueTradeMinRoster">Minimum roster</label><input id="leagueTradeMinRoster" type="number" min="0" max="100" value="${escape(r.min_roster_size)}"></div>
+       <div><label for="leagueTradeMaxRoster">Maximum roster (blank = unlimited)</label><input id="leagueTradeMaxRoster" type="number" min="0" max="100" value="${r.max_roster_size==null?'':escape(r.max_roster_size)}"></div>
+       <div><label for="leagueTradeTeamLimit">Team-to-team trade limit</label><input id="leagueTradeTeamLimit" type="number" min="0" value="${escape(r.team_trade_limit)}"></div>
+       <div><label for="leagueTradeFaLimit">Free Agency trade limit</label><input id="leagueTradeFaLimit" type="number" min="0" value="${escape(r.free_agency_trade_limit)}"></div>
+     </div>
+     <div style="margin-top:12px"><label for="leagueTradeOverrides">Optional individual franchise caps (one per line, Franchise=points)</label><textarea id="leagueTradeOverrides" rows="3" placeholder="Team Awesome=120">${escape(overrides)}</textarea></div>
+     <button type="button" class="primary" id="saveLeagueTradeRules">Save season trade rules</button>
+     <span id="leagueTradeRulesStatus" class="note" role="status" aria-live="polite"></span>
+   </section>`;
+ }
+ function drawTradeAllowancesView(){
+   return `${drawTradeRulesEditor()}<div style="margin-top:14px">${tradeManagerRows()}</div><div style="margin-top:14px">${drawManualTradeCredits()}</div>`;
+ }
 
 
   function drawMulliganManager(){
@@ -4243,6 +4273,35 @@ function renderDraft(){ return drawDraft(); }
         drawTrades();
       });
     });
+    document.getElementById('leagueTradeCapFree')?.addEventListener('change',event=>{
+     const input=document.getElementById('leagueTradeSalaryCap');if(input)input.disabled=event.target.checked;
+   });
+   document.getElementById('saveLeagueTradeRules')?.addEventListener('click',async()=>{
+     const btn=document.getElementById('saveLeagueTradeRules'),status=document.getElementById('leagueTradeRulesStatus');
+     const value=id=>document.getElementById(id)?.value??'';
+     btn.disabled=true;status.className='note';status.textContent='Saving rules…';
+     try{
+       const caps={};
+       for(const line of value('leagueTradeOverrides').split(/\r?\n/).map(x=>x.trim()).filter(Boolean)){
+         const at=line.lastIndexOf('=');
+         if(at<=0)throw new Error('Each franchise override must use Franchise=points.');
+         const team=line.slice(0,at).trim(),amount=Number(line.slice(at+1).trim());
+         if(!team||!Number.isFinite(amount)||amount<0)throw new Error('Invalid franchise salary cap: '+line);
+         caps[team]=amount;
+       }
+       if(!document.getElementById('leagueTradeCapFree')?.checked && !value('leagueTradeSalaryCap').trim())throw new Error('Enter a salary cap or explicitly tick Cap-free league.');
+       COMM_TRADE_RULES=await SBL.tradeRules.save({
+         salaryCap:document.getElementById('leagueTradeCapFree')?.checked?null:value('leagueTradeSalaryCap'),
+         minRoster:value('leagueTradeMinRoster'),maxRoster:value('leagueTradeMaxRoster'),
+         teamTradeLimit:value('leagueTradeTeamLimit'),freeAgencyTradeLimit:value('leagueTradeFaLimit'),teamSalaryCaps:caps
+       },supabase);
+       try{await logAdminAction('set_trade_rule_contract','Updated season trade cap, roster size, and trade allowance contract.',{
+         seasonId:COMM_TRADE_RULES?.season_id,salaryCap:COMM_TRADE_RULES?.salary_cap
+       });}catch(error){console.warn('Rule audit logging unavailable:',error);}
+       drawTrades();
+       const done=document.getElementById('leagueTradeRulesStatus');if(done){done.className='note ok';done.textContent='Season trade rules saved to Supabase.';}
+     }catch(error){status.className='note danger';status.textContent=error?.message||String(error);btn.disabled=false;}
+   });
     document.getElementById('saveTradeTimingSettings')?.addEventListener('click',async()=>{
       const btn=document.getElementById('saveTradeTimingSettings'),status=document.getElementById('tradeTimingSaveStatus');
       const leagueId=String(SBL.leagueDb?.selectedLeagueId?.()||'').trim();
