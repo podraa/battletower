@@ -20,11 +20,12 @@
 <link href="css/sbl-components.css?v=cp463" rel="stylesheet"/>
 <link href="css/sbl-sprites-layout.css?v=cp454-contained-sprites" rel="stylesheet"/>
 <link href="css/sbl-ui.css?v=cp463-gutters" rel="stylesheet"/>
-<link href="css/pages/admin.css?v=cp4114-top-workspace-navigation" rel="stylesheet"/>
+<link href="css/pages/admin.css?v=cp4152-dropdown-collapse-snipe-link" rel="stylesheet"/>
 
 
 
-<link href="css/sbl-standard-ui.css?v=cp435-ui-standardization" rel="stylesheet">
+<link href="css/sbl-standard-ui.css?v=cp4144-empty-states" rel="stylesheet">
+<link href="css/pages/replay-review.css?v=cp4148" rel="stylesheet">
   <link rel="stylesheet" href="css/sbl-mobile-scroll.css?v=cp493">
 <link rel="stylesheet" href="css/sbl-ux-sweep.css?v=cp4125-planner-controls">
 </head>
@@ -41,43 +42,58 @@
   </button>
 </header>
 <nav class="tabs admin-nav" id="tabs" aria-label="Admin navigation">
-  <div class="admin-nav-group admin-nav-standalone">
-    <div class="admin-nav-group-title">Support</div>
-    <div class="admin-nav-submenu"><button class="admin-nav-item admin-nav-featured" data-tab="bug-reports">Bug Reports &amp; Feedback</button></div>
-  </div>
-  <div class="admin-nav-group" data-nav-group="league">
-    <div class="admin-nav-group-title">League management</div>
+  <div class="admin-nav-group" data-nav-group="overview">
+    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>Overview</span><span aria-hidden="true">⌄</span></button>
     <div class="admin-nav-submenu">
       <button class="admin-nav-item active" data-tab="overview">League Dashboard</button>
+    </div>
+  </div>
+  <div class="admin-nav-group" data-nav-group="league">
+    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>League</span><span aria-hidden="true">⌄</span></button>
+    <div class="admin-nav-submenu">
       <button class="admin-nav-item" data-tab="league">League Setup</button>
       <button class="admin-nav-item" data-tab="seasonsetup">Season Management</button>
-      <button class="admin-nav-item" data-tab="people">People &amp; Franchises</button>
-      <button class="admin-nav-item" data-tab="settings-franchises">Showdown Team Mapping</button>
-      <button class="admin-nav-item" data-tab="trades">Trades</button>
       <button class="admin-nav-item" data-tab="updates">League Updates</button>
     </div>
   </div>
-  <div class="admin-nav-group" data-nav-group="draft">
-    <div class="admin-nav-group-title">Draft</div>
-    <div class="admin-nav-submenu"><button class="admin-nav-item" data-tab="draft">Draft Management</button></div>
-  </div>
-  <div class="admin-nav-group" data-nav-group="freeagency">
-    <div class="admin-nav-group-title">Free agency</div>
-    <div class="admin-nav-submenu"><button class="admin-nav-item" data-tab="freeagency">Workbook &amp; Free Agency Board</button></div>
-  </div>
-  <div class="admin-nav-group" data-nav-group="roles">
-    <div class="admin-nav-group-title">Pokémon data</div>
-    <div class="admin-nav-submenu"><button class="admin-nav-item" data-tab="pokemon-roles">Role Catalogue &amp; Assignments</button></div>
-  </div>
-  <div class="admin-nav-group" data-nav-group="diagnostics">
-    <div class="admin-nav-group-title">Diagnostics &amp; archives</div>
+  <div class="admin-nav-group" data-nav-group="people">
+    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>People</span><span aria-hidden="true">⌄</span></button>
     <div class="admin-nav-submenu">
-      <button class="admin-nav-item" data-tab="process">Processed Replays</button>
+      <button class="admin-nav-item" data-tab="people">People &amp; Franchises</button>
+      <button class="admin-nav-item" data-tab="settings-franchises">Showdown Team Mapping</button>
+    </div>
+  </div>
+  <div class="admin-nav-group" data-nav-group="draft">
+    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>Draft &amp; Pokémon</span><span aria-hidden="true">⌄</span></button>
+    <div class="admin-nav-submenu">
+      <button class="admin-nav-item" data-tab="draft">Draft Management</button>
+      <button class="admin-nav-item" data-tab="freeagency">Free Agency Board</button>
+      <button class="admin-nav-item" data-tab="pokemon-roles">Pokémon Roles</button>
+    </div>
+  </div>
+  <div class="admin-nav-group" data-nav-group="trades">
+    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>Trades</span><span aria-hidden="true">⌄</span></button>
+    <div class="admin-nav-submenu">
+      <button class="admin-nav-item" data-tab="trades">Trade Management</button>
+    </div>
+  </div>
+  <div class="admin-nav-group" data-nav-group="data">
+    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>Data &amp; History</span><span aria-hidden="true">⌄</span></button>
+    <div class="admin-nav-submenu">
+      <button class="admin-nav-item" data-tab="process">Replay Imports</button>
+      <button class="admin-nav-item" data-tab="replay-review">Replay Review</button>
       <button class="admin-nav-item" data-tab="players">Replays by Player</button>
       <button class="admin-nav-item" data-tab="legacy-migration">Archived Seasons</button>
       <button class="admin-nav-item" data-tab="settings-data">Data Management</button>
       <button class="admin-nav-item" data-tab="admin-log">Admin Log</button>
       <button class="admin-nav-item" data-tab="settings-system">System Settings</button>
+      <a class="admin-nav-direct-link" id="adminSnipeReplayLink" href="tracker.html" aria-label="Open post-draft Snipe Replay">Snipe Replay <span>Post-draft replay</span></a>
+    </div>
+  </div>
+  <div class="admin-nav-group" data-nav-group="support">
+    <button type="button" class="admin-nav-group-toggle" aria-expanded="false"><span>Support</span><span aria-hidden="true">⌄</span></button>
+    <div class="admin-nav-submenu">
+      <button class="admin-nav-item admin-nav-featured" data-tab="bug-reports">Bug Reports &amp; Feedback</button>
     </div>
   </div>
 </nav>
@@ -88,8 +104,10 @@
 <script defer="" src="js/sbl-site.js?v=cp4125-hover-only-nav"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
 <script src="js/pokemon-dex-ids.js" defer></script>
-<script src="js/services/pokemon.js?v=cp476-verified-mega-filenames" defer></script><script src="js/services/team-colors.js?v=cp463" defer></script><script src="js/services/pokemon-types.js?v=cp424-mega-typing" defer></script>
+<script src="js/services/pokemon.js?v=cp476-verified-mega-filenames" defer></script>
+<script src="js/services/pokemon-catalog.js?v=cp4153-global-catalog" defer></script><script src="js/services/team-colors.js?v=cp463" defer></script><script src="js/services/pokemon-types.js?v=cp424-mega-typing" defer></script>
 <script src="js/services/replays.js?v=cp451" defer></script>
+<script src="js/services/active-parser.js?v=cp4148" defer></script>
 <script src="js/services/legacy-archive.js" defer></script>
 <script src="js/sbl-supabase.js" defer></script>
 <script src="js/services/league-db.js?v=cp462-archive-safe-delete" defer></script>
@@ -108,7 +126,9 @@
 <script src="js/services/data.js" defer></script>
 <script src="js/services/finals.js" defer></script>
 <script src="js/services/fixture-workflow.js?v=cp451" defer></script>
-<script src="js/pages/admin.js?v=cp4114-workspace-dedup" defer></script>
+<script src="js/pages/admin.js?v=cp4152-dropdown-collapse-snipe-link" defer></script>
+<script src="js/services/replay-review.js?v=cp4148" defer></script>
+<script src="js/pages/replay-review.js?v=cp4148" defer></script>
 
 
 <script src="js/app.js" defer></script>

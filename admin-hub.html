@@ -11,7 +11,7 @@
 <link href="css/sbl-sprites-layout.css?v=cp454-contained-sprites" rel="stylesheet">
 <link href="css/sbl-ui.css?v=cp463-gutters" rel="stylesheet">
 <link href="css/pages/admin-hub.css?v=cp458-site-testaccounts" rel="stylesheet">
-<link href="css/sbl-standard-ui.css?v=cp435-ui-standardization" rel="stylesheet">
+<link href="css/sbl-standard-ui.css?v=cp4144-empty-states" rel="stylesheet">
   <link rel="stylesheet" href="css/sbl-mobile-scroll.css?v=cp493">
 <link rel="stylesheet" href="css/sbl-ux-sweep.css?v=cp4125-planner-controls">
 </head>
@@ -50,6 +50,20 @@
       <div id="leagueDeleteStatus" class="site-admin-muted" aria-live="polite"></div>
     </section>
 
+    <section class="site-admin-section" id="siteReplayReviewSection">
+      <div class="site-admin-section-heading"><div><div class="site-admin-eyebrow">Site-admin overrides</div><h2>Replay review oversight</h2></div></div>
+      <p class="site-admin-muted">Inspect a league's manual classifications, override a review, or approve a globally reusable evidence-pattern suggestion. Overrides take precedence over league-admin decisions.</p>
+      <label for="siteReviewLeague">League</label><select id="siteReviewLeague"><option value="">Select league…</option></select>
+      <button id="siteReviewLoad" class="site-admin-button" type="button">Load review queue</button>
+      <p id="siteReviewMessage" class="site-admin-muted" role="status"></p><div id="siteReviewResults"></div>
+    </section>
+    <section class="site-admin-section" id="parserRegistrySection">
+      <div class="site-admin-section-heading"><div><div class="site-admin-eyebrow">Site admin only</div><h2>Parser version registry</h2></div></div>
+      <p class="site-admin-muted">Upload parser source for version tracking and deployment review. Upload and test a parser in an isolated sandbox, then explicitly activate it. Activation affects future replay imports only; old season records are not rewritten. Use Roll back to restore a prior version.</p>
+      <div class="test-account-form"><div><label for="parserVersionLabel">Version</label><input type="text" id="parserVersionLabel" placeholder="e.g. v2.4"></div><div><label for="parserSourceFile">Parser source (.txt or .js)</label><input id="parserSourceFile" type="file" accept=".txt,.js,text/plain,application/javascript"></div><div><label>&nbsp;</label><button class="site-admin-button primary" id="stageParserVersion" type="button">Stage parser version</button></div></div>
+      <div id="parserRegistryStatus" class="site-admin-muted" aria-live="polite"></div>
+      <div id="parserRegistryTable" class="site-admin-table-wrap"></div>
+    </section>
     <section class="site-admin-section" id="queueInspectorSection">
       <div class="site-admin-section-heading">
         <div><div class="site-admin-eyebrow">Private · Site admins only</div><h2>Draft queue inspector</h2></div>
@@ -123,5 +137,9 @@
 <script src="js/services/site-admin.js?v=cp4129-queue-inspector" defer></script>
 <script src="js/sbl-site.js?v=cp4125-hover-only-nav" defer></script>
 <script src="js/pages/admin-hub.js?v=cp4129-queue-inspector" defer></script>
+<script src="js/services/replay-review.js?v=cp4145" defer></script>
+<script src="js/services/active-parser.js?v=cp4148" defer></script>
+<script src="js/pages/parser-registry.js?v=cp4148" defer></script>
+<script src="js/pages/site-replay-oversight.js?v=cp4145" defer></script>
 </body>
 </html>
