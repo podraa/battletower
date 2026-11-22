@@ -42,7 +42,7 @@
   let activeTab = 'myteam';
   let spectatorClaimOpen = false;
   let themePickerState = { group:'All' };
-  let draft = { target:'', offered:new Set(), requested:new Set(), faQuery:'' };
+  let draft = { target:'', offered:new Set(), requested:new Set(), faQuery:'', minPoints:'', maxPoints:'' };
   let statusMsg = '';
   let rosterRefreshBusy = false;
   let rosterRealtimeChannel = null;
@@ -74,23 +74,10 @@
   function myRoster(){ const team=myLeagueTeam(); return (team && DASH.settings.rosters[team]) || []; }
   function rosterPoints(list){ return (list||[]).reduce((s,m)=> s + (Number(m.points)||0), 0); }
   function freeAgencyMons(){
-    const pool = Array.isArray(DASH.settings?.freeAgency?.mons)
-      ? DASH.settings.freeAgency.mons
-      : [];
-
-    // Free Agency is only for genuinely undrafted Pokémon. The published
-    // Free Agency board may still contain a Pokémon that was later drafted,
-    // traded, or otherwise moved onto a team, so filter against every
-    // currently published team roster before showing anything as available.
-    const drafted = new Set();
-    for(const roster of Object.values(DASH.settings?.rosters || {})){
-      for(const mon of (Array.isArray(roster) ? roster : [])){
-        const name = typeof mon === 'string' ? mon : mon?.name;
-        if(name) drafted.add(SBL.pokemon.matchKey(name));
-      }
-    }
-
-    return pool.filter(mon => mon?.name && !drafted.has(SBL.pokemon.matchKey(mon.name)));
+    // DASH.settings already contains the effective roster for this season.
+    // Reusing the shared roster projection avoids page-specific ownership
+    // filtering and never reapplies a completed trade a second time.
+    return SBL.trades.projectRosterState(DASH.settings,[],{archived:true}).available;
   }
 
   // ---------- pokémon stat aggregation (mirrors stats.html) ----------
@@ -137,32 +124,21 @@
   // Aggregates this coach's season stats for one species across every stored
   // replay where that Pokémon appeared on the coach's side.
   function myPokemonStats(species){
-    if(!profile || !myLeagueTeam()) return null;
-    const target = normName(species);
-    let dealt=0, taken=0, kills=0, deaths=0, assists=0, games=0, winGames=0, wins=0;
-    for(const r of Object.values(DASH.replays||{})){
-      for(const k in (r.mons||{})){
-        const m = r.mons[k];
-        if(normName(m.species) !== target) continue;
-        if(teamFor(r.players?.[m.side]) !== myLeagueTeam()) continue;
-        dealt += m.damageDealt||0;
-        taken += m.damageTaken||0;
-        kills += m.kills||0;
-        deaths += m.deaths||0;
-        assists += m.assists||0;
-        const appearances = m.appearances||0;
-        games += appearances;
-        if(appearances > 0){
-          winGames++;
-          // Replays store the winner as a username (r.winner), not a per-side
-          // results map, so fall back to comparing against the coach on this side.
-          const result = r.results && r.results[m.side] ? r.results[m.side]
-            : (r.winner && r.winner.toLowerCase()===(r.players?.[m.side]||'').toLowerCase() ? 'W' : (r.winner ? 'L' : null));
-          if(result === 'W') wins++;
-        }
-      }
+    if(!myLeagueTeam())return null;
+    const row=SBL.stats.franchisePokemonStat(DASH.settings.rosters,Object.values(DASH.replays||{}),teamFor,myLeagueTeam(),species);
+    if(!row)return {dealt:0,taken:0,kills:0,deaths:0,assists:0,games:0,winPct:null};
+    const games=Number(row.games)||0;
+    // Game record is determined by the replay winner; only appearance games
+    // count, not roster-only zero entries. Use the shared side/team resolver.
+    let wins=0;
+    for(const replay of Object.values(DASH.replays||{}))for(const side of ['p1','p2']){
+      if(teamFor(replay?.players?.[side])!==myLeagueTeam())continue;
+      const actual=Object.values(replay?.mons||{}).some(m=>m?.side===side&&
+        (SBL.stats.identity(m.species)===SBL.stats.identity(row.species) ||
+         SBL.stats.identity(m.species).startsWith(SBL.stats.identity(species)+'-mega')));
+      if(actual && String(replay?.winner||'').toLowerCase()===String(replay?.players?.[side]||'').toLowerCase())wins++;
     }
-    return { dealt, taken, kills, deaths, assists, games, winPct: winGames ? Math.round(100*wins/winGames) : null };
+    return {dealt:row.dealt,taken:row.taken,kills:row.kills,deaths:row.deaths,assists:row.assists,games,winPct:games?Math.round(100*wins/games):null};
   }
 
   // ---------- data loading ----------
@@ -1591,6 +1567,8 @@
     const targetIsFA = draft.target === '';
     const targetRoster = targetIsFA ? null : (DASH.settings.rosters[draft.target] || []);
     const requestPool = targetIsFA ? freeAgencyMons() : (targetRoster || []);
+    const pointOptions={minPoints:draft.minPoints,maxPoints:draft.maxPoints};
+    const filteredRequestPool=SBL.trades.filterPokemon(requestPool,'',pointOptions);
 
     function pickCard(m, role){
       const set = role === 'offered' ? draft.offered : draft.requested;
@@ -1614,8 +1592,8 @@
 
     function faResultsHtml(){
       const q = (draft.faQuery||'').trim().toLowerCase();
-      if(!q) return '<div class="fa-hint">Only Pokémon that are currently undrafted are available in Free Agency.</div>';
-      const matches = freeAgencyMons().filter(m=>m.name.toLowerCase().includes(q)).slice(0,30);
+      if(!q && draft.minPoints==='' && draft.maxPoints==='') return '<div class="fa-hint">Search by Pokémon name or select a points range to browse Free Agency.</div>';
+      const matches = SBL.trades.filterPokemon(freeAgencyMons(),q,pointOptions).slice(0,30);
       if(!matches.length) return `<div class="fa-empty">No free agents match “${SBL.pokemon.escapeHtml(draft.faQuery)}”.</div>`;
       return matches.map(m=>pickCard(m,'requested')).join('');
     }
@@ -1642,6 +1620,10 @@
         </div>
         <div class="trade-col">
           <h4>You get ${targetIsFA?'(undrafted only)':''}</h4>
+          <div class="row" style="gap:8px;margin:8px 0;align-items:end;flex-wrap:wrap">
+            <label style="flex:1;min-width:90px">Min points <input id="tradeMinPoints" type="number" min="0" step="1" placeholder="Any" value="${SBL.pokemon.escapeHtml(draft.minPoints||'')}"></label>
+            <label style="flex:1;min-width:90px">Max points <input id="tradeMaxPoints" type="number" min="0" step="1" placeholder="Any" value="${SBL.pokemon.escapeHtml(draft.maxPoints||'')}"></label>
+          </div>
           <div class="selected-row" id="requestedSelected">${chipsHtml('requested')}</div>
           ${targetIsFA ? `
             <div class="fa-search-wrap">
@@ -1650,7 +1632,7 @@
             <div class="pick-grid" id="requestedPicks">${faResultsHtml()}</div>
           ` : `
             <div class="pick-grid" id="requestedPicks">
-              ${requestPool.length ? requestPool.map(m=>pickCard(m,'requested')).join('') : '<div class="empty-state">That team has no published roster.</div>'}
+              ${filteredRequestPool.length ? filteredRequestPool.map(m=>pickCard(m,'requested')).join('') : '<div class="empty-state">No Pokémon match the selected point range.</div>'}
             </div>
           `}
         </div>
@@ -1737,6 +1719,10 @@
 
     bindPickCards(el);
     bindChipRemovers();
+    ['tradeMinPoints','tradeMaxPoints'].forEach(id=>document.getElementById(id)?.addEventListener('change',event=>{
+      draft[id==='tradeMinPoints'?'minPoints':'maxPoints']=event.target.value;
+      renderProposeTrade();
+    }));
 
     if(targetIsFA){
       const searchInput = document.getElementById('faSearch');
@@ -2246,7 +2232,7 @@
               ${themeGroupOrder.filter(group=>group!=='Essentials' && themeGroups[group]?.length).map(group => `<option value="${SBL.pokemon.escapeHtml(group)}" ${group===initialThemeGroup?'selected':''}>${SBL.pokemon.escapeHtml(group)}</option>`).join('')}
             </select>
           </div>
-          <div class="account-theme-quick-actions"><button type="button" class="ghost" id="accountSurpriseTheme">✨ Surprise me</button><button type="button" class="ghost" id="accountCreateTheme">🎨 Create theme</button><button type="button" class="ghost" id="accountExportTheme">↗ Export</button><button type="button" class="ghost" id="accountImportTheme">↙ Import</button><input id="accountImportThemeFile" type="file" accept="application/json,.json" hidden></div>
+          <div class="account-theme-quick-actions"><button type="button" class="ghost" id="accountCreateTheme">🎨 Create theme</button><button type="button" class="ghost" id="accountExportTheme">↗ Export</button><button type="button" class="ghost" id="accountImportTheme">↙ Import</button><input id="accountImportThemeFile" type="file" accept="application/json,.json" hidden></div>
           <div class="account-theme-current" id="accountThemeCurrent" aria-live="polite">
             <span class="theme-swatch-preview" style="background:${SBL.pokemon.escapeHtml(currentTheme?.bg||'transparent')};border-color:${SBL.pokemon.escapeHtml(currentTheme?.border||'var(--border)')}"><i style="background:${SBL.pokemon.escapeHtml(currentTheme?.accent||'var(--amber)')}"></i><b style="background:${SBL.pokemon.escapeHtml(currentTheme?.panel||'var(--panel)')}"></b></span>
             <span id="accountThemeName">${SBL.pokemon.escapeHtml(currentTheme?.name || 'Theme')}</span>
@@ -2329,7 +2315,6 @@
       rerenderThemeLibrary();
     };
     document.getElementById('accountRandomTheme')?.addEventListener('click',randomTheme);
-    document.getElementById('accountSurpriseTheme')?.addEventListener('click',randomTheme);
     document.getElementById('accountExportTheme')?.addEventListener('click',()=>{const blob=new Blob([window.SBLTheme.exportTheme()],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`sbl-theme-${getSavedThemeId()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500);});
     document.getElementById('accountImportTheme')?.addEventListener('click',()=>document.getElementById('accountImportThemeFile')?.click());
     document.getElementById('accountImportThemeFile')?.addEventListener('change',async e=>{const f=e.target.files?.[0];if(!f)return;try{const text=await f.text();window.SBLTheme.importTheme(text);renderAccount();}catch(err){alert('Could not import that theme: '+err.message);}});

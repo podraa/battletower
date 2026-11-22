@@ -445,112 +445,13 @@
   // Replay records are used only to fill statistics for Pokemon that are already
   // on that published roster. This prevents traded/released/old replay Pokemon
   // from leaking into the current franchise display.
-  function franchiseRosterData(weekFilter='ALL'){
-    const raw = (PUBLISHED_ROSTERS && Object.keys(PUBLISHED_ROSTERS).length)
-      ? PUBLISHED_ROSTERS
-      : (STATE.settings?.rosters || {});
-    const result = {};
-
-    // Build the complete current roster first, including zero-game Pokemon.
-    for(const [teamName, rawRoster] of Object.entries(raw || {})){
-      if(!String(teamName).trim()) continue;
-      const roster = rosterEntries(rawRoster);
-      const team = {
-        name:String(teamName),
-        roster:[],
-        byKey:{},
-        total:{dealt:0,taken:0,kills:0,deaths:0,appearances:0},
-        linkedPlayers:new Set(),
-        replayCount:0
-      };
-
-      for(const item of roster){
-        const species = canonicalRosterSpecies(item);
-        const key = normName(species);
-        if(!key || team.byKey[key]) continue;
-        const points = item && typeof item==='object'
-          ? (item.points ?? item.cost ?? item.price ?? null)
-          : null;
-        const stat = {
-          species,
-          points,
-          dealt:0,
-          taken:0,
-          kills:0,
-          deaths:0,
-          appearances:0,
-          killLog:[],
-          deathLog:[]
-        };
-        team.byKey[key]=stat;
-        team.roster.push(stat);
-      }
-      result[team.name]=team;
-    }
-
-    // Fill the roster entries from replay data. A replay can contribute only if
-    // the player is explicitly mapped to this franchise.
-    for(const replay of allReplays(weekFilter)){
-      if(!replay || !replay.mons) continue;
-      for(const side of ['p1','p2']){
-        const username=String(replay.players?.[side]||'').trim();
-        if(!username) continue;
-        const mappedTeam=teamFor(username);
-        if(!mappedTeam || mappedTeam==='Unknown') continue;
-        const teamName=Object.keys(result).find(t=>sameRosterTeam(t,mappedTeam));
-        if(!teamName) continue;
-        const team=result[teamName];
-        team.linkedPlayers.add(username);
-        team.replayCount++;
-
-        const appearanceCounted=new Set();
-        const submitted=(replay.teamRoster?.[side]||[]).map(x=>typeof x==='string'?x:String(x?.species||x?.name||'')).filter(Boolean).map(canonicalRosterSpecies);
-        const submittedKeys=new Set(submitted.map(normName));
-        for(const stat of Object.values(replay.mons)){
-          if(!stat || stat.side!==side || !stat.species) continue;
-          const species=normName(stat.species)==='comfey' ? 'Comfey' : String(stat.species);
-          const target=team.byKey[normName(species)];
-          if(!target) continue;
-          target.dealt += Number(stat.damageDealt)||0;
-          target.taken += Number(stat.damageTaken)||0;
-          target.kills += Number(stat.kills)||0;
-          target.deaths += Number(stat.deaths)||0;
-          if(submittedKeys.size){
-            const key=normName(species);
-            if(submittedKeys.has(key) && !appearanceCounted.has(key)){target.appearances += 1;appearanceCounted.add(key);}
-          }else if(!appearanceCounted.has(normName(species))){
-            target.appearances += Number(stat.appearances)||0;
-            appearanceCounted.add(normName(species));
-          }
-          if(Array.isArray(stat.killLog)) target.killLog.push(...stat.killLog);
-          if(Array.isArray(stat.deathLog)) target.deathLog.push(...stat.deathLog);
-        }
-        // Legacy replays can have team preview data without a corresponding
-        // mons entry when a brought Pokémon was never sent out.
-        for(const speciesRaw of submitted){
-          const key=normName(speciesRaw), target=team.byKey[key];
-          if(target && !appearanceCounted.has(key)){target.appearances += 1;appearanceCounted.add(key);}
-        }
-      }
-    }
-
-    for(const team of Object.values(result)){
-      for(const stat of team.roster){
-        team.total.dealt += stat.dealt;
-        team.total.taken += stat.taken;
-        team.total.kills += stat.kills;
-        team.total.deaths += stat.deaths;
-        team.total.appearances += stat.appearances;
-      }
-    }
-    return result;
+  function franchiseRosterData(weekFilter='ALL') {
+    const rosters=PUBLISHED_ROSTERS&&Object.keys(PUBLISHED_ROSTERS).length ? PUBLISHED_ROSTERS : (STATE.settings?.rosters||{});
+    return SBL.stats.franchiseRosterData(rosters,allReplays(weekFilter),teamFor);
   }
-
-  // Kept as the common data API used by CSV export and the older Settings tools.
-  function teamPokemonStats(weekFilter){
-    const data=franchiseRosterData(weekFilter);
-    const out={};
-    for(const [team,info] of Object.entries(data)) out[team]=info.byKey;
+  function teamPokemonStats(weekFilter) {
+    const data=franchiseRosterData(weekFilter),out={};
+    for(const [team,info] of Object.entries(data))out[team]=info.byKey;
     return out;
   }
 
@@ -1562,7 +1463,7 @@
   function renderPokemonProfile(species, weekFilter){
     const s = pokemonProfileData(species, weekFilter);
     if(!s.games) return `<div class="empty-state">No data for ${SBL.pokemon.escapeHtml(species)} in this scope.</div>`;
-    const kd = s.deaths ? (s.kills/s.deaths).toFixed(2) : (s.kills ? '∞' : '0');
+    const kd = SBL.stats.formatKD(s.kills,s.deaths);
     const avg = s.games ? (s.dealt/s.games).toFixed(1) : '0';
     return `<div class="panel pokemon-profile">
       <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
@@ -2014,12 +1915,15 @@
               const res = findFixtureResult(activeRound.week, m.home, m.away);
               const homeWin = res.played && res.winner && groupKey(res.winner)===groupKey(m.home);
               const awayWin = res.played && res.winner && groupKey(res.winner)===groupKey(m.away);
+              const displayedFirst = awayWin ? m.away : m.home;
+              const displayedSecond = awayWin ? m.home : m.away;
+              const firstWon = res.played && !!res.winner && (awayWin || homeWin);
               const scoreline = res.played ? (res.winner ? `${res.winnerScore}\u2013${res.loserScore}` : `${res.homeScore}\u2013${res.awayScore}`) : '';
               const statusText = res.played ? (res.winner ? `${SBL.pokemon.escapeHtml(fixtureTeamText(res.winner))} won ${scoreline}` : `Played ${scoreline}`) : 'Not played yet';
               return `<div class="fixture-match ${isInter?'fixture-inter':''} ${res.played?'fixture-played':''}">
-                <div class="fixture-team ${homeWin?'fixture-winner':''}"${teamTintForTeam(m.home)}>${fixtureTeam(m.home)}</div>
+                <div class="fixture-team ${firstWon?'fixture-winner':''}"${teamTintForTeam(displayedFirst)}>${fixtureTeam(displayedFirst)}</div>
                 <div class="fixture-vs"${res.played?` data-score="${SBL.pokemon.escapeHtml(res.winner ? `${res.winnerScore}–${res.loserScore}` : `${res.homeScore}–${res.awayScore}`)}"`:''}>${res.played?'':'VS'}</div>
-                <div class="fixture-team ${awayWin?'fixture-winner':''}"${teamTintForTeam(m.away)}>${fixtureTeam(m.away)}</div>
+                <div class="fixture-team"${teamTintForTeam(displayedSecond)}>${fixtureTeam(displayedSecond)}</div>
                 <div class="fixture-status">${isInter?'<span class="fixture-inter-tag">INTER-CONFERENCE</span>':''}${statusText}</div>
               </div>`;
             }).join('') : '<div class="conference-empty">No games scheduled this week.</div>'}

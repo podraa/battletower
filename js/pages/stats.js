@@ -1334,7 +1334,7 @@
     const num = v => Number(v)||0;
     const esc = v => SBL.pokemon.escapeHtml(v == null ? '' : String(v));
     const coaches = Array.from(s.coaches instanceof Set ? s.coaches : []).sort().join(', ');
-    const kd = num(s.deaths) ? (num(s.kills)/num(s.deaths)).toFixed(2) : (num(s.kills) ? '∞' : '0');
+    const kd = SBL.stats.formatKD(s.kills,s.deaths);
     const killsPerGame = num(s.games) ? (num(s.kills)/num(s.games)).toFixed(2) : '0.00';
     let fallbackLuckRank = null;
     try { fallbackLuckRank = luckPokemonRank(s.species, weekFilter || 'ALL'); } catch(e) {}

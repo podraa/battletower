@@ -3573,7 +3573,7 @@ function renderDraft(){ return drawDraft(); }
     // Include every published draft-pool Pokémon, not only Pokémon present in
     // the API's format-specific role response. This is important in draft:
     // move eligibility matters even when a Pokémon is not an OU usage pick.
-    const pool=Array.isArray(STATE.settings?.freeAgency?.mons)?STATE.settings.freeAgency.mons:[];
+    const pool=projection.available;
     const names=new Map();rows.forEach(row=>{const n=String(row?.pokemon_name||row?.name||'').trim();if(n)names.set(roleKey(n),n);});
     pool.forEach(mon=>{const n=String(mon?.name||'').trim();if(n)names.set(roleKey(n),n);});
     names.forEach(name=>{
@@ -3714,7 +3714,7 @@ function renderDraft(){ return drawDraft(); }
   let COMM_MULLIGAN_ALLOWANCES = [];
   let COMM_MULLIGAN_EVENTS = [];
   let COMM_ADMIN_ROSTER_TRANSACTIONS = [];
-  let COMM_ADMIN_ROSTER_UI = { primary:'', secondary:'', mode:'freeagency', removePrimary:[], removeSecondary:[], addPool:[], reason:'' };
+  let COMM_ADMIN_ROSTER_UI = { primary:'', secondary:'', mode:'freeagency', removePrimary:[], removeSecondary:[], addPool:[], reason:'', poolSearch:'' };
   let COMM_TRADE_TIMING_SETTINGS = { cutoff_day:5, cutoff_hour:23, cutoff_minute:59, weekday_weeks_ahead:1, after_cutoff_weeks_ahead:2 };
 
   async function loadCommissionerData(){
@@ -4088,16 +4088,17 @@ function renderDraft(){ return drawDraft(); }
   }
 
   function drawAdminRosterEditor(){
-    const rosters = STATE.settings?.rosters && typeof STATE.settings.rosters === 'object' ? STATE.settings.rosters : {};
+    const projection=SBL.trades.projectRosterState(STATE.settings||{},COMM_TRADES||[]);
+    const rosters=projection.rosters;
     const configured = STATE.settings?.franchises && typeof STATE.settings.franchises === 'object' ? Object.keys(STATE.settings.franchises) : [];
     const sitoutFranchises=new Set((ACTIVE_MEMBER_FRANCHISES||[]).filter(f=>ACTIVE_SEASON_SITOUT_USERS.has(String(f.userId||''))).map(f=>String(f.name||'').trim().toLocaleLowerCase()));
     const teams = [...new Set([...Object.keys(rosters), ...configured])].filter(team=>team && !sitoutFranchises.has(String(team).trim().toLocaleLowerCase())).sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}));
     if(!teams.includes(COMM_ADMIN_ROSTER_UI.primary)) COMM_ADMIN_ROSTER_UI.primary=teams[0]||'';
     if(!teams.includes(COMM_ADMIN_ROSTER_UI.secondary) || COMM_ADMIN_ROSTER_UI.secondary===COMM_ADMIN_ROSTER_UI.primary) COMM_ADMIN_ROSTER_UI.secondary=teams.find(t=>t!==COMM_ADMIN_ROSTER_UI.primary)||'';
     const primary=COMM_ADMIN_ROSTER_UI.primary, secondary=COMM_ADMIN_ROSTER_UI.secondary, mode=COMM_ADMIN_ROSTER_UI.mode;
-    const pool=Array.isArray(STATE.settings?.freeAgency?.mons)?STATE.settings.freeAgency.mons:[];
+    const pool=projection.available; // only Pokemon not owned by any effective roster
     const monName=adminRosterMonName;
-    const buttonList=(items,attr,selected)=>items.map(mon=>{
+    const buttonList=(items,attr,selected)=>SBL.trades.sortedPokemon(items).map(mon=>{
       const name=monName(mon); if(!name) return '';
       const active=selected.includes(name);
       return `<button type="button" class="admin-mon-choice ${active?'selected':''}" data-${attr}="${SBL.pokemon.escapeHtml(name)}" aria-pressed="${active}">${SBL.pokemon.escapeHtml(name)}</button>`;
@@ -4110,7 +4111,7 @@ function renderDraft(){ return drawDraft(); }
     const leagueName=String(STATE.settings?.activeLeagueName||'').trim();
     const seasonName=String(STATE.settings?.activeSeason||DEFAULT_SEASON);
     return `<div class="panel">
-      <div class="section-head-row"><div><h2>Admin roster &amp; trade editor</h2><div class="note">Choose the franchise or franchises involved, then click Pokémon to build one atomic transaction. No Pokémon names need to be typed.</div></div><span class="badge">ADMIN ONLY</span></div>
+      <div class="section-head-row"><div><h2>Admin roster &amp; trade editor</h2><button type="button" class="secondary small" id="refreshAdminRosterEditor">Refresh roster &amp; Free Agency</button><div class="note">Choose the franchise or franchises involved, then click Pokémon to build one atomic transaction. No Pokémon names need to be typed.</div></div><span class="badge">ADMIN ONLY</span></div>
       <div class="note"><strong>Exclusive ownership is enforced.</strong> A Pokémon already owned by another franchise can only move when its current owner and receiving franchise are included in this same save. All changes commit together or none do.</div>
       <div class="note">Active season: <strong>${SBL.pokemon.escapeHtml(seasonName)}</strong>${leagueName?` · ${SBL.pokemon.escapeHtml(leagueName)}`:''}. Admin transactions bypass player trade windows and allowances, but do not bypass ownership validation.</div>
       <div class="admin-roster-controls">
@@ -4118,7 +4119,7 @@ function renderDraft(){ return drawDraft(); }
         <div><label for="adminRosterMode">Action</label><select id="adminRosterMode"><option value="freeagency" ${mode==='freeagency'?'selected':''}>Free Agency pickup / release</option><option value="mulligan" ${mulliganMode?'selected':''}>Mulligan (1-for-1)</option><option value="trade" ${tradeMode?'selected':''}>Trade between two franchises</option></select></div>
         ${tradeMode?`<div><label for="adminRosterSecondary">Franchise 2</label><select id="adminRosterSecondary">${teams.filter(t=>t!==primary).map(t=>`<option value="${SBL.pokemon.escapeHtml(t)}" ${t===secondary?'selected':''}>${SBL.pokemon.escapeHtml(t)}</option>`).join('')}</select></div>`:''}
       </div>
-      ${tradeMode?`<div class="admin-roster-pick-grid"><section class="admin-roster-pick-panel"><h3>${SBL.pokemon.escapeHtml(primary)} roster</h3><p class="note">Click Pokémon moving from this franchise to ${SBL.pokemon.escapeHtml(secondary)}.</p><div class="admin-mon-choice-list">${buttonList(primaryMons,'admin-pick-primary',COMM_ADMIN_ROSTER_UI.removePrimary)}</div></section><section class="admin-roster-pick-panel"><h3>${SBL.pokemon.escapeHtml(secondary)} roster</h3><p class="note">Click Pokémon moving from this franchise to ${SBL.pokemon.escapeHtml(primary)}.</p><div class="admin-mon-choice-list">${buttonList(secondaryMons,'admin-pick-secondary',COMM_ADMIN_ROSTER_UI.removeSecondary)}</div></section></div>`:`<div class="admin-roster-pick-grid"><section class="admin-roster-pick-panel"><h3>${SBL.pokemon.escapeHtml(primary)} roster</h3><p class="note">${mulliganMode?'Choose exactly one outgoing Pokémon.':'Click any Pokémon to release it to Free Agency.'}</p><div class="admin-mon-choice-list">${buttonList(primaryMons,'admin-pick-primary',COMM_ADMIN_ROSTER_UI.removePrimary)}</div></section><section class="admin-roster-pick-panel"><h3>Available Free Agency Pokémon</h3><p class="note">${mulliganMode?'Choose exactly one incoming Pokémon.':'Click Pokémon to add them to the selected franchise.'}</p><div class="admin-mon-choice-list">${buttonList(pool,'admin-pick-pool',COMM_ADMIN_ROSTER_UI.addPool)}</div></section></div>`}
+      ${tradeMode?`<div class="admin-roster-pick-grid"><section class="admin-roster-pick-panel"><h3>${SBL.pokemon.escapeHtml(primary)} roster</h3><p class="note">Click Pokémon moving from this franchise to ${SBL.pokemon.escapeHtml(secondary)}.</p><div class="admin-mon-choice-list">${buttonList(primaryMons,'admin-pick-primary',COMM_ADMIN_ROSTER_UI.removePrimary)}</div></section><section class="admin-roster-pick-panel"><h3>${SBL.pokemon.escapeHtml(secondary)} roster</h3><p class="note">Click Pokémon moving from this franchise to ${SBL.pokemon.escapeHtml(primary)}.</p><div class="admin-mon-choice-list">${buttonList(secondaryMons,'admin-pick-secondary',COMM_ADMIN_ROSTER_UI.removeSecondary)}</div></section></div>`:`<div class="admin-roster-pick-grid"><section class="admin-roster-pick-panel"><h3>${SBL.pokemon.escapeHtml(primary)} roster</h3><p class="note">${mulliganMode?'Choose exactly one outgoing Pokémon.':'Click any Pokémon to release it to Free Agency.'}</p><div class="admin-mon-choice-list">${buttonList(primaryMons,'admin-pick-primary',COMM_ADMIN_ROSTER_UI.removePrimary)}</div></section><section class="admin-roster-pick-panel"><h3>Available Free Agency Pokémon</h3><p class="note">${mulliganMode?'Choose exactly one incoming Pokémon.':'Click Pokémon to add them to the selected franchise.'}</p><label for="adminFaPokemonSearch">Search available Pokémon</label><input id="adminFaPokemonSearch" type="search" placeholder="Search Pokémon or form…" value="${SBL.pokemon.escapeHtml(COMM_ADMIN_ROSTER_UI.poolSearch||'')}" autocomplete="off"><div class="admin-mon-choice-list" id="adminFaPokemonChoices">${buttonList(pool,'admin-pick-pool',COMM_ADMIN_ROSTER_UI.addPool)}</div><p class="note" id="adminFaSearchEmpty" hidden>No available Pokémon match your search.</p></section></div>`}
       <div class="admin-roster-selection-summary"><strong>Selected:</strong> ${tradeMode?`${COMM_ADMIN_ROSTER_UI.removePrimary.length} moving ${SBL.pokemon.escapeHtml(primary)} → ${SBL.pokemon.escapeHtml(secondary)}; ${COMM_ADMIN_ROSTER_UI.removeSecondary.length} moving ${SBL.pokemon.escapeHtml(secondary)} → ${SBL.pokemon.escapeHtml(primary)}`:`${COMM_ADMIN_ROSTER_UI.removePrimary.length} outgoing; ${COMM_ADMIN_ROSTER_UI.addPool.length} incoming`}</div>
       <label for="adminRosterTransactionReason">Reason / note (optional)</label><input id="adminRosterTransactionReason" type="text" maxlength="500" placeholder="e.g. Manual trade, roster correction" value="${SBL.pokemon.escapeHtml(COMM_ADMIN_ROSTER_UI.reason||'')}" style="width:100%">
       ${mulliganMode?'<div class="note">A mulligan must contain exactly one outgoing roster Pokémon and exactly one incoming Free Agency Pokémon. This is an administrator roster override, recorded in the admin transaction audit; it does not consume a player allowance.</div>':''}
@@ -4264,6 +4265,36 @@ function renderDraft(){ return drawDraft(); }
       }catch(error){status.className='note danger';status.textContent=error?.message||String(error);btn.disabled=false;}
     });
 
+    // Search only hides buttons; it does not reset selected Pokémon or rerender
+    // the entire Admin workspace on every keystroke.
+    const filterAdminFreeAgency=()=>{
+      const query=String(document.getElementById('adminFaPokemonSearch')?.value||'').trim().toLowerCase();
+      COMM_ADMIN_ROSTER_UI.poolSearch=query;
+      let visible=0;
+      document.querySelectorAll('#adminFaPokemonChoices [data-admin-pick-pool]').forEach(btn=>{
+        const match=String(btn.getAttribute('data-admin-pick-pool')||'').toLowerCase().includes(query);
+        btn.hidden=!match; if(match)visible++;
+      });
+      const empty=document.getElementById('adminFaSearchEmpty');if(empty)empty.hidden=visible>0;
+    };
+    document.getElementById('adminFaPokemonSearch')?.addEventListener('input',filterAdminFreeAgency);
+    filterAdminFreeAgency();
+    const refreshAdminRoster=async()=>{
+      const button=document.getElementById('refreshAdminRosterEditor');if(button)button.disabled=true;
+      try{
+        SBL.replays.invalidateCache?.();
+        await loadState();
+        await loadCommissionerData();
+        drawTrades();
+        const message=document.getElementById('adminRosterTransactionStatus');
+        if(message)message.textContent='Showing latest saved roster and Free Agency data.';
+      }catch(error){
+        const message=document.getElementById('adminRosterTransactionStatus');
+        if(message){message.className='note danger';message.textContent='Refresh failed: '+(error?.message||error);}
+        if(button)button.disabled=false;
+      }
+    };
+    document.getElementById('refreshAdminRosterEditor')?.addEventListener('click',refreshAdminRoster);
     const rosterStatus=()=>document.getElementById('adminRosterTransactionStatus');
     document.getElementById('adminRosterMode')?.addEventListener('change',e=>{COMM_ADMIN_ROSTER_UI.mode=e.target.value;COMM_ADMIN_ROSTER_UI.removePrimary=[];COMM_ADMIN_ROSTER_UI.removeSecondary=[];COMM_ADMIN_ROSTER_UI.addPool=[];drawTrades();});
     document.getElementById('adminRosterPrimary')?.addEventListener('change',e=>{COMM_ADMIN_ROSTER_UI.primary=e.target.value;COMM_ADMIN_ROSTER_UI.removePrimary=[];COMM_ADMIN_ROSTER_UI.removeSecondary=[];COMM_ADMIN_ROSTER_UI.addPool=[];drawTrades();});
@@ -4311,7 +4342,12 @@ function renderDraft(){ return drawDraft(); }
         try{await logAdminAction('admin_roster_transaction',`Applied an administrator ${ui.mode} transaction: ${data?.removed_count||0} removed, ${data?.added_count||0} added, ${data?.transfers||0} transferred.`,{seasonId,operations,reason,transactionResult:data});}catch(logError){console.warn('Secondary admin log entry failed; database transaction audit is retained.',logError);}
         COMM_ADMIN_ROSTER_UI.removePrimary=[];COMM_ADMIN_ROSTER_UI.removeSecondary=[];COMM_ADMIN_ROSTER_UI.addPool=[];COMM_ADMIN_ROSTER_UI.reason='';
         status.className='note';status.textContent=`Transaction committed. ${data?.removed_count||0} removed, ${data?.added_count||0} added, ${data?.transfers||0} transferred. Refreshing…`;
-        window.setTimeout(()=>window.location.reload(),900);
+        SBL.replays.invalidateCache?.();
+        await loadState();
+        await loadCommissionerData();
+        drawTrades();
+        const verified=document.getElementById('adminRosterTransactionStatus');
+        if(verified){verified.className='note';verified.textContent='Transaction committed. The roster editor was refreshed from Supabase.';}
       }catch(error){status.className='note danger';status.textContent=`Transaction was not applied: ${error?.message||String(error)}`;button.disabled=false;}
     });
 
@@ -4445,6 +4481,8 @@ function renderDraft(){ return drawDraft(); }
           await logAdminAction('commissioner_trade_action', `Commissioner ${action} action on trade #${id}.`, {
             tradeId:id, action, proposerTeam:trade?.proposer_team || null, targetTeam:trade?.target_team || null
           });
+          SBL.replays.invalidateCache?.();
+          await loadState();
           await loadCommissionerData();
           if(activeTab === 'trades') drawTrades();
         }catch(e){
