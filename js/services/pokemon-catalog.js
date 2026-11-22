@@ -8,6 +8,25 @@
   window.SBL = window.SBL || {};
   const SBL = window.SBL;
 
+  // Bounded, single-flight, client-side cache. The global catalogue is
+  // versioned and immutable between syncs; short TTL ensures updates land
+  // without fetching the same species/moves/learnset for each analyser.
+  const inflight=new Map(), cache=new Map();
+  const TTL_MS=5*60*1000, MAX_CACHE=350;
+  async function once(key,request){
+    const now=Date.now(),hit=cache.get(key);
+    if(hit && hit.expires>now)return hit.value;
+    if(inflight.has(key))return inflight.get(key);
+    const promise=(async()=>{
+      const value=await request();
+      if(cache.size>=MAX_CACHE)cache.delete(cache.keys().next().value);
+      cache.set(key,{value,expires:Date.now()+TTL_MS});
+      return value;
+    })();
+    inflight.set(key,promise);
+    try{return await promise;}finally{if(inflight.get(key)===promise)inflight.delete(key);}
+  }
+  function clearCache(){cache.clear();inflight.clear();}
   function client() {
     if (typeof SBL.getSupabase !== 'function') throw new Error('Supabase client is not ready.');
     return SBL.getSupabase();
@@ -15,7 +34,7 @@
   function normalizeId(value) {
     return SBL.domain?.pokemonCatalogId ? SBL.domain.pokemonCatalogId(value) : String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   }
-  async function getMeta() {
+  async function getMeta() {return once('catalog:meta',async()=>{
     const { data, error } = await client()
       .from('pokemon_catalog_meta')
       .select('active_version,source_url,synced_at,species_count,move_count,learnset_count')
@@ -23,7 +42,7 @@
       .maybeSingle();
     if (error) throw error;
     return data || null;
-  }
+  });}
   async function isReady() {
     const meta = await getMeta();
     return Boolean(meta?.active_version);
@@ -31,6 +50,7 @@
   async function getSpecies(id) {
     const key = normalizeId(id);
     if (!key) return null;
+    return once('catalog:species:'+key,async()=>{
     const { data, error } = await client()
       .from('pokemon_catalog_active')
       .select('*')
@@ -38,6 +58,7 @@
       .maybeSingle();
     if (error) throw error;
     return data || null;
+    });
   }
   async function searchSpecies(query, options = {}) {
     const term = String(query || '').trim();
@@ -55,16 +76,19 @@
   async function getMoves(moveIds) {
     const ids = [...new Set((Array.isArray(moveIds) ? moveIds : [moveIds]).map(normalizeId).filter(Boolean))];
     if (!ids.length) return [];
+    return once('catalog:moves:'+ids.slice().sort().join(','),async()=>{
     const { data, error } = await client()
       .from('pokemon_moves_active')
       .select('*')
       .in('move_id', ids);
     if (error) throw error;
     return data || [];
+    });
   }
   async function getLearnset(pokemonId) {
     const key = normalizeId(pokemonId);
     if (!key) return [];
+    return once('catalog:learnset:'+key,async()=>{
     const { data, error } = await client()
       .from('pokemon_learnsets_active')
       .select('pokemon_id,move_id,sources')
@@ -72,6 +96,7 @@
       .order('move_id', { ascending: true });
     if (error) throw error;
     return data || [];
+    });
   }
   async function getSpeciesWithLearnset(pokemonId) {
     const [species, learnset] = await Promise.all([getSpecies(pokemonId), getLearnset(pokemonId)]);
@@ -90,5 +115,6 @@
     getMoves,
     getLearnset,
     getSpeciesWithLearnset,
+    clearCache,
   };
 })();

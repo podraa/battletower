@@ -99,6 +99,16 @@
     return data||[];
   }
 
+  // Lightweight index for page headers and navigation. Never fetch every
+  // league's entire JSON state just to render a league name.
+  async function listHeaders(client){
+    const {data,error}=await db(client).from('leagues')
+      .select('id,name,description,status,created_at,updated_at')
+      .order('created_at',{ascending:true});
+    if(error)throw error;
+    return data||[];
+  }
+
   async function listForUser(userId, client){
     if(!userId) return [];
     const D=db(client);
@@ -535,5 +545,5 @@
     if(error) throw error; return data||[];
   }
 
-  SBL.leagueDb={selectedLeagueId,setSelectedLeagueId,selectedSeasonId,setSelectedSeasonId,selectedSeasonKey,setSelectedSeasonKey,getSeasonContext,listSeasons,saveSeasonState,createSeason,activateSeason,renameSeason,updateLeague,deleteLeague,isUuid,isAvailable,listAll,listForUser,getLeague,getMembership,getSnapshot,saveState,createLeague,listFranchises,createFranchise,updateFranchiseDefinition,findByJoinCode,requestJoin,setMembership,upsertFranchises,loadReplays,upsertReplays,deleteReplays,clearAvailability:()=>{availability=null;availabilityPromise=null;}};
+  SBL.leagueDb={selectedLeagueId,setSelectedLeagueId,selectedSeasonId,setSelectedSeasonId,selectedSeasonKey,setSelectedSeasonKey,getSeasonContext,listSeasons,saveSeasonState,createSeason,activateSeason,renameSeason,updateLeague,deleteLeague,isUuid,isAvailable,listAll,listHeaders,listForUser,getLeague,getMembership,getSnapshot,saveState,createLeague,listFranchises,createFranchise,updateFranchiseDefinition,findByJoinCode,requestJoin,setMembership,upsertFranchises,loadReplays,upsertReplays,deleteReplays,clearAvailability:()=>{availability=null;availabilityPromise=null;}};
 })();

@@ -217,25 +217,22 @@
     const row = Object.assign({}, payload || {});
     if (leagueId) row.league_id = leagueId;
     if (seasonId) row.season_id = seasonId;
-    const { data, error } = await db.from('trade_requests').insert(row).select('*').maybeSingle();
+    if(!leagueId||!seasonId)throw new Error('Select an active league and season before proposing a trade.');
+    const {data,error}=await db.rpc('sbl_propose_trade',{
+      p_league_id:leagueId,p_season_id:seasonId,p_target_team:row.target_team??null,
+      p_mons_offered:row.mons_offered||[],p_mons_requested:row.mons_requested||[]
+    });
     if (error) throw error;
     invalidateTradeCache();
     return data || null;
   }
 
-  async function respond(id, status, userId, client) {
-    const db = client || SBL.getSupabase();
-    const leagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
-    let query=db.from('trade_requests').update({
-      status,
-      responded_at: new Date().toISOString(),
-      responded_by: userId || null
-    }).eq('id',id);
-    if(leagueId) query=query.eq('league_id',leagueId);
-    const { data, error } = await query.select('*').maybeSingle();
-    if (error) throw error;
+  async function respond(id,status,userId,client){
+    const db=client||SBL.getSupabase();
+    const {data,error}=await db.rpc('sbl_respond_trade',{p_trade_id:id,p_status:status});
+    if(error)throw error;
     invalidateTradeCache();
-    return data || null;
+    return data||null;
   }
 
   async function accept(id, client) {

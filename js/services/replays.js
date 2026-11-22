@@ -140,12 +140,22 @@
       id: sr.id, key: sr.season_key || '', name: sr.name || '', status: sr.status || ''
     };
     snapshot.state = scopedState;
-    const leagues = await SBL.leagueDb.listAll(db);
+    // CP4.169: the old N+1 loop downloaded every league's full state and
+    // member directory on EVERY dashboard load. One skinny league-directory
+    // read and one active-league detail read are sufficient. Historical
+    // league data and other tenants' state are never copied into this page.
+    const headers = await SBL.leagueDb.listHeaders(db);
     const registry = {};
-    for (const league of leagues) {
-      const full = await SBL.leagueDb.getLeague(league.id, db);
-      if (full) registry[full.id] = full;
+    for (const league of headers) {
+      registry[league.id] = {
+        id:league.id,name:league.name,description:league.description||'',
+        status:league.status,createdAt:league.created_at,updatedAt:league.updated_at,
+        members:[],state:{}
+      };
     }
+    // getSnapshot() already fetched the selected league and its member list;
+    // reuse that object rather than making another identical request.
+    if(snapshot.league) registry[id]=snapshot.league;
     snapshot.state.settings = snapshot.state.settings || {};
     snapshot.state.settings.leagues = registry;
     snapshot.state.settings.activeLeagueId = id;
@@ -222,7 +232,7 @@
       db.from('league_seasons').select('id,updated_at,status').eq('league_id',leagueId).eq('id',seasonId).maybeSingle(),
       db.from('leagues').select('id,updated_at').eq('id',leagueId).maybeSingle(),
       db.from('league_replays').select('replay_id,updated_at').eq('league_id',leagueId).eq('season_id',seasonId),
-      db.from('trade_requests').select('id,updated_at,status').eq('league_id',leagueId)
+      db.from('trade_requests').select('id,updated_at,status').eq('league_id',leagueId).or(`season_id.is.null,season_id.eq.${seasonId}`)
     ]);
     if (season.error || league.error || replay.error || trades.error || !season.data || !league.data) return null;
     const replayRows = (replay.data || []).map(r => [r.replay_id,r.updated_at||'']).sort((a,b)=>String(a[0]).localeCompare(String(b[0])));
