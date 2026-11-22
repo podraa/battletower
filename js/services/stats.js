@@ -22,17 +22,21 @@
   // Showdown "Charizard-Mega-X" must select the SAME row/profile.
   function identity(name){
     const id=rawIdentity(name);
-    let m=id.match(/^mega-(.+?)-(x|y)$/);
+    let m=id.match(/^mega-(.+?)-([xyz])$/);
     if(m) return `${m[1]}-mega-${m[2]}`;
     m=id.match(/^mega-(.+)$/);
     if(m) return `${m[1]}-mega`;
-    m=id.match(/^(.+)-meg([axy])$/);
-    if(m) return `${m[1]}-mega${m[2]==='a'?'':'-'+m[2]}`;
+    m=id.match(/^(.+)-mega([xyz])$/);
+    if(m) return `${m[1]}-mega-${m[2]}`;
+    m=id.match(/^primal-(kyogre|groudon)$/);
+    if(m) return `${m[1]}-primal`;
     return id;
   }
-  function megaBaseIdentity(name){
+  function permanentFormBaseIdentity(name){
     const id=identity(name);
-    const m=id.match(/^(.+)-mega(?:-(?:x|y))?$/);
+    let m=id.match(/^(.+)-mega(?:-(?:x|y|z))?$/);
+    if(m) return m[1];
+    m=id.match(/^(kyogre|groudon)-primal$/);
     return m ? m[1] : null;
   }
   function rosterSpeciesForSide(replay,side){
@@ -42,7 +46,7 @@
     const exact=identity(species);
     const matches=Object.values(replay?.mons||{}).filter(m=>m?.side===side&&m?.species);
     if(matches.some(m=>identity(m.species)===exact)) return species;
-    const megas=matches.filter(m=>megaBaseIdentity(m.species)===exact);
+    const megas=matches.filter(m=>permanentFormBaseIdentity(m.species)===exact);
     // Only substitute when the actual replay has exactly one Mega form for
     // this base. Never infer an evolution from a held Mega Stone or roster.
     return megas.length===1 ? megas[0].species : species;

@@ -47,7 +47,11 @@ S.replays.validateStagedParser=async(source)=>{const runner=await newSandbox(sou
   makeSample(['|player|p1|Alpha','|player|p2|Beta','|poke|p1|Pikachu','|poke|p2|Eevee','|switch|p1a: Pika|Pikachu|100/100','|switch|p2a: Eev|Eevee|100/100','|turn|1','|move|p1a: Pika|Tackle|p2a: Eev','|-damage|p2a: Eev|50/100','|turn|2','|win|Alpha']),
   makeSample(['|player|p1|Alpha','|player|p2|Beta','|poke|p1|Ditto','|poke|p2|Gengar','|switch|p1a: Copy|Ditto|100/100','|switch|p2a: Ghost|Gengar|100/100','|turn|1','|-transform|p1a: Copy|p2a: Ghost','|detailschange|p1a: Copy|Gengar, L50','|move|p1a: Copy|Tackle|p2a: Ghost','|-damage|p2a: Ghost|80/100','|win|Alpha']),
   makeSample(['|player|p1|Alpha','|player|p2|Beta','|poke|p1|Zoroark','|poke|p1|Gengar','|poke|p2|Pikachu','|switch|p1a: Trickster|Gengar, L50|100/100','|switch|p2a: Pika|Pikachu, L50|100/100','|turn|1','|move|p1a: Trickster|Tackle|p2a: Pika','|-damage|p2a: Pika|80/100','|replace|p1a: Trickster|Zoroark, L50|100/100','|move|p1a: Trickster|Tackle|p2a: Pika','|win|Alpha']),
-  makeSample(['|player|p1|Alpha','|player|p2|Beta','|poke|p1|Charizard','|poke|p2|Pikachu','|switch|p1a: Blaze|Charizard, L50|100/100','|switch|p2a: Pika|Pikachu, L50|100/100','|turn|1','|move|p1a: Blaze|Tackle|p2a: Pika','|-formechange|p1a: Blaze|Charizard-Mega-X','|move|p1a: Blaze|Tackle|p2a: Pika','|win|Alpha'])
+  makeSample(['|player|p1|Alpha','|player|p2|Beta','|poke|p1|Charizard','|poke|p2|Pikachu','|switch|p1a: Blaze|Charizard, L50|100/100','|switch|p2a: Pika|Pikachu, L50|100/100','|turn|1','|move|p1a: Blaze|Tackle|p2a: Pika','|-formechange|p1a: Blaze|Charizard-Mega-X','|move|p1a: Blaze|Tackle|p2a: Pika','|win|Alpha']),
+  makeSample(['|player|p1|Alpha','|player|p2|Beta','|poke|p1|Kyogre','|poke|p2|Pikachu','|switch|p1a: Sea|Kyogre|100/100','|switch|p2a: Pika|Pikachu|100/100','|turn|1','|-primal|p1a: Sea','|win|Alpha']),
+  makeSample(['|player|p1|Alpha','|player|p2|Beta','|poke|p1|Lucario','|poke|p2|Pikachu','|switch|p1a: Aura|Lucario|100/100','|switch|p2a: Pika|Pikachu|100/100','|turn|1','|-mega|p1a: Aura|Lucarionite Z','|win|Alpha']),
+  makeSample(['|player|p1|Alpha','|player|p2|Beta','|poke|p1|Zoroark','|poke|p1|Landorus-Therian','|poke|p2|Pikachu','|switch|p1a: Landorus-Therian|Landorus-Therian|100/100','|switch|p2a: Pika|Pikachu|100/100','|turn|1','|move|p1a: Landorus-Therian|Tackle|p2a: Pika','|replace|p1a: Zoroark|Zoroark|60/100','|faint|p1a: Zoroark','|turn|2','|switch|p1a: Landorus-Therian|Landorus-Therian|100/100','|move|p1a: Landorus-Therian|Earthquake|p2a: Pika','|faint|p1a: Landorus-Therian','|win|Beta']),
+  makeSample(['|player|p1|Alpha','|player|p2|Beta','|poke|p1|Ditto','|poke|p2|Kyogre','|switch|p1a: Ditto|Ditto|100/100','|switch|p2a: K|Kyogre|100/100','|turn|1','|-transform|p1a: Ditto|p2a: K','|-primal|p1a: Ditto','|move|p1a: Ditto|Water Spout|p2a: K','|win|Alpha'])
  ];
  for(let i=0;i<samples.length;i++){
   const result=await runner.parse(samples[i],'activation-test-'+i);
@@ -59,6 +63,14 @@ S.replays.validateStagedParser=async(source)=>{const runner=await newSandbox(sou
    throw Error('Illusion attribution regression: disguised actions or appearances credited incorrectly');
   if(i===3 && (!mons['p1|charizard mega x'] || mons['p1|charizard'] || Number(mons['p1|charizard mega x'].moves?.Tackle||0)!==2))
    throw Error('Mega evolution regression: base and Mega counted separately');
+  if(i===4 && (!mons['p1|kyogre primal'] || mons['p1|kyogre']))
+   throw Error('Primal regression: both Kyogre and Primal Kyogre were credited');
+  if(i===5 && (!mons['p1|lucario mega z'] || mons['p1|lucario mega'] || mons['p1|lucario']))
+   throw Error('Z Mega regression: Z Mega was merged into normal Mega or base');
+  if(i===6 && (Number(mons['p1|zoroark']?.deaths||0)!==1 || Number(mons['p1|landorus therian']?.deaths||0)!==1 || Number(mons['p1|zoroark']?.moves?.Tackle||0)!==1 || Number(mons['p1|landorus therian']?.moves?.Earthquake||0)!==1))
+   throw Error('Illusion physical identity regression: Landorus deaths or moves merged with Zoroark');
+  if(i===7 && (Number(mons['p1|ditto']?.moves?.['Water Spout']||0)!==1 || mons['p1|kyogre primal']))
+   throw Error('Transform/Imposter regression: copied Primal form stole Ditto statistics');
  }
  return {count:samples.length};
  }finally{runner.close();}};
