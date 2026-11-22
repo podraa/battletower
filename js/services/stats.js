@@ -18,7 +18,35 @@
     return typo[id]||id;
   }
 
-  function identity(name){ return rawIdentity(name); }
+  // Canonical Mega identity: both public-facing "Mega Charizard X" and
+  // Showdown "Charizard-Mega-X" must select the SAME row/profile.
+  function identity(name){
+    const id=rawIdentity(name);
+    let m=id.match(/^mega-(.+?)-(x|y)$/);
+    if(m) return `${m[1]}-mega-${m[2]}`;
+    m=id.match(/^mega-(.+)$/);
+    if(m) return `${m[1]}-mega`;
+    m=id.match(/^(.+)-meg([axy])$/);
+    if(m) return `${m[1]}-mega${m[2]==='a'?'':'-'+m[2]}`;
+    return id;
+  }
+  function megaBaseIdentity(name){
+    const id=identity(name);
+    const m=id.match(/^(.+)-mega(?:-(?:x|y))?$/);
+    return m ? m[1] : null;
+  }
+  function rosterSpeciesForSide(replay,side){
+    return (replay?.teamRoster?.[side]||[]).map(x=>typeof x==='string'?x:String(x?.species||x?.name||'')).filter(Boolean);
+  }
+  function creditedSpeciesForRoster(replay,side,species){
+    const exact=identity(species);
+    const matches=Object.values(replay?.mons||{}).filter(m=>m?.side===side&&m?.species);
+    if(matches.some(m=>identity(m.species)===exact)) return species;
+    const megas=matches.filter(m=>megaBaseIdentity(m.species)===exact);
+    // Only substitute when the actual replay has exactly one Mega form for
+    // this base. Never infer an evolution from a held Mega Stone or roster.
+    return megas.length===1 ? megas[0].species : species;
+  }
   function display(name){
     if(SBL.pokemon?.displayNameWithForm) return SBL.pokemon.displayNameWithForm(name);
     return String(name??'').trim();
@@ -127,16 +155,16 @@
         // Preserve the site's existing display convention: identity determines
         // grouping, while the first/available form-aware display name is shown.
         row.species=display(mon.species)||row.species;
-        const roster=(replay?.teamRoster?.[mon?.side]||[]).map(x=>typeof x==='string'?x:String(x?.species||x?.name||'')).filter(Boolean);
-        const inSubmittedTeam=roster.some(x=>identity(x)===identity(mon.species));
+        const roster=rosterSpeciesForSide(replay,mon?.side);
+        const inSubmittedTeam=roster.some(x=>identity(creditedSpeciesForRoster(replay,mon.side,x))===identity(mon.species));
         mergeMon(row,mon,replay,{...options,appearanceOverride:inSubmittedTeam?1:undefined});
       }
       // Legacy processed replays may have teamRoster but only contain Pokémon
       // that were actually sent out in `mons`. Seed the missing submitted-team
       // members so sitewide appearance stats still mean "brought this week".
       for(const side of ['p1','p2']){
-        for(const raw of (replay?.teamRoster?.[side]||[])){
-          const species=typeof raw==='string'?raw:String(raw?.species||raw?.name||'');
+        for(const raw of rosterSpeciesForSide(replay,side)){
+          const species=creditedSpeciesForRoster(replay,side,raw);
           if(!species) continue;
           const key=includeForms ? identity(species) : identity(display(species));
           if(!key) continue;
@@ -175,13 +203,13 @@
             let row=out.get(key);
             if(!row){ row=empty(display(mon.species)); out.set(key,row); }
             row.species=display(mon.species)||row.species;
-            const roster=(replay?.teamRoster?.[mon?.side]||[]).map(x=>typeof x==='string'?x:String(x?.species||x?.name||'')).filter(Boolean);
-            const inSubmittedTeam=roster.some(x=>identity(x)===identity(mon.species));
+            const roster=rosterSpeciesForSide(replay,mon?.side);
+            const inSubmittedTeam=roster.some(x=>identity(creditedSpeciesForRoster(replay,mon.side,x))===identity(mon.species));
             mergeMon(row,mon,replay,{...options,teamFor,appearanceOverride:inSubmittedTeam?1:undefined});
           }
           for(const side of ['p1','p2']){
-            for(const raw of (replay?.teamRoster?.[side]||[])){
-              const species=typeof raw==='string'?raw:String(raw?.species||raw?.name||'');
+            for(const raw of rosterSpeciesForSide(replay,side)){
+              const species=creditedSpeciesForRoster(replay,side,raw);
               if(!species) continue;
               const key=includeForms ? identity(species) : identity(display(species));
               if(!key) continue;
