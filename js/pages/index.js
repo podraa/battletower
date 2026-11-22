@@ -348,11 +348,36 @@
             <button class="primary" id="loginBtn" style="flex:1;">Log in</button>
             <button class="ghost" id="signupBtn" style="flex:1;">Sign up</button>
           </div>
-          <div id="authMsg" class="note"></div>
+          <div style="text-align:right; margin-top:12px"><a id="forgotPasswordLink" href="reset-password.html" style="color:var(--teal);font-size:12px;font-weight:650">Forgot password?</a></div>
+          <div id="authMsg" class="note" role="status" aria-live="polite"></div>
         </div>
       </div>`;
     const msgEl = document.getElementById('authMsg');
     const setMsg = (text, danger)=>{ msgEl.className = 'note' + (danger?' danger':' ok'); msgEl.textContent = text; };
+
+    document.getElementById('forgotPasswordLink').onclick = async (event)=>{
+      event.preventDefault();
+      const email = document.getElementById('authEmail').value.trim();
+      if(!email){
+        setMsg('Enter your registered email above, then click Forgot password?', true);
+        document.getElementById('authEmail').focus();
+        return;
+      }
+      const link = document.getElementById('forgotPasswordLink');
+      link.setAttribute('aria-disabled', 'true');
+      link.style.pointerEvents = 'none';
+      try {
+        const redirectTo = new URL('reset-password.html', window.location.href).href;
+        const {error} = await supabase.auth.resetPasswordForEmail(email, {redirectTo});
+        if(error) throw error;
+        setMsg('If an account exists for that email, a password reset link will arrive shortly. Check your spam folder too.', false);
+      } catch (error) {
+        setMsg(error?.message || 'Could not request a password reset. Please try again later.', true);
+      } finally {
+        link.removeAttribute('aria-disabled');
+        link.style.pointerEvents = '';
+      }
+    };
 
     document.getElementById('loginBtn').onclick = async ()=>{
       const email = document.getElementById('authEmail').value.trim();

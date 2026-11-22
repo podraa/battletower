@@ -116,7 +116,21 @@
   function renderRegisteredAccounts(){
     const wrap=$('#registeredAccountTable');if(!wrap)return;
     if(!users.length){wrap.innerHTML='<div class="site-admin-empty">No registered accounts found.</div>';return;}
-    wrap.innerHTML=`<table><thead><tr><th>Account</th><th>Email</th><th>Site role</th><th>Username action</th></tr></thead><tbody>${users.map(u=>`<tr><td><strong>${esc(String(u.username||'').trim()||'Unknown user')}</strong><span class="cell-sub"><code>${esc(u.id)}</code></span></td><td>${esc(u.email||'—')}</td><td>${esc(u.site_role||'User')}</td><td><button class="table-action" data-account-username="${esc(u.id)}">Change username</button></td></tr>`).join('')}</tbody></table>`;
+    wrap.innerHTML=`<table><thead><tr><th>Account</th><th>Email</th><th>Site role</th><th>Username action</th><th>Account recovery</th></tr></thead><tbody>${users.map(u=>`<tr><td><strong>${esc(String(u.username||'').trim()||'Unknown user')}</strong><span class="cell-sub"><code>${esc(u.id)}</code></span></td><td>${esc(u.email||'—')}</td><td>${esc(u.site_role||'User')}</td><td><button class="table-action" data-account-username="${esc(u.id)}">Change username</button></td><td><button class="table-action" data-account-reset="${esc(u.id)}" ${u.email?'':'disabled title="No account email available"'}>Send reset email</button></td></tr>`).join('')}</tbody></table>`;
+    wrap.querySelectorAll('[data-account-reset]').forEach(btn=>btn.addEventListener('click',async()=>{
+      const target=users.find(u=>String(u.id)===String(btn.dataset.accountReset));
+      if(!target?.email){setError('No email is available for this account.');return;}
+      if(!confirm(`Send a password reset email to ${target.email}?\n\nThe user will set their own new password. You will not see it.`)) return;
+      btn.disabled=true;
+      try {
+        setError('');
+        const redirectTo=new URL('reset-password.html',window.location.href).href;
+        const {error}=await SBL.getSupabase().auth.resetPasswordForEmail(target.email,{redirectTo});
+        if(error)throw error;
+        alert('Password recovery requested. If the account is eligible, Supabase will email a recovery link.');
+      } catch(error){setError(error?.message||'Could not send the recovery email.');}
+      finally{btn.disabled=false;}
+    }));
     wrap.querySelectorAll('[data-account-username]').forEach(btn=>btn.addEventListener('click',async()=>{
       const target=users.find(u=>String(u.id)===String(btn.dataset.accountUsername));if(!target)return;
       const next=prompt(`Set username for ${target.username||target.email||'this account'}:`,target.username||'');if(next===null)return;

@@ -88,9 +88,8 @@
     const seasonName=String(snapshot?.name||settings?.activeSeason||'this season');
     if(['setup','lobby','live'].includes(draftStatus)){
       return `<section class="roster-empty-state" role="status" aria-live="polite">
-        <div class="roster-empty-kicker">SEASON IN PROGRESS</div>
-        <div class="roster-empty-icon" aria-hidden="true">⌛</div>
-        <h2>Rosters will be finalised after the draft</h2>
+        <div class="roster-empty-kicker">ROSTERS PENDING</div>
+        <h2>Awaiting published rosters</h2>
         <p>The ${esc(seasonName)} draft has not been completed yet. Franchise rosters will appear here once the draft is finished and the results have been published.</p>
       </section>`;
     }

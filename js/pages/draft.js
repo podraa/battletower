@@ -112,6 +112,7 @@ async function readIdentity(){
 }
 function teamKey(t){return String(t??'').normalize('NFKC').trim().toLocaleLowerCase().replace(/\s+/g,' ')}
 function sameTeam(a,b){return teamKey(a)===teamKey(b)}
+function isEndedDraftTeam(d,team){return Object.keys(d?.endedTeams||{}).some(k=>sameTeam(k,team))}
 function keyedValue(obj,team,fallback){const k=Object.keys(obj||{}).find(x=>sameTeam(x,team));return k==null?fallback:obj[k]}
 function teams(){const d=state.settings.draft;const out=[];[...(d.order||[]),...Object.keys(state.settings.rosters||{}),...Object.keys(state.settings.franchises||{}),...Object.keys(state.settings.budgets||{}),...Object.keys(state.settings.franchiseDefinitions||{}),...availableLeagueFranchises.map(f=>f.name)].forEach(t=>{const s=String(t||'').trim();if(s&&!out.some(x=>teamKey(x)===teamKey(s)))out.push(s)});return out}
 function myTeam(){return String(currentFranchise?.franchise?.name||'').trim()}
@@ -535,10 +536,10 @@ function cmdResultsHtml(d,team){
   list.sort((a,b)=>cmd.stat?((DD().statValue(b,cmd.stat)??-1)-(DD().statValue(a,cmd.stat)??-1)||b.points-a.points):b.points-a.points||a.name.localeCompare(b.name));
   list=list.slice(0,60);
   if(!list.length)return '<div class="note">No undrafted Pokémon match these filters.</div>';
-  const live=d.status==='live';
-  return '<div class="cmd-results">'+list.map(m=>{const ok=live&&team&&DD().canAfford(d,team,m);
+  const live=d.status==='live',ended=!!team&&isEndedDraftTeam(d,team);
+  return '<div class="cmd-results">'+list.map(m=>{const ok=live&&team&&!ended&&DD().canAfford(d,team,m);
     const block=team?DD().megaBlock(d,team,m):null;
-    const why=!live?'Draft is not live':!ok?'Unavailable under current draft limits for '+team:'Draft for '+team;
+    const why=!live?'Draft is not live':ended?team+' has finished drafting':!ok?'Unavailable under current draft limits for '+team:'Draft for '+team;
     return '<button class="cmd-mon" data-cmd-pick="'+esc(m.id)+'" '+(ok?'':'disabled')+' title="'+esc(why)+'">'+dashSprite(m.name)+'<span><span class="nm">'+esc(displayMonName(m.name))+'</span><br><span class="sb">'+m.points+' pts · '+(m.abilities||[]).slice(0,2).map(esc).join(', ')+'</span></span></button>'}).join('')+'</div>'+(d.pool.filter(m=>!m.drafted).length>60?'<div class="note">Showing the first 60 matches. Narrow the filters to find more specific Pokémon.</div>':'');
 }
 function consoleHtml(d,ts){
@@ -552,8 +553,8 @@ function consoleHtml(d,ts){
     '<div class="actions"><a class="ghost" href="'+esc(draftViewUrl('present'))+'" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;text-decoration:none">Open presentation ↗</a>'+(latest?'<button class="ghost" id="cmdRevert">Revert last pick: '+esc(displayMonName(latest.name))+'</button>':'')+'</div></div>'+
     (status?'<div class="note" style="margin-top:8px">'+status+'</div>':'')+
     (offClock?'<div class="note danger" style="margin-top:8px">'+esc(team)+' is not on the clock ('+esc(oc)+' is). This pick will not advance the clock.</div>':'')+
-    '<div class="cmd-actions" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0">'+(live&&d.mode==='ordered'&&oc?'<button type="button" class="ghost" id="skipCurrentPickBtn">Skip current pick · '+esc(oc)+'</button>':'')+(live&&team?'<button type="button" class="ghost danger-btn" id="endFranchiseDraftBtn">End '+esc(team)+'’s draft</button>':'')+'</div>'+
-    '<div class="cmd-bar"><select id="cmdTeam" title="Franchise to draft for" '+''+'>'+ts.map(t=>'<option value="'+esc(t)+'" '+(t===team?'selected':'')+'>'+esc(t)+' — '+(budget(t)-spent(t))+' pts left'+(d.endedTeams?.[t]?' · finished':'')+'</option>').join('')+'</select>'+
+    '<div class="cmd-actions" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0">'+(live&&d.mode==='ordered'&&oc?'<button type="button" class="ghost" id="skipCurrentPickBtn">Skip current pick · '+esc(oc)+'</button>':'')+(live&&team&&!isEndedDraftTeam(d,team)?'<button type="button" class="ghost danger-btn" id="endFranchiseDraftBtn">End '+esc(team)+'’s draft</button>':'')+'</div>'+
+    '<div class="cmd-bar"><select id="cmdTeam" title="Franchise to draft for" '+''+'>'+ts.map(t=>'<option value="'+esc(t)+'" '+(t===team?'selected':'')+' '+(isEndedDraftTeam(d,t)?'disabled':'')+'>'+esc(t)+' — '+(budget(t)-spent(t))+' pts left'+(isEndedDraftTeam(d,t)?' · finished':'')+'</option>').join('')+'</select>'+
     '<input type="search" id="cmdSearch" placeholder="Search Pokémon to draft…" autocomplete="off" value="'+esc(cmd.q)+'"></div>'+
     '<div class="cmd-filter-grid"><input type="search" id="cmdAbility" placeholder="Ability contains…" value="'+esc(cmd.ability)+'"><select id="cmdStat"><option value="">Any stat</option>'+[['bst','BST'],['hp','HP'],['atk','Attack'],['def','Defense'],['spa','Sp. Atk'],['spd','Sp. Def'],['spe','Speed']].map(([v,l])=>'<option value="'+v+'" '+(cmd.stat===v?'selected':'')+'>'+l+'</option>').join('')+'</select><input type="number" id="cmdStatMin" min="0" max="1200" placeholder="Min stat" value="'+esc(cmd.statMin)+'"><input type="number" id="cmdStatMax" min="0" max="1200" placeholder="Max stat" value="'+esc(cmd.statMax)+'"><input type="number" id="cmdMinPts" min="0" placeholder="Min points" value="'+esc(cmd.minPts)+'"><input type="number" id="cmdMaxPts" min="0" placeholder="Max points" value="'+esc(cmd.maxPts)+'"><select id="cmdType"><option value="">Any type</option>'+DD().allTypes(d.pool).map(t=>'<option value="'+esc(t.toLowerCase())+'" '+(cmd.type===t.toLowerCase()?'selected':'')+'>'+esc(t)+'</option>').join('')+'</select><select id="cmdMega"><option value="all" '+(cmd.mega==='all'?'selected':'')+'>All forms</option><option value="mega" '+(cmd.mega==='mega'?'selected':'')+'>Mega only</option><option value="standard" '+(cmd.mega==='standard'?'selected':'')+'>Non-Mega only</option></select><button type="button" class="ghost small" id="cmdResetFilters">Reset filters</button></div>'+
     '<div id="cmdResults">'+cmdResultsHtml(d,team)+'</div><div class="note danger" id="cmdErr"></div>';
@@ -588,13 +589,13 @@ function wireConsole(ts){
     const current=d0().mode==='ordered'?d0().order[d0().currentPick]:null;
     if(!current)return;
     const confirmed=await showDraftConfirm({kicker:'Commissioner console · Skip pick',title:'Skip this draft slot?',message:`${current}'s current turn will be passed without adding a Pokémon. Completed picks and budgets will remain unchanged.`,details:[['Franchise',current],['Draft slot',`#${Number(d0().currentPick)+1}`]],confirmLabel:'Skip pick',cancelLabel:'Keep turn',danger:true});
-    if(!confirmed)return;err('');try{await SBL.draft.skipCurrentPick();render()}catch(x){err(x.message||String(x))}
+    if(!confirmed)return;err('');try{await SBL.draft.skipCurrentPick();cmd.team='';render()}catch(x){err(x.message||String(x))}
   });
   $('endFranchiseDraftBtn')?.addEventListener('click',async()=>{
     const target=cmdTeam(d0(),ts);if(!target)return;
     const info=DD().budgetInfo(d0(),target),zero=(Number(info?.left)||0)<=0;
     const confirmed=await showDraftConfirm({kicker:'Commissioner console · End franchise draft',title:`Finish ${target}'s drafting?`,message:zero?'This franchise has no points remaining. It will be skipped for all remaining turns and cannot make further picks.':'This franchise will be skipped for all remaining turns and cannot make further picks. Other franchises will continue normally.',details:[['Franchise',target],['Points remaining',`${Number(info?.left)||0} pts`]],confirmLabel:'End franchise draft',cancelLabel:'Cancel',danger:true});
-    if(!confirmed)return;err('');try{await SBL.draft.endFranchiseDraft(target,zero?'No points remaining':'Commissioner ended franchise draft');render()}catch(x){err(x.message||String(x))}
+    if(!confirmed)return;err('');try{await SBL.draft.endFranchiseDraft(target,zero?'No points remaining':'Commissioner ended franchise draft');cmd.team='';render()}catch(x){err(x.message||String(x))}
   });
   $('cmdRevert')?.addEventListener('click',async()=>{
     const latest=d0().picks.slice(-1)[0];

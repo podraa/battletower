@@ -530,6 +530,23 @@ async function loadShowdownDex(){
   return SHOWDOWN_DEX_PROMISE;
 }
 
+// PokeAPI knows many newer Mega forms by numeric form ID even when its
+// species-name endpoint or Showdown's current Pokedex has no matching entry.
+// Always resolve the exact Mega ID before trying a less specific species.
+function exactMegaApiId(species){
+  return window.SBL?.pokemon?.megaPokeapiId?.(species)||null;
+}
+function matchPrepApiCandidates(species){
+  const id=exactMegaApiId(species);
+  return [...(id?[String(id)]:[]),...pokemonDexCandidates(species)];
+}
+async function requestPokemonApi(slug){
+  try{
+    const r=await fetch('https://pokeapi.co/api/v2/pokemon/'+encodeURIComponent(slug),{cache:'force-cache'});
+    return r.ok?await r.json():null;
+  }catch(_){return null;}
+}
+
 async function fetchBaseSpeed(species){
   const cacheKey=String(species||'').trim().toLowerCase();
   if(SPEED_CACHE.has(cacheKey))return SPEED_CACHE.get(cacheKey);
@@ -541,7 +558,7 @@ async function fetchBaseSpeed(species){
   // much more complete than maintaining a hand-written speed table.
   const dex=await loadShowdownDex();
   if(dex){
-    for(const slug of showdownDexCandidates(species)){
+    for(const slug of (exactMegaApiId(species)?window.SBL.pokemon.showdownStatsIdCandidates(species):showdownDexCandidates(species))){
       const d=dex[slug];
       const value=Number(d?.baseStats?.spe);
       if(Number.isFinite(value)){
@@ -551,15 +568,12 @@ async function fetchBaseSpeed(species){
   }
 
   // Final fallback for anything not present in the Showdown data.
-  for(const slug of pokemonDexCandidates(species)){
-    try{
-      const r=await fetch('https://pokeapi.co/api/v2/pokemon/'+encodeURIComponent(slug));
-      if(!r.ok)continue;
-      const d=await r.json();
-      const st=(d.stats||[]).find(x=>x.stat?.name==='speed');
-      const value=Number(st?.base_stat);
-      if(Number.isFinite(value)){SPEED_CACHE.set(cacheKey,value);return value;}
-    }catch(e){}
+  for(const slug of (exactMegaApiId(species)?[String(exactMegaApiId(species))]:pokemonDexCandidates(species))){
+    const d=await requestPokemonApi(slug);
+    if(!d)continue;
+    const st=(d.stats||[]).find(x=>x.stat?.name==='speed');
+    const value=Number(st?.base_stat);
+    if(Number.isFinite(value)){SPEED_CACHE.set(cacheKey,value);return value;}
   }
   SPEED_CACHE.set(cacheKey,null); return null;
 }
@@ -699,7 +713,7 @@ async function fetchPokemonData(species){
     // entirely and falling through to a much less reliable PokeAPI guess
     // (or no data at all) — this was the root cause of formes not showing
     // data in the scouting popup.
-    for(const slug of showdownDexCandidates(species)){
+    for(const slug of (exactMegaApiId(species)?window.SBL.pokemon.showdownStatsIdCandidates(species):showdownDexCandidates(species))){
       const d=dex[slug];
       if(d?.baseStats || d?.types || d?.abilities){
         const bs=d.baseStats||{};
@@ -720,18 +734,18 @@ async function fetchPokemonData(species){
       }
     }
   }
-  for(const slug of pokemonDexCandidates(species)){
-    try{
-      const r=await fetch('https://pokeapi.co/api/v2/pokemon/'+encodeURIComponent(slug));
-      if(!r.ok)continue;
-      const d=await r.json();
-      const data={
-        stats:Object.fromEntries((d.stats||[]).map(x=>[x.stat?.name,x.base_stat]).filter(x=>x[0])),
-        types:(d.types||[]).sort((a,b)=>a.slot-b.slot).map(x=>x.type?.name).filter(Boolean),
-        abilities:(d.abilities||[]).map(x=>x.ability?.name).filter(Boolean)
-      };
-      POKEMON_DATA_CACHE.set(key,data); return data;
-    }catch(e){}
+  // Never silently apply the base species' stats or typing to a newer Mega
+  // whose exact form ID is known. Its typing and stats may have changed.
+  const candidates=exactMegaApiId(species)?[String(exactMegaApiId(species))]:pokemonDexCandidates(species);
+  for(const slug of candidates){
+    const d=await requestPokemonApi(slug);
+    if(!d)continue;
+    const data={
+      stats:Object.fromEntries((d.stats||[]).map(x=>[x.stat?.name,x.base_stat]).filter(x=>x[0])),
+      types:(d.types||[]).sort((a,b)=>a.slot-b.slot).map(x=>x.type?.name).filter(Boolean),
+      abilities:(d.abilities||[]).map(x=>x.ability?.name).filter(Boolean)
+    };
+    POKEMON_DATA_CACHE.set(key,data); return data;
   }
   POKEMON_DATA_CACHE.set(key,null); return null;
 }
@@ -743,20 +757,18 @@ async function fetchTypes(species){
   // aliases don't depend on guessing a third-party URL slug.
   const dex=await loadShowdownDex();
   if(dex){
-    for(const slug of showdownDexCandidates(species)){
+    for(const slug of (exactMegaApiId(species)?window.SBL.pokemon.showdownStatsIdCandidates(species):showdownDexCandidates(species))){
       const types=normalizedTypes(dex[slug]?.types||[]);
       if(types.length){TYPE_CACHE.set(key,types);return types;}
     }
   }
 
-  for(const slug of pokemonDexCandidates(species)){
-    try{
-      const r=await fetch('https://pokeapi.co/api/v2/pokemon/'+encodeURIComponent(slug));
-      if(!r.ok)continue;
-      const d=await r.json();
-      const types=normalizedTypes((d.types||[]).sort((a,b)=>a.slot-b.slot).map(x=>x.type?.name).filter(Boolean));
-      if(types.length){TYPE_CACHE.set(key,types);return types}
-    }catch(e){}
+  const candidates=exactMegaApiId(species)?[String(exactMegaApiId(species))]:pokemonDexCandidates(species);
+  for(const slug of candidates){
+    const d=await requestPokemonApi(slug);
+    if(!d)continue;
+    const types=normalizedTypes((d.types||[]).sort((a,b)=>a.slot-b.slot).map(x=>x.type?.name).filter(Boolean));
+    if(types.length){TYPE_CACHE.set(key,types);return types}
   }
   TYPE_CACHE.set(key,[]);return [];
 }
@@ -1186,14 +1198,22 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
     const key=norm(species);
     if(coverageMoveCache.has(key))return coverageMoveCache.get(key);
     let raw=[];
-    for(const slug of coverageDexSlug(species)){
-      try{
-        const r=await fetch(`https://pokeapi.co/api/v2/pokemon/${encodeURIComponent(slug)}`,{cache:'force-cache'});
-        if(!r.ok)continue;
-        const d=await r.json();
-        raw=(d.moves||[]).map(x=>({name:x.move?.name,url:x.move?.url})).filter(x=>x.name&&x.url);
-        if(raw.length)break;
-      }catch(e){}
+    const megaId=exactMegaApiId(species);
+    // A Mega ordinarily inherits its base species' learnset. Query its own
+    // form first for newer moves, then the base species only for moves.
+    // Mega forms use the base species learnset if the form has no distinct
+    // movepool. Do not accidentally try the generic token "mega" as a species.
+    const canonical=window.SBL?.pokemon?.normalizeName?.(species)||String(species||'').toLowerCase();
+    const megaBase=canonical.match(/^mega-(.+?)(?:-[xyz])?$/)?.[1]
+      ||canonical.match(/^(.+?)-mega(?:-[xyz]|[xyz])?$/)?.[1]
+      ||null;
+    const moveSlugs=[...(megaId?[String(megaId)]:[]),
+      ...(megaBase?coverageDexSlug(megaBase):coverageDexSlug(species))];
+    for(const slug of moveSlugs){
+      const d=await requestPokemonApi(slug);
+      if(!d)continue;
+      raw=(d.moves||[]).map(x=>({name:x.move?.name,url:x.move?.url})).filter(x=>x.name&&x.url);
+      if(raw.length)break;
     }
     const details=[];
     for(let i=0;i<raw.length;i+=18){

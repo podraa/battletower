@@ -820,7 +820,7 @@ Choose Cancel to keep draft status unchanged.`);
       if(!resp.ok) throw new Error('replay not found (' + resp.status + ')');
       const json = await resp.json();
       if(!json || typeof json !== 'object') throw new Error('invalid replay response');
-      const parsed = SBL.replays.parseLog(json, id);
+      const parsed = await SBL.replays.parseLogActive(json, id);
       if(!parsed || typeof parsed !== 'object') throw new Error('replay parser returned no data');
       parsed.uploadtime = json.uploadtime || parsed.uploadtime || null;
       parsed.weekOverride = false;
@@ -1143,7 +1143,9 @@ Choose Cancel to keep draft status unchanged.`);
     } catch (_) { return 'overview'; }
   })();
   tabsEl?.querySelectorAll('.admin-nav-item').forEach(button => {
-    button.classList.toggle('active', button.dataset.tab === activeTab);
+    const active=button.dataset.tab===activeTab;
+    button.classList.toggle('active',active);
+    button.setAttribute('aria-current',active?'page':'false');
   });
   document.getElementById('adminRefreshButton')?.addEventListener('click', event => {
     const button = event.currentTarget;
@@ -1156,13 +1158,17 @@ Choose Cancel to keep draft status unchanged.`);
   });
 
   const NAV_GROUP_KEY = 'sbl_admin_nav_group';
+  const availableNavGroups = new Set(Array.from(tabsEl.querySelectorAll('.admin-nav-group')).map(group=>group.dataset.navGroup));
   let openNavGroup = localStorage.getItem(NAV_GROUP_KEY) || '';
+  if(!availableNavGroups.has(openNavGroup)) openNavGroup = '';
 
   function syncAdminNavGroups() {
     tabsEl.querySelectorAll('.admin-nav-group').forEach(group => {
       const name = group.dataset.navGroup || '';
       const open = name === openNavGroup;
+      const hasActive = !!group.querySelector('.admin-nav-item.active');
       group.classList.toggle('open', open);
+      group.classList.toggle('has-active', hasActive);
       const toggle = group.querySelector('.admin-nav-group-toggle');
       if (toggle) toggle.setAttribute('aria-expanded', String(open));
     });
@@ -1178,6 +1184,22 @@ Choose Cancel to keep draft status unchanged.`);
   syncAdminNavGroups();
 
   tabsEl.addEventListener('click', (e)=>{
+    const snipeLink = e.target.closest('#adminSnipeReplayLink');
+    if (snipeLink) {
+      e.preventDefault();
+      const routeParams = new URLSearchParams(window.location.search);
+      const leagueId = String(routeParams.get('league') || SBL.leagueDb?.selectedLeagueId?.() || '').trim();
+      const seasonId = String(routeParams.get('season_id') || SBL.leagueDb?.selectedSeasonId?.(leagueId) || '').trim();
+      if (!leagueId || !seasonId) {
+        window.alert('Select a league and season before opening the Snipe Replay.');
+        return;
+      }
+      const replayUrl = new URL('tracker.html', window.location.href);
+      replayUrl.searchParams.set('league', leagueId);
+      replayUrl.searchParams.set('season_id', seasonId);
+      window.location.assign(replayUrl.toString());
+      return;
+    }
     const groupToggle = e.target.closest('.admin-nav-group-toggle');
     if(groupToggle){
       const group = groupToggle.closest('.admin-nav-group');
@@ -1191,12 +1213,29 @@ Choose Cancel to keep draft status unchanged.`);
     if(!item) return;
     activeTab = item.dataset.tab;
     try { sessionStorage.setItem(ADMIN_LAST_TAB_KEY, activeTab); } catch (_) {}
-    tabsEl.querySelectorAll('.admin-nav-item').forEach(b=>b.classList.toggle('active', b.dataset.tab===activeTab));
+    tabsEl.querySelectorAll('.admin-nav-item').forEach(b=>{const active=b.dataset.tab===activeTab;b.classList.toggle('active',active);b.setAttribute('aria-current',active?'page':'false');});
     const group = item.closest('.admin-nav-group');
-    openNavGroup = group?.dataset.navGroup || openNavGroup;
-    localStorage.setItem(NAV_GROUP_KEY, openNavGroup);
+    // Close the category menu after choosing a destination. The active
+    // category remains highlighted, while the workspace tabs stay visible.
+    openNavGroup = '';
+    localStorage.setItem(NAV_GROUP_KEY, '');
     syncAdminNavGroups();
     render();
+  });
+
+  // Close the compact category menu when the user clicks outside it or
+  // presses Escape. This is intentionally independent of workspace rendering.
+  document.addEventListener('click', (e) => {
+    if (!tabsEl || !openNavGroup || tabsEl.contains(e.target)) return;
+    openNavGroup = '';
+    try { localStorage.setItem(NAV_GROUP_KEY, ''); } catch (_) {}
+    syncAdminNavGroups();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !openNavGroup) return;
+    openNavGroup = '';
+    try { localStorage.setItem(NAV_GROUP_KEY, ''); } catch (_) {}
+    syncAdminNavGroups();
   });
 
   function renderTicker(){
@@ -1278,6 +1317,7 @@ Choose Cancel to keep draft status unchanged.`);
       people: renderPeople,
       overview: renderOverview,
       process: renderProcess,
+      'replay-review': () => window.SBL.replayReviewUI?.render(contentEl),
       players: renderPlayers,
       'legacy-migration': renderLegacyMigration,
       'bug-reports': renderBugReports,
@@ -1309,8 +1349,8 @@ Choose Cancel to keep draft status unchanged.`);
   }
 
   const ADMIN_SECTION_WORKSPACE_TABS = new Set([
-    'people','legacy-migration','draft','freeagency','pokemon-roles','trades','updates',
-    'franchise-requests','settings-franchises','settings-data','settings-system'
+    'league','people','legacy-migration','draft','freeagency','pokemon-roles','trades','updates',
+    'franchise-requests','settings-franchises','settings-data','settings-system','seasonsetup','process','players'
   ]);
   function applyAdminSectionWorkspace(container=contentEl, workspaceKey='main', headingOverride=''){
     if(container === contentEl && !ADMIN_SECTION_WORKSPACE_TABS.has(activeTab)) return;
@@ -1328,7 +1368,7 @@ Choose Cancel to keep draft status unchanged.`);
     }
     // Small two-panel tools are easier to use as one continuous workflow.
     // Only substantial workspaces get a section switcher.
-    if(panels.length < 3) return;
+    if(panels.length < 2) return;
 
     const workspace = document.createElement('section');
     workspace.className = 'admin-focused-workspace';
@@ -1387,11 +1427,26 @@ Choose Cancel to keep draft status unchanged.`);
     });
   }
 
+  // Keep the section switcher available if a tool replaces its own content
+  // after an action. Some older admin functions update #content directly
+  // rather than calling the top-level render() function again.
+  let workspaceRefreshQueued=false;
+  const adminContentObserver = new MutationObserver(()=>{
+    if(workspaceRefreshQueued || !loaded || !ADMIN_SECTION_WORKSPACE_TABS.has(activeTab)) return;
+    if(contentEl.querySelector(':scope > .admin-focused-workspace')) return;
+    workspaceRefreshQueued=true;
+    requestAnimationFrame(()=>{
+      workspaceRefreshQueued=false;
+      if(!contentEl.querySelector(':scope > .admin-focused-workspace')) applyAdminSectionWorkspace();
+    });
+  });
+  adminContentObserver.observe(contentEl,{childList:true,subtree:true});
+
   // jump to another tab programmatically
   function goToTab(tab){
     // Legacy User Control destinations now land in the consolidated workspace.
     activeTab = tab === 'commissioner' || tab === 'settings' ? 'people' : tab;
-    tabsEl.querySelectorAll('.admin-nav-item').forEach(b=>b.classList.toggle('active', b.dataset.tab===activeTab));
+    tabsEl.querySelectorAll('.admin-nav-item').forEach(b=>{const active=b.dataset.tab===activeTab;b.classList.toggle('active',active);b.setAttribute('aria-current',active?'page':'false');});
     render();
   }
 
@@ -1654,7 +1709,7 @@ Choose Cancel to keep draft status unchanged.`);
         const resp = await fetch(`https://replay.pokemonshowdown.com/${id}.json`);
         if(!resp.ok) throw new Error('not found (' + resp.status + ')');
         const json = await resp.json();
-        const parsed = SBL.replays.parseLog(json, id);
+        const parsed = await SBL.replays.parseLogActive(json, id);
         parsed.uploadtime = json.uploadtime;
         // Preserve a manual week exactly. Failed fetch/parse leaves oldReplay
         // untouched, so reprocessing can never destroy an existing replay.

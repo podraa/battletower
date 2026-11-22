@@ -31,7 +31,7 @@
   const SUPABASE_STATE_ID = '__dashboard_state__';
   const supabase = window.SBL.getSupabase();
   const IS_ADMIN_PAGE = document.body.dataset.admin === 'true' && !window.SBL_SITE?.isUserPreview?.();
-  const POLL_MS = 10000;
+  const POLL_MS = 60000; // CP4.154: lower passive read frequency (previously 10s)
   let adminUser = null;
   let loadingFromRemote = false;
 
@@ -42,11 +42,11 @@
   // Only the most recently started load may apply its result; a slower,
   // superseded response must never overwrite newer season state.
   let loadSeq = 0;
-  async function loadState(){
+  async function loadState(options={}){
     const seq = ++loadSeq;
     loadingFromRemote = true;
     try{
-      const { data, error } = await SBL.replays.load(supabase);
+      const { data, error } = await SBL.replays.load(supabase,{force:!!options.force});
       if(error) throw error;
       if(seq !== loadSeq) return;
       const { sharedState, replays, publishedRosters, normalizedSeason } = SBL.replays.partition(data);
@@ -158,7 +158,7 @@
       t: STATE.teamMap,
       s: STATE.settings
     });
-    await loadState();
+    await loadState({force:true});
     pokemonSearchCache = null;
     pokemonSearchCachePromise = null;
     const after = JSON.stringify({
@@ -337,7 +337,7 @@
         const resp = await fetch(`https://replay.pokemonshowdown.com/${id}.json`);
         if(!resp.ok) throw new Error('replay not found (' + resp.status + ')');
         const json = await resp.json();
-        const parsed = SBL.replays.parseLog(json, id);
+        const parsed = await SBL.replays.parseLogActive(json, id);
         parsed.week = autoWeekForReplay(parsed);
         parsed.processedAt = Date.now();
         STATE.replays[id] = parsed;
@@ -1112,7 +1112,7 @@
         if(!resp.ok) throw new Error('not found (' + resp.status + ')');
         const json = await resp.json();
         const oldReplay = STATE.replays[id];
-        const parsed = SBL.replays.parseLog(json, id);
+        const parsed = await SBL.replays.parseLogActive(json, id);
         parsed.uploadtime = json.uploadtime;
         parsed.weekOverride = !!oldReplay.weekOverride;
         parsed.week = oldReplay.weekOverride
@@ -2394,10 +2394,40 @@
       try{ render(); }catch(e){ console.warn('Post-type render failed:', e); }
       try{ renderTicker(); }catch(e){ console.warn('Post-type banner render failed:', e); }
     });
-    // Public dashboard polls the shared database every 10 seconds. This keeps the
-    // viewer page read-only while still making new replay data appear automatically.
+    // CP4.155: probe tiny metadata before downloading season.data + replay_data.
+    // Reconcile fully at least every 10 minutes, even if an external writer
+    // neglected to bump updated_at. Errors fail open to a full refresh.
     if(!IS_ADMIN_PAGE){
-      setInterval(async ()=>{ try{ await refreshSharedState(); }catch(e){ console.warn('Shared refresh failed', e); } }, POLL_MS);
+      let refreshBusy = false;
+      let lastFingerprint = null;
+      let lastFullRefresh = Date.now();
+      const passiveRefresh = async () => {
+        if(document.hidden || refreshBusy) return;
+        refreshBusy = true;
+        try {
+          const fingerprint = await SBL.replays.passiveFingerprint?.(supabase) ?? null;
+          const fullDue = Date.now()-lastFullRefresh >= 10*60*1000;
+          if(fingerprint === null || lastFingerprint === null || fingerprint !== lastFingerprint || fullDue){
+            await refreshSharedState();
+            lastFullRefresh=Date.now();
+          }
+          // Only mark a fingerprint current after the full refresh succeeded.
+          lastFingerprint=fingerprint;
+        } catch(e) {
+          lastFingerprint=null;
+          console.warn('Shared refresh failed',e);
+        } finally { refreshBusy = false; }
+      };
+      setInterval(passiveRefresh, POLL_MS);
+      // Establish a baseline after the first render, without forcing a reload.
+      SBL.replays.passiveFingerprint?.(supabase).then(value=>{ if(lastFingerprint===null) lastFingerprint=value; }).catch(()=>{});
+      let lastVisibleRefresh=Date.now();
+      document.addEventListener('visibilitychange',()=>{
+        if(!document.hidden && Date.now()-lastVisibleRefresh>30000){
+          lastVisibleRefresh=Date.now();
+          void passiveRefresh();
+        }
+      });
     }
   })();
 })();
