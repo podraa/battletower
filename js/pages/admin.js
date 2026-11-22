@@ -816,7 +816,7 @@ Choose Cancel to keep draft status unchanged.`);
   }
 
   async function fetchReplayForImport(id){
-    if(!SBL.replays || typeof SBL.replays.parseLog !== 'function' || typeof SBL.replays.extractReplayId !== 'function'){
+    if(!SBL.replays || typeof SBL.replays.parseLogActive !== 'function' || typeof SBL.replays.extractReplayId !== 'function'){
       throw new Error('Replay service is unavailable. Reload the page and try again.');
     }
     // Accuracy data is optional enrichment. The importer must never depend on
@@ -847,7 +847,7 @@ Choose Cancel to keep draft status unchanged.`);
   }
 
   async function processUrls(urlsRaw, logEl){
-    if(!SBL.replays || typeof SBL.replays.extractReplayId !== 'function' || typeof SBL.replays.parseLog !== 'function'){
+    if(!SBL.replays || typeof SBL.replays.extractReplayId !== 'function' || typeof SBL.replays.parseLogActive !== 'function'){
       appendLog(logEl, 'Replay service failed to load. Reload the admin page before processing replays.', true);
       return;
     }
@@ -860,6 +860,11 @@ Choose Cancel to keep draft status unchanged.`);
     }
     const rawLines = String(urlsRaw || '').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
     if(rawLines.length === 0){ appendLog(logEl, 'No links provided.', true); return; }
+    let activeParser;
+    try{
+      activeParser=await SBL.replays.refreshActiveParser();
+      appendLog(logEl,`Active uploaded parser: ${activeParser.version} (${activeParser.sha256.slice(0,12)}…)`,false);
+    }catch(e){appendLog(logEl,`Cannot import without an active uploaded parser: ${e.message}`,true);return;}
 
     // De-duplicate IDs before fetching, while preserving the order in which the
     // user pasted them for the import log. Week assignment itself is based on
@@ -870,18 +875,17 @@ Choose Cancel to keep draft status unchanged.`);
     for(const url of rawLines){
       const id = SBL.replays.extractReplayId(url);
       if(!id){ appendLog(logEl, `Could not read a replay id from: ${url}`, true); invalid++; continue; }
-      if(seen.has(id) || STATE.replays[id]){
-        if(STATE.replays[id] && Number(STATE.replays[id].parserVersion||0) < 7){
-          if(!seen.has(id)){
-            appendLog(logEl, `Reprocessing older parser version: ${id}`, false);
-            ids.push(id);
-            seen.add(id);
-          }
-          continue;
+      if(seen.has(id)){
+        appendLog(logEl, `Duplicate replay link: ${id} — skipped`, false);skipped++;continue;
+      }
+      if(STATE.replays[id]){
+        if(SBL.replays.isReplayCurrent(STATE.replays[id],activeParser)){
+          appendLog(logEl, `Already processed by ${activeParser.version}: ${id} — skipped`, false);
+          skipped++;continue;
         }
-        appendLog(logEl, `Already processed: ${id} — skipped`, false);
-        skipped++;
-        continue;
+        // Numeric parserVersion tracks internal schema evolution, NOT the
+        // externally uploaded source. Compare the exact source checksum.
+        appendLog(logEl, `Reprocessing ${id}: stored parser does not match active ${activeParser.version}.`,false);
       }
       seen.add(id);
       ids.push(id);
@@ -898,8 +902,14 @@ Choose Cancel to keep draft status unchanged.`);
         const id = queue.shift();
         try{
           const parsed = await fetchReplayForImport(id);
+          const previous=STATE.replays[id];
+          if(previous){
+            parsed.weekOverride=!!previous.weekOverride;
+            if(previous.weekOverride)parsed.week=previous.week;
+            parsed.processedAt=previous.processedAt||parsed.processedAt;
+          }
           STATE.replays[id] = parsed;
-          appendLog(logEl, `Parsed ${id} (${parsed.players.p1 || '?'} vs ${parsed.players.p2 || '?'}); awaiting database save`, false);
+          appendLog(logEl, `Parsed ${id} with ${parsed.parserVersionLabel} (${parsed.players.p1 || '?'} vs ${parsed.players.p2 || '?'}); awaiting database save`, false);
           added++;
         }catch(e){
           appendLog(logEl, `✗ ${id} — ${e.message}`, true);
@@ -1721,6 +1731,9 @@ Choose Cancel to keep draft status unchanged.`);
       appendLog(logEl, `Move data unavailable — continuing without accuracy-sensitive luck: ${e.message}`, true);
       MOVE_DATA = {};
     }
+    let activeParser;
+    try{activeParser=await SBL.replays.refreshActiveParser();appendLog(logEl,`Reprocessing with uploaded parser ${activeParser.version} (${activeParser.sha256.slice(0,12)}…)`,false);}
+    catch(e){appendLog(logEl,`Reprocessing blocked: ${e.message}`,true);return;}
     const ids = Object.keys(STATE.replays || {});
     if(!ids.length){
       appendLog(logEl, 'No processed replays found.', true);
@@ -1743,7 +1756,7 @@ Choose Cancel to keep draft status unchanged.`);
           : automaticWeekForReplay(parsed);
         parsed.processedAt = oldReplay.processedAt;
         STATE.replays[id] = parsed;
-        appendLog(logEl, `✓ reprocessed ${id}`, false, true);
+        appendLog(logEl, `Parsed ${id} with ${parsed.parserVersionLabel||activeParser.version}; awaiting database save`, false);
         ok++;
       }catch(e){
         appendLog(logEl, `✗ ${id} — ${e.message} (existing replay preserved)`, true);
@@ -1752,8 +1765,16 @@ Choose Cancel to keep draft status unchanged.`);
     }
     if(ok > 0){
       assignAutomaticWeeks();
-      await saveSettings();
-      await saveReplays();
+      try {
+        // A green check is reserved for a confirmed persistence response.
+        await saveReplays({skipSharedState:true});
+        appendLog(logEl, `✓ Saved ${ok} reprocessed replay(s) to Supabase with ${activeParser.version}.`, false, true);
+        try { await saveSettings(); }
+        catch(settingsError) { appendLog(logEl, `⚠ Replay rows saved, season settings update failed: ${settingsError?.message||settingsError}`, true); }
+      } catch(e) {
+        appendLog(logEl, `✗ Parsed ${ok} replay(s), but save was NOT confirmed: ${e?.message||e}.`, true);
+        return;
+      }
     }
     try{
       await logAdminAction(
@@ -1815,6 +1836,10 @@ Choose Cancel to keep draft status unchanged.`);
                 <option value="">Unassigned</option>${franchiseOptions(teamFor(r.players?.p2))}
               </select>
             </div>
+          </div>
+          <div class="note" style="margin-top:4px;" title="Exact uploaded-parser version that generated this saved record">
+            Parser: ${SBL.pokemon.escapeHtml(r.parserVersionLabel||'Unknown / older saved result')}
+            ${r.parserSourceSha256 ? `<code>${SBL.pokemon.escapeHtml(String(r.parserSourceSha256).slice(0,12))}…</code>` : '<span class="badge">Reimport to verify parser</span>'}
           </div>
         </td>
         <td style="color:var(--text-dim)">${SBL.pokemon.escapeHtml(r.format||'')}</td>

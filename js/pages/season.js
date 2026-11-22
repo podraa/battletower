@@ -326,25 +326,33 @@
     const times=Object.values(STATE.replays).map(replayTimestampMs).filter(Boolean);
     if(!times.length) return;
     STATE.settings.seasonStartMonday=mondayStartMs(Math.min(...times));
-    for(const r of Object.values(STATE.replays)) r.week=autoWeekForReplay(r);
+    for(const r of Object.values(STATE.replays))if(!r.weekOverride)r.week=autoWeekForReplay(r);
   }
 
   async function processUrls(urlsRaw, week, logEl){
     try { await SBL.replays.ensureMoveAccuracyData?.(); } catch (_) { /* optional enrichment */ }
     const urls = urlsRaw.split('\n').map(s=>s.trim()).filter(Boolean);
     if(urls.length === 0){ appendLog(logEl, 'No links provided.', true); return; }
+    let activeParser;
+    try{activeParser=await SBL.replays.refreshActiveParser();appendLog(logEl,`Active uploaded parser: ${activeParser.version} (${activeParser.sha256.slice(0,12)}…)`,false);}
+    catch(e){appendLog(logEl,`Replay import blocked: ${e.message}`,true);return;}
     let added = 0, skipped = 0, failed = 0;
     for(const url of urls){
       const id = SBL.replays.extractReplayId(url);
       if(!id){ appendLog(logEl, `Could not read a replay id from: ${url}`, true); failed++; continue; }
-      if(STATE.replays[id]){ appendLog(logEl, `Already processed: ${id} — skipped`, false); skipped++; continue; }
+      const previous=STATE.replays[id];
+      if(previous && SBL.replays.isReplayCurrent(previous,activeParser)){
+        appendLog(logEl, `Already processed by ${activeParser.version}: ${id} — skipped`, false);skipped++;continue;
+      }
+      if(previous)appendLog(logEl,`Reprocessing ${id} with ${activeParser.version}: stored parser checksum differs.`,false);
       try{
         const resp = await fetch(`https://replay.pokemonshowdown.com/${id}.json`);
         if(!resp.ok) throw new Error('replay not found (' + resp.status + ')');
         const json = await resp.json();
         const parsed = await SBL.replays.parseLogActive(json, id);
-        parsed.week = autoWeekForReplay(parsed);
-        parsed.processedAt = Date.now();
+        parsed.weekOverride=!!previous?.weekOverride;
+        parsed.week=parsed.weekOverride?(previous.week||'Unassigned'):autoWeekForReplay(parsed);
+        parsed.processedAt=previous?.processedAt||Date.now();
         STATE.replays[id] = parsed;
         appendLog(logEl, `✓ ${id}  (${parsed.players.p1 || '?'} vs ${parsed.players.p2 || '?'})`, false, true);
         added++;
@@ -1326,6 +1334,8 @@
 
   async function reprocessAll(logEl){
     try { await SBL.replays.ensureMoveAccuracyData?.(); } catch (_) { /* optional enrichment */ }
+    try{const activeParser=await SBL.replays.refreshActiveParser();appendLog(logEl,`Reprocessing with uploaded parser ${activeParser.version} (${activeParser.sha256.slice(0,12)}…)`,false);}
+    catch(e){appendLog(logEl,`Reprocessing blocked: ${e.message}`,true);return;}
     const ids = Object.keys(STATE.replays);
     let ok=0, failed=0;
     for(const id of ids){

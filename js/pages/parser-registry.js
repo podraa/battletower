@@ -28,7 +28,13 @@ for(const button of table.querySelectorAll('[data-parser-activate]'))button.oncl
  const test=await testSource(src.source_text);const note=reason('Activate',src.version_label);if(note===null){tell('Activation cancelled.');return;}
  if(!confirm(`Activate ${src.version_label}? ${test.count} fixtures passed, but this does NOT prove compatibility with every replay. Only future imports are affected. Continue?`))return;
  const {error:e}=await db().rpc('sbl_activate_parser_version',{p_parser_id:src.id,p_note:note,p_rollback:true});if(e)throw e;
- tell(src.version_label+' activated. Reload open browser tabs; old replays remain unchanged.');await refresh();
+ S.replays?.invalidateActiveParser?.();
+ // Other open tabs evict their sandbox as well. A future import also rechecks
+ // the Supabase registry, so changes from other devices cannot remain cached.
+ try{window.localStorage?.setItem(S.replays?.parserChangeStorageKey||'sbl:active-parser-changed',JSON.stringify({sha256:src.sha256,at:Date.now()}));}catch(_){}
+ const loaded=await S.replays.activeParserInfo();
+ if(loaded.sha256!==src.sha256)throw Error('Database activation completed, but this tab loaded a different parser checksum. Refresh and verify before importing.');
+ tell(src.version_label+' activated and verified in this tab ('+loaded.sha256.slice(0,12)+'…). Existing replay rows are unchanged; reimport affected matches to update them.');await refresh();
  }catch(e){tell('Activation failed: '+e.message);}finally{button.disabled=false;}};
 }
 stage.onclick=async()=>{const f=file.files?.[0],version=label.value.trim();if(!f||!version){tell('Provide a version and parser file.');return;}
