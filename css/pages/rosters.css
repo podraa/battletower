@@ -536,3 +536,9 @@ body{
 .roster-franchise-signature-art .sprite,.roster-franchise-signature-art img{width:108px!important;height:108px!important;object-fit:contain}
 .roster-franchise-signature-name{font-size:11px;font-weight:650;color:var(--text-dim,#cab6d1);line-height:1.2}
 @media(max-width:580px){.roster-directory-intro{flex-direction:row;align-items:center}.roster-franchise-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.roster-franchise-tile{min-height:178px;padding:12px 8px}.roster-franchise-signature-art{width:88px;height:88px}.roster-franchise-signature-art .sprite,.roster-franchise-signature-art img{width:86px!important;height:86px!important}.roster-franchise-name{font-size:14px}}
+
+/* CP4.144 — consistent awaiting-state surface, aligned with Match Prep. */
+.roster-empty-state{max-width:720px;margin:32px auto 0;padding:28px 30px;background:var(--panel,rgba(33,29,39,.5));border:1px dashed var(--border,rgba(150,150,170,.3));box-shadow:none;border-radius:14px}
+.roster-empty-kicker{color:var(--text-dim);letter-spacing:.1em;font-size:11px}
+.roster-empty-state h2{font-size:clamp(18px,2vw,22px);margin:10px 0 8px;color:var(--text)}
+.roster-empty-state p{font-size:14px;line-height:1.55}
