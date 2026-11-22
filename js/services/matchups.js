@@ -21,5 +21,38 @@ function bestStabMultiplier(attackingTypes,defendingTypes){
   return Math.max(...attacks.map(a=>defense(a,defs)));
 }
 function defensiveEffectiveness(types){const defs=normalizedTypes(types);return TYPE_NAMES.map(type=>({type,mult:defs.length?defense(type,defs):null}));}
-SBL.matchups={types:TYPE_NAMES,normalizeTypeName,normalizedTypes,multiplier,defense,bestStabMultiplier,defensiveEffectiveness};
+function isGrounded(mon,context={}) {
+  const types=normalizedTypes(context.types||mon?.types||[]);
+  const ability=String(context.ability||mon?.ability||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  const item=String(context.item||mon?.item||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  const effect=String(context.effect||'').toLowerCase();
+  if(context.grounded===true||context.gravity||context.smackDown||context.ironBall||item==='ironball'||effect.includes('thousand arrows'))return true;
+  if(context.grounded===false)return false;
+  if(!types.length)return null;
+  if(types.includes('Flying'))return false;
+  if(ability==='levitate'&&!context.ignoreAbility)return false;
+  if(item==='airballoon'&&!context.balloonPopped)return false;
+  if(context.magnetRise||context.telekinesis)return false;
+  return true;
+}
+function stickyWebAffected(mon,context={}) {
+  const item=String(context.item||mon?.item||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  // Heavy-Duty Boots prevent Sticky Web's entry effect on an otherwise grounded
+  // target. Existing Speed workbench uses idealized assumptions unless item
+  // and ability are explicitly supplied.
+  return item!=='heavydutyboots' && isGrounded(mon,context)===true;
+}
+function applySpeedModifiers(speed,mon,mods={},context={}) {
+  let value=Math.floor(Number(speed)||0);
+  const n=Math.max(-6,Math.min(6,Number(mods.stage)||0));
+  const stage=n>=0?(2+n)/2:2/(2-n);
+  if(n)value=Math.floor(value*stage);
+  if(mods.scarf)value=Math.floor(value*1.5);
+  if(mods.tailwind)value=Math.floor(value*2);
+  if(mods.paralysis)value=Math.floor(value*.5);
+  if(mods.webs&&stickyWebAffected(mon,context))value=Math.floor(value*2/3);
+  return value;
+}
+
+SBL.matchups={types:TYPE_NAMES,normalizeTypeName,normalizedTypes,multiplier,defense,bestStabMultiplier,defensiveEffectiveness,isGrounded,stickyWebAffected,applySpeedModifiers};
 })();

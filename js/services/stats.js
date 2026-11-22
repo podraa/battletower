@@ -308,8 +308,109 @@
 
   function kda(row){
     const kills=Number(row?.kills)||0, deaths=Number(row?.deaths)||0, assists=Number(row?.assists)||0;
-    return {kills,deaths,assists,ratio:deaths?((kills+assists)/deaths):((kills+assists)?Infinity:0),kd:deaths?(kills/deaths):((kills)?Infinity:0)};
+    return {kills,deaths,assists,ratio:deaths?((kills+assists)/deaths):null,kd:deaths?(kills/deaths):null};
   }
 
-  SBL.stats={identity,pokemon,pokemonAsync,pokemonStats,getPokemonStats,pokemonProfile,team,kda};
+  function formatKD(kills,deaths) {
+    const k=Number(kills)||0,d=Number(deaths)||0;
+    return d>0?(k/d).toFixed(2):(k===0?'0.00':'—');
+  }
+  // Canonical per-franchise roster stats. This layer joins actual replay forms
+  // to drafted base forms, so a rostered Greninja is not displayed as unused
+  // when its battles are recorded as Greninja-Mega. This joins by team, side
+  // and *actual form*; no nickname/species-alias cross-player substitutions.
+  function franchiseRosterData(rosters,replays,teamFor) {
+    const teams={};
+    const keyTeam=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+    const monName=m=>typeof m==='string'?m:String(m?.name||m?.species||'');
+    const newEntry=(species,points=null)=>({species:display(species),points,dealt:0,taken:0,kills:0,deaths:0,assists:0,appearances:0,games:0,killLog:[],deathLog:[]});
+    for(const [teamName,members] of Object.entries(rosters||{})) {
+      const row={name:teamName,roster:[],byKey:{},rosterBases:{},total:{dealt:0,taken:0,kills:0,deaths:0,appearances:0},linkedPlayers:new Set(),replayCount:0};
+      for(const mon of Array.isArray(members)?members:[]) {
+        const raw=monName(mon),id=identity(raw);
+        if(!id||row.byKey[id])continue;
+        const item=newEntry(raw,mon&&typeof mon==='object'?(mon.points??mon.cost??null):null);
+        row.byKey[id]=item;row.roster.push(item);
+        row.rosterBases[permanentFormBaseIdentity(raw)||id]=item.points;
+      }
+      teams[teamName]=row;
+    }
+    for(const replay of Array.isArray(replays)?replays:[]) {
+      for(const side of ['p1','p2']) {
+        const player=String(replay?.players?.[side]||'');
+        const mapped=typeof teamFor==='function'?teamFor(player):'';
+        const teamKey=Object.keys(teams).find(t=>keyTeam(t)===keyTeam(mapped));
+        if(!teamKey)continue;
+        const row=teams[teamKey];row.replayCount++;if(player)row.linkedPlayers.add(player);
+        const observations=Object.values(replay?.mons||{}).filter(m=>m?.side===side&&m?.species);
+        const findTarget=(species)=>{
+          const id=identity(species);if(row.byKey[id])return row.byKey[id];
+          const base=permanentFormBaseIdentity(species);
+          if(base&&Object.prototype.hasOwnProperty.call(row.rosterBases,base)) {
+            // Each permanent battle form owns a different season row. Moving a
+            // drafted base's empty placeholder onto the first observed form is
+            // safe; moving an already-scored row would incorrectly merge an
+            // ordinary Mega, a Z-Mega, and a base-form battle.
+            const seed=row.byKey[base];
+            if(seed&&!seed.games&&!seed.appearances&&!seed.kills&&!seed.deaths&&!seed.dealt&&!seed.taken){
+              row.roster=row.roster.filter(x=>x!==seed);delete row.byKey[base];
+            }
+            const target=newEntry(species,row.rosterBases[base]);
+            row.byKey[id]=target;row.roster.push(target);
+            return target;
+          }
+          if(Object.prototype.hasOwnProperty.call(row.rosterBases,id)) {
+            // A base-form battle can occur after the season already recorded a
+            // Mega form; restore a separate base row instead of merging forms.
+            const target=newEntry(species,row.rosterBases[id]);
+            row.byKey[id]=target;row.roster.push(target);return target;
+          }
+          return null;
+        };
+        const counted=new Set();
+        const teamPreview=(replay?.teamRoster?.[side]||[]).map(monName).filter(Boolean);
+        for(const mon of observations) {
+          const target=findTarget(mon.species);if(!target)continue;
+          const total=Number(mon.damageDealt)||0,direct=Number(mon.directDamage)||0,indirect=Number(mon.indirectDamage)||0;
+          target.dealt+=Number(replay.parserVersion||0)>=3 ? direct+indirect : total;
+          target.taken+=Number(mon.damageTaken)||0;
+          target.kills+=Number(mon.kills)||0;
+          target.deaths+=Number(mon.deaths)||0;
+          target.assists+=Array.isArray(mon.assistLog)?mon.assistLog.length:(Number(mon.assists)||0);
+          if(Array.isArray(mon.killLog))target.killLog.push(...mon.killLog);
+          if(Array.isArray(mon.deathLog))target.deathLog.push(...mon.deathLog);
+          const seenKey=identity(target.species);
+          if(!counted.has(seenKey)) {
+            const brought=teamPreview.length?teamPreview.some(sp=>{
+              const k=identity(sp);return k===seenKey||k===permanentFormBaseIdentity(target.species);
+            }):true;
+            const appearances=brought?1:(Number(mon.appearances)||0);
+            target.appearances+=appearances;target.games+=appearances;counted.add(seenKey);
+          }
+        }
+        for(const raw of teamPreview) {
+          const id=identity(creditedSpeciesForRoster(replay,side,raw));
+          const target=findTarget(id)||row.byKey[identity(raw)];
+          if(!target)continue;
+          const statKey=identity(target.species);
+          if(!counted.has(statKey)){target.appearances++;target.games++;counted.add(statKey);}
+        }
+      }
+    }
+    for(const team of Object.values(teams))for(const item of team.roster){
+      for(const metric of ['dealt','taken','kills','deaths','appearances'])team.total[metric]+=item[metric];
+    }
+    return teams;
+  }
+  function franchisePokemonStat(rosters,replays,teamFor,teamName,species) {
+    const teams=franchiseRosterData(rosters,replays,teamFor);
+    const keyTeam=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+    const t=Object.keys(teams).find(k=>keyTeam(k)===keyTeam(teamName));
+    const roster=t?teams[t].roster:[];
+    const wanted=identity(species);
+    return roster.find(r=>identity(r.species)===wanted) ||
+      roster.find(r=>permanentFormBaseIdentity(r.species)===wanted) ||null;
+  }
+
+  SBL.stats={identity,pokemon,pokemonAsync,pokemonStats,getPokemonStats,pokemonProfile,team,kda,formatKD,franchiseRosterData,franchisePokemonStat};
 })();

@@ -286,6 +286,56 @@
     return data;
   }
 
+  // CP4.168: all roster/FA consumers must project the same transaction-effective
+  // state. No page may treat a stale FA pool entry as available if it is owned.
+  // Historical/archived season views must pass {archived:true} and never have
+  // current trade rows retroactively applied to a finished season.
+  function projectRosterState(settings, trades, options={}) {
+    const source=settings&&typeof settings==='object'?settings:{};
+    const raw=cloneRosters(source.rosters||{});
+    const active=options.archived ? raw : getEffectiveRosters(raw,trades||[],options.now||new Date());
+    const originalPool=Array.isArray(source.freeAgency?.mons)?source.freeAgency.mons:[];
+    const pool=options.archived ? originalPool.slice() : restoreFutureFreeAgencyPool(originalPool,raw,trades||[],options.now||new Date());
+    const owned=new Map();
+    const conflicts=[];
+    for(const [team,mons] of Object.entries(active)) {
+      for(const mon of mons){
+        const species=typeof mon==='string'?mon:mon?.name;
+        const id=key(species);
+        if(!id)continue;
+        if(owned.has(id)&&owned.get(id)!==team)conflicts.push({species,teams:[owned.get(id),team]});
+        else owned.set(id,team);
+      }
+    }
+    // Filter AFTER effective ownership is resolved; never return a drafted
+    // Pokémon as available just because settings.freeAgency.mons is stale.
+    const seen=new Set();
+    const available=pool.filter(mon=>{
+      const id=key(typeof mon==='string'?mon:mon?.name);
+      if(!id||seen.has(id)||owned.has(id))return false;
+      seen.add(id); return true;
+    });
+    return {rosters:active, available, owned, conflicts};
+  }
+  function sortedPokemon(list) {
+    return (Array.isArray(list)?list:[]).slice().sort((a,b)=>{
+      const name=x=>String(typeof x==='string'?x:x?.name||'').trim();
+      return name(a).localeCompare(name(b),undefined,{numeric:true,sensitivity:'base'});
+    });
+  }
+  function filterPokemon(list,query='',options={}) {
+    const q=String(query||'').trim().toLowerCase();
+    const min=options.minPoints==null||options.minPoints===''?null:Number(options.minPoints);
+    const max=options.maxPoints==null||options.maxPoints===''?null:Number(options.maxPoints);
+    return sortedPokemon(list).filter(mon=>{
+      const name=typeof mon==='string'?mon:mon?.name||'';
+      const pts=typeof mon==='string'?NaN:Number(mon?.points);
+      return (!q||String(name).toLowerCase().includes(q)) &&
+        (min===null||(Number.isFinite(pts)&&pts>=min)) &&
+        (max===null||(Number.isFinite(pts)&&pts<=max));
+    });
+  }
+
   SBL.services = SBL.services || {};
   SBL.services.trades = {
     load,
@@ -305,6 +355,9 @@
     formatEffectiveDate,
     getEffectiveRosters,
     restoreFutureFreeAgencyPool,
+    projectRosterState,
+    sortedPokemon,
+    filterPokemon,
     futureAcceptedTrades,
     consumedCount,
     allowance,
