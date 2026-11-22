@@ -45,3 +45,22 @@
 @media (prefers-reduced-motion: reduce) {
   :where(button, input, select, textarea, .card, .panel) { transition: none !important; }
 }
+
+/* CP4.144: one consistent, neutral missing/waiting state sitewide.
+   Uses design tokens rather than hard-coded page colours. */
+:where(.empty-state,.empty,.error-state,.loading-state,.conference-empty){
+  min-height:112px;
+  box-sizing:border-box;
+  padding:clamp(20px,3vw,32px);
+  border:1px dashed var(--border,rgba(160,160,170,.32));
+  border-radius:var(--sbl-panel-radius,14px);
+  background:var(--panel,rgba(35,32,44,.35));
+  color:var(--text-dim,rgba(235,235,240,.68));
+  font-size:14px;
+  line-height:1.55;
+  text-align:center;
+  align-items:center;
+  justify-content:center;
+}
+/* A plain inline "no rows" message should remain modest inside a table/modal. */
+:where(.empty-state,.empty,.error-state,.loading-state,.conference-empty) a{color:var(--accent,var(--text));}
