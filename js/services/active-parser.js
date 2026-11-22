@@ -4,7 +4,16 @@
 (function(){'use strict';
 const S=window.SBL=window.SBL||{};S.replays=S.replays||{};
 const verifiedHash=async source=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(source)))).map(b=>b.toString(16).padStart(2,'0')).join('');
-let current=null,initializing=null;
+let current=null,initializing=null,loadEpoch=0;
+const PARSER_CHANGE_KEY='sbl:active-parser-changed';
+// Cached sandbox code is only a performance optimization, never a second authority.
+// The administrator's activation invalidates this tab and broadcasts to other open tabs.
+function invalidateActiveParser(){
+ loadEpoch++;
+ const stale=current;current=null;initializing=null;
+ try{stale?.close?.();}catch(e){console.warn('Could not close stale parser sandbox:',e);}
+}
+window.addEventListener('storage',e=>{if(e.key===PARSER_CHANGE_KEY)invalidateActiveParser();});
 const NO_PARSER='No uploaded replay parser is active';
 function newSandbox(source){
  return new Promise((resolve,reject)=>{
@@ -27,20 +36,44 @@ function newSandbox(source){
   document.body.appendChild(frame);
  });
 }
-async function active(){if(current)return current;if(initializing)return initializing;
- initializing=(async()=>{const db=S.getSupabase?.();if(!db)throw Error('Supabase unavailable for active parser check');
+async function active(){
+ if(current)return current;
+ if(initializing)return initializing;
+ const expectedEpoch=loadEpoch;
+ const pending=(async()=>{
+  const db=S.getSupabase?.();if(!db)throw Error('Supabase unavailable for active parser check');
   const {data,error}=await db.rpc('sbl_active_parser_source');
   if(error)throw Error('Active parser lookup failed: '+error.message+' (run migration 055)');
   const version=Array.isArray(data)?data[0]:null;
   if(!version)throw Error(NO_PARSER+'; ask a site administrator to upload and activate one in Admin Hub. Replay processing is blocked.');
   if(await verifiedHash(version.source_text)!==version.sha256)throw Error('Active parser checksum mismatch; parsing blocked');
-  const runner=await newSandbox(version.source_text);current={...runner,version:version.version_label,sha256:version.sha256};return current;
- })();try{return await initializing;}finally{initializing=null;}}
+  const runner=await newSandbox(version.source_text);
+  // A new version can be activated while a previous RPC/iframe is loading.
+  // Never let that delayed response overwrite the newly selected version.
+  if(expectedEpoch!==loadEpoch){runner.close();throw Error('Active parser changed during initialization; retry the import.');}
+  current={...runner,version:version.version_label,sha256:version.sha256};return current;
+ })();
+ initializing=pending;
+ try{return await pending;}finally{if(initializing===pending)initializing=null;}
+}
+async function activeParserInfo(){const runner=await active();return {version:runner.version,sha256:runner.sha256};}
+// Refresh once at the start of each import/reprocess batch: this catches parser
+// changes made from other devices, not only this tab or a browser storage event.
+async function refreshActiveParser(){invalidateActiveParser();return activeParserInfo();}
+function isReplayCurrent(replay,info){
+ const saved=String(replay?.parserSourceSha256||'').toLowerCase();
+ return !!saved && saved===String(info?.sha256||'').toLowerCase();
+}
 async function parseLogActive(json,id){const runner=await active();const result=await runner.parse(json,id);
  if(!result||!result.mons||!result.players||!result.luck)throw Error('Active parser returned an invalid replay record');
  result.parserVersionLabel=runner.version;result.parserSourceSha256=runner.sha256;return result;}
 S.replays.parseLogActive=parseLogActive;
 S.replays.activeParserVersion=async()=> (await active()).version;
+S.replays.activeParserInfo=activeParserInfo;
+S.replays.refreshActiveParser=refreshActiveParser;
+S.replays.invalidateActiveParser=invalidateActiveParser;
+S.replays.isReplayCurrent=isReplayCurrent;
+S.replays.parserChangeStorageKey=PARSER_CHANGE_KEY;
 S.replays.validateStagedParser=async(source)=>{const runner=await newSandbox(source);try{
  const makeSample=lines=>({formatid:'gen9nationaldex',log:lines.join('\n')});
  const samples=[
