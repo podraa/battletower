@@ -70,7 +70,7 @@
         return `<span class="pokemon-click profile-event-pokemon" role="button" tabindex="0" data-pokemon="${label}" title="Open ${label} profile">${label}</span>`;
       } catch(e) { return label; }
     };
-    const kd = s.deaths ? (s.kills/s.deaths).toFixed(2) : (s.kills ? '∞' : '0');
+    const kd = SBL.stats.formatKD(s.kills,s.deaths);
     const avg = s.games ? (s.dealt/s.games).toFixed(1) : '0';
     const luckScope = weekFilter || 'ALL';
     const luckRank = typeof luckPokemonRank === 'function' ? luckPokemonRank(s.species, luckScope) : null;
