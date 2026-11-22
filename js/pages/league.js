@@ -132,8 +132,7 @@
     return canonicalPokemonName(name, candidates);
   }
   function teamFor(username){
-    const key = (username||'').trim().toLowerCase();
-    return DASH.teamMap[key] || (username||'').trim() || 'Unknown';
+    return SBL.domain.replayTeamLabel(DASH,username);
   }
   // Aggregates this coach's season stats for one species across every stored
   // replay where that Pokémon appeared on the coach's side.

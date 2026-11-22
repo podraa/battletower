@@ -54,7 +54,7 @@ function norm(s){
 }
 function teamKey(s){return norm(s).replace(/[^a-z0-9]/g,'')}
 function sameTeam(a,b){return teamKey(a)===teamKey(b)}
-function teamFor(u){const raw=String(u||'').trim();const k=raw.toLowerCase();return STATE.teamMap[k]||raw||'Unknown'}
+function teamFor(u){return SBL.domain.replayTeamLabel(STATE,u)}
 function spriteId(s){ return SBL.pokemon.normalizeName(s); }
 function spriteCandidates(s){ return SBL.pokemon.candidateIds(s); }
 function sprite(s,cls='sprite'){ return SBL.pokemon.spriteMarkup(s, cls); }
@@ -666,22 +666,12 @@ async function franchiseMons(team){
   return enriched;
 }
 
-const TYPE_NAMES=['Normal','Fire','Water','Electric','Grass','Ice','Fighting','Poison','Ground','Flying','Psychic','Bug','Rock','Ghost','Dragon','Dark','Steel','Fairy'];
-const TYPE_CHART={
-  Normal:{Rock:.5,Steel:.5,Ghost:0},Fire:{Fire:.5,Water:.5,Grass:2,Ice:2,Bug:2,Rock:.5,Dragon:.5,Steel:2},Water:{Fire:2,Water:.5,Grass:.5,Ground:2,Rock:2,Dragon:.5},Electric:{Water:2,Electric:.5,Grass:.5,Ground:0,Flying:2,Dragon:.5},Grass:{Fire:.5,Water:2,Grass:.5,Poison:.5,Ground:2,Flying:.5,Bug:.5,Rock:2,Dragon:.5,Steel:.5},Ice:{Fire:.5,Water:.5,Grass:2,Ground:2,Flying:2,Dragon:2,Ice:.5,Steel:.5},Fighting:{Normal:2,Ice:2,Rock:2,Dark:2,Steel:2,Poison:.5,Flying:.5,Psychic:.5,Bug:.5,Ghost:0,Fairy:.5},Poison:{Grass:2,Poison:.5,Ground:.5,Rock:.5,Ghost:.5,Steel:0,Fairy:2},Ground:{Fire:2,Electric:2,Grass:.5,Poison:2,Flying:0,Bug:.5,Rock:2,Steel:2},Flying:{Grass:2,Electric:.5,Fighting:2,Bug:2,Rock:.5,Steel:.5},Psychic:{Fighting:2,Poison:2,Psychic:.5,Steel:.5,Dark:0},Bug:{Fire:.5,Grass:2,Fighting:.5,Poison:.5,Flying:.5,Psychic:2,Ghost:.5,Dark:2,Steel:.5,Fairy:.5},Rock:{Fire:2,Ice:2,Flying:2,Bug:2,Fighting:.5,Ground:.5,Steel:.5},Ghost:{Normal:0,Psychic:2,Ghost:2,Dark:.5},Dragon:{Dragon:2,Steel:.5,Fairy:0},Dark:{Fighting:.5,Psychic:2,Ghost:2,Dark:.5,Fairy:.5},Steel:{Fire:.5,Water:.5,Electric:.5,Ice:2,Rock:2,Fairy:2,Steel:.5},Fairy:{Fire:.5,Fighting:2,Poison:.5,Dragon:2,Dark:2,Steel:.5}
-};
-function normalizeTypeName(type){
-  const raw=String(type||'').trim().toLowerCase();
-  if(!raw)return '';
-  return raw.charAt(0).toUpperCase()+raw.slice(1);
-}
-function normalizedTypes(types){
-  return Array.from(new Set((Array.isArray(types)?types:[]).map(normalizeTypeName).filter(t=>TYPE_NAMES.includes(t))));
-}
-function typeChartMultiplier(attacking,defending){
-  const a=normalizeTypeName(attacking), d=normalizeTypeName(defending);
-  return TYPE_CHART[a]?.[d]??1;
-}
+// All matchup calculations now use the shared service; no page-local chart.
+const MATCHUPS=window.SBL?.matchups;
+if(!MATCHUPS)throw new Error('Matchup engine unavailable.');
+const TYPE_NAMES=MATCHUPS.types;
+const normalizedTypes=MATCHUPS.normalizedTypes;
+const typeChartMultiplier=MATCHUPS.multiplier;
 const TYPE_CACHE=new Map();
 const POKEMON_DATA_CACHE=new Map();
 function pokemonDexCandidates(species){
@@ -775,13 +765,9 @@ async function fetchTypes(species){
 
 function typePills(types){return types.length?`<div class="type-row">${types.map(t=>`<span class="type-pill type-${esc(t)}">${esc(t)}</span>`).join('')}</div>`:'<div class="type-row"><span class="type-pill type-unknown">Type unknown</span></div>'}
 function typePill(type){const t=String(type||'').trim();return t?`<span class="type-pill type-${esc(t)}">${esc(t)}</span>`:''}
-function combinedMultiplier(attackingTypes,defendingTypes){if(!attackingTypes.length||!defendingTypes.length)return null;return Math.max(...attackingTypes.map(a=>defendingTypes.reduce((m,d)=>m*typeChartMultiplier(a,d),1)))}
-function defensiveMultiplier(attackingType,defendingTypes){if(!defendingTypes.length)return null;return defendingTypes.reduce((m,d)=>m*typeChartMultiplier(attackingType,d),1)}
-function defensiveTypeEffectiveness(types){
-  const defs=normalizedTypes(types);
-  if(!defs.length)return TYPE_NAMES.map(type=>({type,mult:null}));
-  return TYPE_NAMES.map(type=>({type,mult:defensiveMultiplier(type,defs)}));
-}
+function combinedMultiplier(attackingTypes,defendingTypes){return MATCHUPS.bestStabMultiplier(attackingTypes,defendingTypes)}
+function defensiveMultiplier(attackingType,defendingTypes){return MATCHUPS.defense(attackingType,defendingTypes)}
+function defensiveTypeEffectiveness(types){return MATCHUPS.defensiveEffectiveness(types)}
 function matchupLabel(mult){if(mult===null)return ['Unknown','matchup-neutral'];if(mult>=4)return ['Extremely effective','matchup-good'];if(mult>=2)return ['Super effective','matchup-good'];if(mult===0)return ['Immune','matchup-bad'];if(mult<=.25)return ['Highly resisted','matchup-bad'];if(mult<=.5)return ['Resisted','matchup-bad'];return ['Neutral','matchup-neutral']}
 function scoutingEffectiveness(mult){if(mult===null)return 'Unknown';if(mult>=4)return 'Extremely effective';if(mult>=2)return 'Super effective';if(mult===0)return 'Immune';if(mult<=.25)return 'Highly resisted';if(mult<=.5)return 'Resisted';return 'Neutral'}
 function fmtMult(v){if(v===null)return '?';if(v===0)return '0×';if(v===.25)return '¼×';if(v===.5)return '½×';return Number.isInteger(v)?v+'×':v.toFixed(2)+'×'}

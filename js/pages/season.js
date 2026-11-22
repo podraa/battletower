@@ -232,8 +232,7 @@
     return pokemonLink(species, withSprite ? `${SBL.pokemon.spriteMarkup(species,spriteClass)}<span>${SBL.pokemon.escapeHtml(species)}</span>` : `<span>${SBL.pokemon.escapeHtml(species)}</span>`);
   }
   function teamFor(username){
-    const key = (username||'').trim().toLowerCase();
-    return STATE.teamMap[key] || (username||'').trim() || 'Unknown';
+    return SBL.domain.replayTeamLabel(STATE,username);
   }
 
   // ---- CP4.63: team colours, owner usernames and the roster pop-out ----

@@ -732,18 +732,7 @@ Choose Cancel to keep draft status unchanged.`);
       .replace(/[_-]+/g,'');
   }
   function teamFor(username){
-    const raw = String(username || '').trim();
-    if(!raw) return 'Unknown';
-    // First honor the exact lower-cased mapping used by existing saved data.
-    const exact = STATE.teamMap[raw.toLowerCase()];
-    if(exact) return exact;
-    // Then support harmless Showdown username variations such as
-    // Dossa_37 / dossa37 without requiring the mapping to be entered twice.
-    const key = usernameKey(raw);
-    for(const [mappedUser, team] of Object.entries(STATE.teamMap || {})){
-      if(usernameKey(mappedUser) === key) return team;
-    }
-    return raw;
+    return SBL.domain.replayTeamLabel(STATE,username);
   }
   // groups values that only differ by case/whitespace under one canonical label
   // (the first-seen casing) when "case-insensitive names" is on in Settings —
@@ -7162,6 +7151,16 @@ function renderDraft(){ return drawDraft(); }
       ${showFranchises ? `
       <div class="admin-section"><div class="admin-section-title"><div><h2>Showdown Team Mapping</h2><div class="note">Manage the mapping between Showdown usernames and league franchises, then clean up likely duplicates.</div></div></div>
       <div class="panel"><div class="admin-subsection"><h3>Showdown → franchise mapping</h3><div class="note">Map each Pokémon Showdown username to a franchise in the currently selected league. Replay imports use this mapping to attribute results to the correct SBL franchise.</div><div id="mapRows" style="margin-top:12px;"></div><div class="map-row"><input type="text" id="newUser" placeholder="Showdown username"><select id="newTeam"><option value="">Loading league franchises…</option></select><button class="ghost small" id="addMap">Add mapping</button></div></div></div>
+      <div class="panel"><div class="admin-subsection"><h3>Known Showdown alts (account-linked)</h3>
+        <div class="note">Assign as many known Showdown names as needed to one league account. The account's current franchise is used automatically in active-season replay statistics, even after a franchise rename. One alias cannot belong to two accounts in the same league.</div>
+        <div class="map-row" style="align-items:flex-start;flex-wrap:wrap;margin-top:12px;">
+          <textarea id="showdownAltNames" rows="2" placeholder="Showdown names (one per line, or comma-separated)" style="flex:2;min-width:210px;"></textarea>
+          <select id="showdownAltAccount" style="flex:1;min-width:175px;"><option value="">Loading league accounts…</option></select>
+          <button class="primary small" id="addShowdownAlts">Assign names</button>
+        </div>
+        <div id="showdownAltStatus" class="note" aria-live="polite"></div>
+        <div id="showdownAltRows" style="margin-top:12px;"><div class="empty-state">Loading saved aliases…</div></div>
+      </div></div>
       <div class="panel"><div class="admin-subsection"><h3>Duplicate users</h3><div class="note">Review usernames that look like the same person typed differently and merge them into the canonical mapping.</div><div id="dupPlayers" style="margin-top:12px;"></div></div></div>
       <div class="panel"><div class="admin-subsection"><h3>Duplicate franchises</h3><div class="note">Review likely duplicate team tags whose rosters overlap heavily and merge them under the established franchise name.</div><div id="dupTeams" style="margin-top:12px;"></div></div></div></div>` : ''}
       ${showSystem ? `
@@ -7223,6 +7222,100 @@ function renderDraft(){ return drawDraft(); }
         mapRows.innerHTML=`<div class="empty-state">Could not load this league's franchise definitions: ${SBL.pokemon.escapeHtml(error?.message||error)}</div>`;
       }
     })();
+
+    // CP4.166 — persisted account-linked Showdown aliases. This editor does
+    // not write season-owned teamMap strings; the replay load overlay derives
+    // current franchise names from the authoritative franchise assignment.
+    const altHost=document.getElementById('showdownAltRows');
+    const altStatus=document.getElementById('showdownAltStatus');
+    const altSelect=document.getElementById('showdownAltAccount');
+    const altButton=document.getElementById('addShowdownAlts');
+    const altInput=document.getElementById('showdownAltNames');
+    let altAccounts=[],altRows=[],altFranchises=[],altOwners=[];
+    const altEscape=value=>SBL.pokemon.escapeHtml(String(value??''));
+    const altUserName=userId=>String(altAccounts.find(a=>String(a.id)===String(userId))?.username||'Unknown account');
+    const altFranchiseName=userId=>{
+      const owner=altOwners.find(a=>String(a.user_id)===String(userId));
+      return String(altFranchises.find(f=>String(f.id)===String(owner?.franchise_id))?.name||'No active franchise');
+    };
+    const drawAliases=()=>{
+      if(!altHost?.isConnected)return;
+      altHost.innerHTML=altRows.length ? altRows.map(row=>`<div class="map-row" style="align-items:center;flex-wrap:wrap;">
+          <div style="flex:1;min-width:210px"><strong>${altEscape(row.showdown_username)}</strong>
+            <div class="note">${altEscape(altUserName(row.user_id))} · ${altEscape(altFranchiseName(row.user_id))}</div></div>
+          <button type="button" class="ghost small danger-btn" data-showdown-alt-remove="${altEscape(row.id)}">Remove</button>
+        </div>`).join(''):'<div class="empty-state">No account-linked Showdown aliases yet.</div>';
+      altHost.querySelectorAll('[data-showdown-alt-remove]').forEach(button=>button.addEventListener('click',async()=>{
+        const row=altRows.find(a=>String(a.id)===String(button.dataset.showdownAltRemove));
+        if(!row)return;
+        if(!confirm(`Remove ${row.showdown_username} from ${altUserName(row.user_id)}?`))return;
+        button.disabled=true;
+        try{
+          await SBL.replays.removeShowdownAlias(selectedLeagueId,row.id,supabase);
+          altRows=altRows.filter(a=>a.id!==row.id);
+          altStatus.textContent=`Removed ${row.showdown_username}.`;
+          // Discard only the live overlay; permanent manual mappings remain.
+          delete STATE.teamMap[row.showdown_username.trim().toLowerCase()];
+          await logAdminAction('remove_showdown_alias',`Removed known Showdown name ${row.showdown_username} from ${altUserName(row.user_id)}.`,{leagueId:selectedLeagueId,aliasId:row.id,userId:row.user_id}).catch(()=>{});
+          drawAliases(); renderTicker();
+        }catch(error){altStatus.textContent=error?.message||String(error);button.disabled=false;}
+      }));
+    };
+    const refreshAliases=async()=>{
+      if(!selectedLeagueId||!altHost?.isConnected)return;
+      altStatus.textContent='Loading account mappings…';
+      try{
+        const [users,aliases,owners,franchises]=await Promise.all([
+          supabase.rpc('sbl_admin_list_league_users',{p_league_id:selectedLeagueId}),
+          SBL.replays.listShowdownAliases(selectedLeagueId,supabase),
+          supabase.from('franchise_assignments').select('user_id,franchise_id').eq('league_id',selectedLeagueId).eq('status','active'),
+          SBL.leagueDb.listFranchises(selectedLeagueId,supabase)
+        ]);
+        if(users.error)throw users.error;
+        if(owners.error)throw owners.error;
+        altAccounts=(users.data||[]).filter(a=>String(a.membership_status||'').toLowerCase()==='active' && String(a.member_type||'player')==='player');
+        altRows=aliases;altOwners=owners.data||[];altFranchises=franchises||[];
+        altSelect.innerHTML='<option value="">Select league account…</option>'+altAccounts.map(a=>`<option value="${altEscape(a.id)}">${altEscape(a.username||'Unnamed account')} — ${altEscape(altFranchiseName(a.id))}</option>`).join('');
+        altStatus.textContent=`${altRows.length} saved account-linked Showdown name${altRows.length===1?'':'s'} in this league.`;
+        drawAliases();
+      }catch(error){
+        altStatus.textContent='Unable to load aliases. Check that SQL migration 058 has been applied: '+(error?.message||error);
+        altHost.innerHTML='<div class="empty-state">The alias list could not be loaded.</div>';
+        altSelect.innerHTML='<option value="">Alias setup unavailable</option>';
+      }
+    };
+    altButton?.addEventListener('click',async()=>{
+      const userId=String(altSelect?.value||'');
+      const names=[...new Set(String(altInput?.value||'').split(/[\n,]+/).map(x=>x.trim()).filter(Boolean))];
+      if(!selectedLeagueId||!userId||!names.length){altStatus.textContent='Select a league account and enter at least one Showdown name.';return;}
+      if(!altAccounts.some(a=>String(a.id)===userId)){altStatus.textContent='Select an active member of this league.';return;}
+      const knownKeys=new Set(altRows.map(a=>SBL.replays.showdownAliasKey(a.showdown_username)));
+      const incomingKeys=new Set();
+      for(const name of names){
+        const key=SBL.replays.showdownAliasKey(name);
+        if(!key||name.length>80){altStatus.textContent='Every Showdown name must contain letters/numbers and be at most 80 characters.';return;}
+        if(knownKeys.has(key)){altStatus.textContent=`${name} is already assigned in this league. Remove it first to reassign.`;return;}
+        if(incomingKeys.has(key)){altStatus.textContent=`Duplicate name in this submission: ${name}.`;return;}
+        incomingKeys.add(key);
+      }
+      altButton.disabled=true;
+      let added=0;
+      try{
+        for(const name of names){
+          // Database UNIQUE(league_id,username_key) is the final guard, even
+          // when two admins add the same name at the same moment.
+          const row=await SBL.replays.addShowdownAlias(selectedLeagueId,userId,name,supabase);
+          altRows.push(row);added++;
+          const franchise=altFranchiseName(userId);
+          if(franchise!=='No active franchise')STATE.teamMap[name.toLowerCase()]=franchise;
+        }
+        altInput.value='';
+        altStatus.textContent=`Assigned ${added} Showdown name${added===1?'':'s'} to ${altUserName(userId)}.`;
+        await logAdminAction('add_showdown_alias',`Assigned ${added} known Showdown username(s) to ${altUserName(userId)}.`,{leagueId:selectedLeagueId,userId,names}).catch(()=>{});
+      }catch(error){altStatus.textContent=`Saved ${added} name(s); ${error?.message||error}. Refresh to review.`;}
+      finally{altButton.disabled=false;altRows.sort((a,b)=>String(a.showdown_username).localeCompare(String(b.showdown_username)));drawAliases();renderTicker();}
+    });
+    refreshAliases();
 
     const dupPlayersEl = document.getElementById('dupPlayers');
     function drawDupPlayers(){
