@@ -516,6 +516,19 @@
     'tatsugiri-stretchy':'tatsugiri-stretchy'
   };
 
+  // Shared exact-form PokeAPI identity for newer and classic Megas. Match Prep
+  // must use these IDs too: guessing names like mega-raichu-x is unreliable.
+  function megaPokeapiId(name){
+    const mega=megaParts(name);
+    if(!mega)return null;
+    const key=String(MEGA_FORM_FILES[mega.base]||(mega.base+'-'+mega.suffix)).toLowerCase();
+    return PRESENTATION_MEGA_IDS[key]||null;
+  }
+  function isNewMega(name){
+    const id=megaPokeapiId(name);
+    return Number.isInteger(id)&&id>=10278;
+  }
+
   function spriteUrlCandidates(name,styleOverride){
     const showcase=styleOverride==='hd';
     const style=styleOverride==='2d'?'2d':styleOverride==='3d'?'3d':showcase?'3d':getSpriteStyle();
@@ -561,9 +574,10 @@
       const megaKey=String(MEGA_FORM_FILES[mega.base] || (mega.base+'-'+mega.suffix)).toLowerCase();
       const staticAsset=MEGA_STATIC_ASSETS[megaKey];
       const formId=PRESENTATION_MEGA_IDS[megaKey];
-      if(showcase&&formId){
-        // Try form-specific full artwork before the 512px HOME render.
-        // Missing artwork automatically falls through via handleSpriteError().
+      if((showcase||(style==='3d'&&isNewMega(name)))&&formId){
+        // Presentation and regular HOME views share exact-form HD assets for
+        // newer Megas. This only changes the image source; normal page CSS
+        // keeps identical sprite box dimensions across all Pokémon.
         urls.push(`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${formId}.png`);
         urls.push(`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/${formId}.png`);
       }
@@ -640,6 +654,8 @@
   window.SBL.pokemon.spriteCandidates=spriteCandidates;
   window.SBL.pokemon.spriteUrl=spriteUrl;
   window.SBL.pokemon.spriteUrlCandidates=spriteUrlCandidates;
+  window.SBL.pokemon.megaPokeapiId=megaPokeapiId;
+  window.SBL.pokemon.isNewMega=isNewMega;
   window.SBL.pokemon.isMega=isMega;
   window.SBL.pokemon.hasAlternateForm=hasAlternateForm;
   window.SBL.pokemon.showdownStatsIdCandidates=showdownStatsIdCandidates;

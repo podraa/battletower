@@ -157,6 +157,26 @@
     }
   }
 
+  // CP4.155: small, league/season-scoped change probe for passive dashboards.
+  // Never fetch replay_data or season.data just to check whether anything changed.
+  // Null means probing is unsupported; callers then use their normal full refresh.
+  async function passiveFingerprint(client) {
+    const db = client || SBL.getSupabase?.();
+    const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
+    const seasonId = SBL.leagueDb?.selectedSeasonId?.(leagueId) || '';
+    if (!db || !leagueId || !seasonId || !SBL.leagueDb?.isUuid?.(leagueId) || !SBL.leagueDb?.isUuid?.(seasonId)) return null;
+    const [season, league, replay, trades] = await Promise.all([
+      db.from('league_seasons').select('id,updated_at,status').eq('league_id',leagueId).eq('id',seasonId).maybeSingle(),
+      db.from('leagues').select('id,updated_at').eq('id',leagueId).maybeSingle(),
+      db.from('league_replays').select('replay_id,updated_at').eq('league_id',leagueId).eq('season_id',seasonId),
+      db.from('trade_requests').select('id,updated_at,status').eq('league_id',leagueId)
+    ]);
+    if (season.error || league.error || replay.error || trades.error || !season.data || !league.data) return null;
+    const replayRows = (replay.data || []).map(r => [r.replay_id,r.updated_at||'']).sort((a,b)=>String(a[0]).localeCompare(String(b[0])));
+    const tradeRows = (trades.data || []).map(r => [r.id,r.updated_at||'',r.status||'']).sort((a,b)=>String(a[0]).localeCompare(String(b[0])));
+    return JSON.stringify([leagueId,seasonId,season.data.updated_at||'',season.data.status||'',league.data.updated_at||'',replayRows,tradeRows]);
+  }
+
   function partition(rows) {
     const list = Array.isArray(rows) ? rows : [];
     let sharedState = null;
@@ -319,6 +339,7 @@
   }
 
   SBL.replays = {
+    passiveFingerprint,
     STATE_ID,
     ROSTERS_ID,
     FREE_AGENCY_ID,
@@ -545,6 +566,8 @@
     let lastMove = null; // {source, target, move}
     let currentTurn = 0;
     let winner = null;
+    const parseWarnings=[];
+    const transformedSlots=new Set();
     // Track side screens independently so we can infer Light Clay only when a
     // screen is demonstrably active for longer than the normal 5 turns.
     // Showdown does not print the held item for this case, but it does print
@@ -665,7 +688,11 @@
     function miscInc(bucket,key,n=1){ if(!key) return; bucket[key]=(Number(bucket[key])||0)+Number(n||0); }
     function miscPokemon(stats){
       if(!stats) return null;
-      const key=String(stats.side||'')+'|'+normName(canonicalBattleSpecies(stats.species||''));
+      // Keep miscellaneous counters on a PHYSICAL battle identity until the
+      // parser has processed Illusion reveals. Using displayed species here
+      // permanently charges the disguised species for pre-reveal events.
+      const key=String(stats.id||'');
+      if(!key) return null;
       if(!misc.pokemon[key]) misc.pokemon[key]={side:stats.side,species:canonicalBattleSpecies(stats.species||''),moves:{},switches:0,leads:0,downs:0,fallen:0,crits:0,flinches:0,statusesInflicted:0,statusesSuffered:0,totalActiveTurns:0,maxActiveTurns:0,shortestLifespan:null,damageDealt:0,damageTaken:0,largestHit:0};
       return misc.pokemon[key];
     }
@@ -865,6 +892,9 @@
       const k = monKey(slot);
       if(k && mons[k]) mons[k].species = newSpecies;
       if(k && luckPokemon[k]) luckPokemon[k].species = newSpecies;
+      // All miscellaneous events already stored against this individual's
+      // identity now follow its revealed species as well.
+      if(k && misc.pokemon[k]) misc.pokemon[k].species = canonicalBattleSpecies(newSpecies);
     }
 
 
@@ -1008,6 +1038,7 @@
         // Capture the individual that is leaving BEFORE replacing the slot.
         // The slot is reused after switches, so this must be resolved first.
         const oldMonKey = slots[slot] ? monKey(slot) : null;
+        transformedSlots.delete(slot);
         // Use the battle nickname as the physical identity. This survives
         // ordinary switches and, unlike species, cannot be stolen by a Zoroark
         // Illusion that temporarily displays as another species.
@@ -1045,6 +1076,15 @@
         delete pendingDelayedHit[slot];
         if(oldMonKey) delete residualSourceByMon[oldMonKey];
         // ensureMon already ran above.
+      } else if(cmd === '-transform'){
+        // Transform changes appearance/moves, never the owner's species or
+        // battle identity. The copied form must not acquire KO/usage credit.
+        const slotFull=parts[2]||'';
+        const slot=slotFull.split(':')[0].trim();
+        if(slot&&slots[slot]){
+          transformedSlots.add(slot);
+          parseWarnings.push({turn:currentTurn,code:'transform',detail:'A Pokémon transformed; copied moves are credited to its original owner, not its target.'});
+        }
       } else if(cmd === 'replace'){
         // Illusion breaking: Showdown reveals the true species of whatever
         // is currently in this slot. No switch occurs — the same physical
@@ -1053,7 +1093,12 @@
         const slotFull = parts[2];
         const slot = slotFull ? slotFull.split(':')[0].trim() : null;
         const species = parts[3] ? parts[3].split(',')[0].trim() : '';
-        if(slot && species) migrateSlotSpecies(slot, species);
+        if(slot && species){
+          if(transformedSlots.has(slot)){
+            parseWarnings.push({turn:currentTurn,code:'transform-reveal-ambiguous',detail:'Species reveal during Transform retained original battle identity; review its individual events.'});
+          } else migrateSlotSpecies(slot, species);
+          parseWarnings.push({turn:currentTurn,code:'illusion-reveal',detail:'A displayed species was replaced by a true identity. Per-individual move and damage attribution was corrected; some pre-reveal battle milestones may still need review.'});
+        }
       } else if(cmd === '-formechange' || cmd === 'detailschange'){
         // Mid-battle forme change with no accompanying switch — e.g.
         // Terapagos Terastallizing into Terapagos-Terastal, or any other
@@ -1064,7 +1109,13 @@
         const slotFull = parts[2];
         const slot = slotFull ? slotFull.split(':')[0].trim() : null;
         const species = parts[3] ? parts[3].split(',')[0].trim() : '';
-        if(slot && species) migrateSlotSpecies(slot, species);
+        if(slot && species){
+          if(transformedSlots.has(slot)) {
+            // A Transform-copy appearance is not a change of the Pokémon's
+            // underlying identity. Preserve the owner for league statistics.
+            parseWarnings.push({turn:currentTurn,code:'transform-form',detail:'Form change while transformed was not treated as a change of owner species.'});
+          } else migrateSlotSpecies(slot, species);
+        }
       } else if(cmd === 'move'){
         finalizePendingStatusChecks();
         const source = parts[2] ? parts[2].split(':')[0].trim() : null;
@@ -1139,7 +1190,9 @@
         // at the -end event and carry it into the following damage event.
         const slotFull = parts[2];
         const effect = parts.slice(3).join('|');
-        
+        if(/^(?:move:\s*)?transform$/i.test(effect.trim()) && slotFull){
+          transformedSlots.delete(slotFull.split(':')[0].trim());
+        }
         if(slotFull){
           const slot = slotFull.split(':')[0].trim();
           const mk = monKey(slot);
@@ -1906,6 +1959,28 @@
     // on being behind in actual remaining Pokémon, not on KO credit.
     accountComebackDeficitThrough(currentTurn + 1);
     misc.longestBattle=Math.max(0,currentTurn);
+    // Aggregate per-identity miscellaneous ledgers only AFTER every Illusion
+    // reveal/form change has been processed. A disguised Zoroark can no longer
+    // leak its earlier move/switch/status counts into the disguise's species.
+    const finalMiscPokemon={};
+    for(const [physicalId, record] of Object.entries(misc.pokemon)){
+      const identity=mons[physicalId];
+      const species=canonicalBattleSpecies(identity?.species||record.species||'');
+      const side=String(identity?.side||record.side||'');
+      if(!species||!side)continue;
+      const key=side+'|'+normName(species);
+      if(!finalMiscPokemon[key]) finalMiscPokemon[key]={...record,side,species,moves:{...(record.moves||{})}};
+      else {
+        const target=finalMiscPokemon[key];
+        for(const name of ['switches','leads','downs','fallen','crits','flinches','statusesInflicted','statusesSuffered','totalActiveTurns','damageDealt','damageTaken'])
+          target[name]=(Number(target[name])||0)+(Number(record[name])||0);
+        for(const [move,count] of Object.entries(record.moves||{})) target.moves[move]=(Number(target.moves[move])||0)+(Number(count)||0);
+        target.maxActiveTurns=Math.max(Number(target.maxActiveTurns)||0,Number(record.maxActiveTurns)||0);
+        if(Number.isFinite(record.shortestLifespan)) target.shortestLifespan=target.shortestLifespan==null?record.shortestLifespan:Math.min(target.shortestLifespan,record.shortestLifespan);
+        target.largestHit=Math.max(Number(target.largestHit)||0,Number(record.largestHit)||0);
+      }
+    }
+    misc.pokemon=finalMiscPokemon;
     const battleEvents=Object.values(misc.pokemon);
     const switchTotal=Number(misc.switches.p1||0)+Number(misc.switches.p2||0);
     misc.mostSwitchesInBattle={count:switchTotal,replayId};
@@ -2049,8 +2124,9 @@
       for(const k of ['crits','critLuck','dodges','moveDodgeLuck','lowAccuracyHits','lowAccuracyHitLuck','lowAccuracyDodges','statusDodgeLuck','secondaryProcs','secondaryLuck','secondaryDodges','secondaryDodgeLuck','flinches','flinchLuck','confusionSelfHits','confusionLuck','protectSuccesses','protectLuck','fullParalysis','paralysisDodgeLuck','paralysisDodges','sleepTurns','sleepEvents','sleepDurationLuck','freezeTurns','freezeEvents','freezeDurationLuck']) out[k]+=Number(l[k]||0);
       out.luckEvents.push(...(l.luckEvents||[]));
     }
-    return { parserVersion: 7, id: replayId, format: json.formatid || json.format || '', uploadtime: json.uploadtime || null,
-      players, mons:aggregatedMons, winner, teamRoster, luck, luckPokemon:aggregatedLuckPokemon, misc
+    return { parserVersion: 8, id: replayId, format: json.formatid || json.format || '', uploadtime: json.uploadtime || null,
+      players, mons:aggregatedMons, winner, teamRoster, luck, luckPokemon:aggregatedLuckPokemon, misc,
+      parseWarnings
       };
   }
   // Shared replay persistence API. Page UIs should not reach directly into

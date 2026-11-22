@@ -21,6 +21,8 @@
     x.pool=Array.isArray(x.pool)?x.pool:[];
     x.order=Array.isArray(x.order)?x.order.map(String):[];
     x.picks=Array.isArray(x.picks)?x.picks:[];
+    x.skippedPicks=Array.isArray(x.skippedPicks)?x.skippedPicks:[];
+    x.endedTeams=x.endedTeams&&typeof x.endedTeams==='object'?x.endedTeams:{};
     x.currentPick=Math.max(0,Number(x.currentPick)||0);
     return x;
   }
@@ -59,6 +61,7 @@
     d.picks.push({poolId:pick.poolId,name:pick.name,points:pick.points,team:pick.team,pickNumber:pick.pickNumber,ts:pick.ts,madeBy:pick.madeBy});
     if(d.mode==='ordered'){
       d.currentPick=Math.max(d.currentPick,pick.pickNumber);
+      advancePastEndedTeams(d);
       if(d.currentPick>=d.order.length) d.status='complete';
     }
     const rosters=Object.assign({},next.settings.rosters||{});
@@ -298,21 +301,43 @@
     const candidates=[...(draft?.order||[]),...Object.keys(draft?.budgets||{}),...Object.keys(draft?.rosters||{}),...Object.keys(draft?.franchises||{}),...(draft?.picks||[]).map(p=>p.team)];
     return candidates.find(name=>teamKey(name)===teamKey(team)) || String(team||'').trim();
   }
+  function hasSkippedSlot(draft,index,team){
+    return (draft.skippedPicks||[]).some(x=>Number(x.slot)===index+1 && teamKey(x.team)===teamKey(team));
+  }
+  function addSkippedSlot(draft,index,team,reason){
+    draft.skippedPicks=Array.isArray(draft.skippedPicks)?draft.skippedPicks:[];
+    if(hasSkippedSlot(draft,index,team)) return false;
+    draft.skippedPicks.push({kind:'skip',team:String(team),slot:index+1,reason:String(reason||'Commissioner skipped this pick'),ts:new Date().toISOString()});
+    return true;
+  }
+  function endedTeamRecord(draft,team){
+    const key=Object.keys(draft.endedTeams||{}).find(k=>teamKey(k)===teamKey(team));
+    return key ? draft.endedTeams[key] : null;
+  }
+  function addSkippedSlot(draft,index,team,reason){
+    draft.skippedPicks=Array.isArray(draft.skippedPicks)?draft.skippedPicks:[];
+    if(draft.skippedPicks.some(x=>Number(x.slot)===index+1&&teamKey(x.team)===teamKey(team))) return false;
+    draft.skippedPicks.push({kind:'skip',team:String(team),slot:index+1,reason:String(reason||'Commissioner skipped this pick'),ts:new Date().toISOString()});
+    return true;
+  }
+  function advancePastEndedTeams(draft){
+    if(draft.mode!=='ordered') return 0;
+    let advanced=0;
+    while(draft.currentPick<draft.order.length){
+      const team=String(draft.order[draft.currentPick]||'').trim();
+      const ended=endedTeamRecord(draft,team);
+      if(!ended) break;
+      addSkippedSlot(draft,draft.currentPick,team,'Franchise ended drafting: '+(ended.reason||'Commissioner decision'));
+      draft.currentPick++; advanced++;
+    }
+    if(draft.currentPick>=draft.order.length) draft.status='complete';
+    return advanced;
+  }
   async function advanceEndedTeams(){
-    return mutate((draft)=>{
+    return mutate(draft=>{
       if(draft.status!=='live'||draft.mode!=='ordered')return false;
-      const ended=draft.endedTeams||{};
-      let changed=false;
-      while(draft.currentPick<draft.order.length){
-        const team=draft.order[draft.currentPick];
-        const key=Object.keys(ended).find(k=>teamKey(k)===teamKey(team));
-        if(!key)break;
-        draft.skippedPicks=Array.isArray(draft.skippedPicks)?draft.skippedPicks:[];
-        draft.skippedPicks.push({kind:'skip',team:String(team),slot:draft.currentPick+1,reason:'Franchise has finished drafting',ts:new Date().toISOString()});
-        draft.currentPick++;changed=true;
-      }
-      if(draft.currentPick>=draft.order.length)draft.status='complete';
-      return changed?{kind:'advance_ended_teams',currentPick:draft.currentPick}:false;
+      const advanced=advancePastEndedTeams(draft);
+      return advanced?{kind:'advance_ended_teams',advanced,currentPick:draft.currentPick}:false;
     },{attempts:6,verify:(committed,result)=>{
       const d=normaliseDraft(committed.settings?.draft);
       return !result || d.currentPick>=result.currentPick;
@@ -323,7 +348,7 @@
     const c=await ensureCtx();
     const current=base || await read();
     const canonicalTeam=canonicalDraftTeam(current?.settings?.draft,team);
-    if(current?.settings?.draft?.endedTeams && current.settings.draft.endedTeams[canonicalTeam]) throw new Error('This franchise has finished drafting. The commissioner must reopen it before another pick.');
+    if(endedTeamRecord(current?.settings?.draft||{},canonicalTeam)) throw new Error('This franchise has finished drafting and cannot make further picks.');
     // Mega rule (max 2 per team; the minimum of 1 is enforced on a team's last turn).
     // A commissioner override bypasses it, like the other pick rules.
     if(SBL.draftDash){
@@ -370,7 +395,9 @@
       if(!pick){
         throw new Error('The pick was accepted by the database but the updated draft state could not be read back.');
       }
-      return {changed:true,state,result:{kind:'pick',poolId:String(poolId),team:String(team),pickNumber:Number(pick.pickNumber)}};
+      try{await advanceEndedTeams();}catch(e){console.warn('Could not advance franchises that have finished drafting:',e);}
+      const finalState=await read();
+      return {changed:true,state:finalState,result:{kind:'pick',poolId:String(poolId),team:String(team),pickNumber:Number(pick.pickNumber)}};
     }
 
     // The fallback is deliberately retained for deployments where the RPC has
@@ -381,6 +408,7 @@
       if(draft.status!=='live') throw new Error('The draft is not live.');
       const target=draft.pool.find(m=>String(m.id)===String(poolId));
       if(!target || target.drafted) throw new Error('That Pokémon is no longer available.');
+      if(endedTeamRecord(draft,team)) throw new Error(team+' has finished drafting and cannot make further picks.');
       const currentTeam=draft.mode==='ordered' ? draft.order[draft.currentPick] : team;
       if(!currentTeam || teamKey(currentTeam)!==teamKey(team)) throw new Error('It is not your turn.');
       const spent=draft.picks.filter(p=>teamKey(p.team)===teamKey(team)).reduce((n,p)=>n+(Number(p.points)||0),0);
@@ -392,6 +420,8 @@
       target.drafted=true; target.draftedBy=team; target.pickNumber=pickNumber;
       draft.picks.push({poolId:String(target.id),name:target.name,points:Number(target.points)||0,team:String(team),pickNumber,ts:new Date().toISOString(),madeBy});
       draft.currentPick=draft.mode==='ordered' ? Number(draft.currentPick)+1 : Number(draft.currentPick)||0;
+      if(draft.mode==='ordered') advancePastEndedTeams(draft);
+      if(draft.mode==='ordered') advancePastEndedTeams(draft);
       if(draft.mode==='ordered' && draft.currentPick>=draft.order.length) draft.status='complete';
       if(!snapshot.settings.rosters) snapshot.settings.rosters={};
       snapshot.settings.rosters[team]=Array.isArray(snapshot.settings.rosters[team])?snapshot.settings.rosters[team]:[];
@@ -474,45 +504,43 @@
   }
 
   async function skipCurrentPick(reason='Commissioner skipped this pick'){
-    return mutate((draft)=>{
+    return mutate(draft=>{
       if(draft.status!=='live') throw new Error('Only a live draft pick can be skipped.');
       if(draft.mode!=='ordered') throw new Error('Skip current pick is available in ordered draft mode.');
-      const team=draft.order[draft.currentPick];
+      const team=String(draft.order[draft.currentPick]||'').trim();
       if(!team) throw new Error('There is no active pick on the clock.');
-      const event={kind:'skip',team:String(team),slot:Number(draft.currentPick)+1,reason:String(reason),ts:new Date().toISOString()};
-      draft.skippedPicks=Array.isArray(draft.skippedPicks)?draft.skippedPicks:[];
-      draft.skippedPicks.push(event);
+      const slot=draft.currentPick+1;
+      addSkippedSlot(draft,draft.currentPick,team,reason);
       draft.currentPick++;
-      if(draft.currentPick>=draft.order.length) draft.status='complete';
-      return event;
+      advancePastEndedTeams(draft);
+      return {kind:'skip',team,slot,reason:String(reason)};
     },{attempts:6,verify:(committed,event)=>{
       const d=normaliseDraft(committed.settings?.draft);
-      return d.skippedPicks.some(x=>x.ts===event.ts&&x.slot===event.slot&&String(x.team)===String(event.team))&&d.currentPick>=event.slot;
+      return d.skippedPicks.some(x=>Number(x.slot)===event.slot&&teamKey(x.team)===teamKey(event.team))&&d.currentPick>=event.slot;
     }});
   }
 
   async function endFranchiseDraft(team,reason='No points remaining'){
     const target=String(team||'').trim();
     if(!target) throw new Error('Choose a franchise first.');
-    return mutate((draft)=>{
+    return mutate(draft=>{
       if(draft.status!=='live') throw new Error('Only a live draft can be changed.');
       const canonical=canonicalDraftTeam(draft,target);
       draft.endedTeams=draft.endedTeams&&typeof draft.endedTeams==='object'?draft.endedTeams:{};
-      if(draft.endedTeams[canonical]) return false;
+      if(endedTeamRecord(draft,canonical)) return false;
       draft.endedTeams[canonical]={reason:String(reason),ts:new Date().toISOString()};
       if(draft.mode==='ordered'){
-        const skipped=Array.isArray(draft.skippedPicks)?draft.skippedPicks:[];
         for(let i=draft.currentPick;i<draft.order.length;i++){
-          if(teamKey(draft.order[i])===teamKey(canonical)) skipped.push({kind:'skip',team:canonical,slot:i+1,reason:'Franchise ended drafting: '+String(reason),ts:new Date().toISOString()});
+          if(teamKey(draft.order[i])===teamKey(canonical)){
+            addSkippedSlot(draft,i,draft.order[i],'Franchise ended drafting: '+String(reason));
+          }
         }
-        draft.skippedPicks=skipped;
-        while(draft.currentPick<draft.order.length && draft.endedTeams[draft.order[draft.currentPick]]) draft.currentPick++;
-        if(draft.currentPick>=draft.order.length) draft.status='complete';
+        advancePastEndedTeams(draft);
       }
       return {team:canonical,reason:String(reason)};
     },{attempts:6,verify:(committed,result)=>{
       const d=normaliseDraft(committed.settings?.draft);
-      return !!d.endedTeams?.[result?.team];
+      return !!endedTeamRecord(d,result?.team);
     }});
   }
 
@@ -630,5 +658,5 @@
     return {format:'draft-tracker-v1',league_id:c.leagueId,season_id:c.seasonId,exported_at:new Date().toISOString(),events:all};
   }
 
-  SBL.draft={STATE_ID,read,version,queue:{load:loadQueue,save:saveQueue,syncReset:syncQueueReset},tracker:{status:trackerStatus,export:trackerExport},subscribe,subscribeLive,applyPickToState,applyRevertToState,rowToPick,subscribe,mutate,replaceDraft,applyPick,revertLastPick,saveDraftState,openLobby,startDraft,endDraft,resetDraft,normaliseDraft};
+  SBL.draft={STATE_ID,read,version,queue:{load:loadQueue,save:saveQueue,syncReset:syncQueueReset},tracker:{status:trackerStatus,export:trackerExport},subscribe,subscribeLive,applyPickToState,applyRevertToState,rowToPick,subscribe,mutate,replaceDraft,applyPick,revertLastPick,saveDraftState,openLobby,startDraft,endDraft,skipCurrentPick,endFranchiseDraft,resetDraft,normaliseDraft};
 })();
