@@ -5,7 +5,7 @@
 const S=window.SBL=window.SBL||{};S.replays=S.replays||{};
 const verifiedHash=async source=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(source)))).map(b=>b.toString(16).padStart(2,'0')).join('');
 let current=null,initializing=null;
-const BARE='Built-in website parser';
+const NO_PARSER='No uploaded replay parser is active';
 function newSandbox(source){
  return new Promise((resolve,reject)=>{
   const token=crypto.randomUUID(),frame=document.createElement('iframe');
@@ -32,20 +32,34 @@ async function active(){if(current)return current;if(initializing)return initial
   const {data,error}=await db.rpc('sbl_active_parser_source');
   if(error)throw Error('Active parser lookup failed: '+error.message+' (run migration 055)');
   const version=Array.isArray(data)?data[0]:null;
-  if(!version){current={version:BARE,parse:(json,id)=>S.replays.parseLog(json,id),close:()=>{}};return current;}
+  if(!version)throw Error(NO_PARSER+'; ask a site administrator to upload and activate one in Admin Hub. Replay processing is blocked.');
   if(await verifiedHash(version.source_text)!==version.sha256)throw Error('Active parser checksum mismatch; parsing blocked');
-  const runner=await newSandbox(version.source_text);current={...runner,version:version.version_label};return current;
+  const runner=await newSandbox(version.source_text);current={...runner,version:version.version_label,sha256:version.sha256};return current;
  })();try{return await initializing;}finally{initializing=null;}}
 async function parseLogActive(json,id){const runner=await active();const result=await runner.parse(json,id);
- if(!result||!result.mons||!result.players||!result.luck)throw Error('Active parser returned an invalid replay record');return result;}
+ if(!result||!result.mons||!result.players||!result.luck)throw Error('Active parser returned an invalid replay record');
+ result.parserVersionLabel=runner.version;result.parserSourceSha256=runner.sha256;return result;}
 S.replays.parseLogActive=parseLogActive;
 S.replays.activeParserVersion=async()=> (await active()).version;
 S.replays.validateStagedParser=async(source)=>{const runner=await newSandbox(source);try{
- const samples=[{formatid:'gen9natdexdraft',log:['|player|p1|Alpha','|player|p2|Beta','|poke|p1|Pikachu','|poke|p2|Eevee','|switch|p1a: Pika|Pikachu|100/100','|switch|p2a: Eev|Eevee|100/100','|turn|1','|move|p1a: Pika|Tackle|p2a: Eev','|-damage|p2a: Eev|50/100','|turn|2','|win|Alpha'].join('\n')},
- {formatid:'gen9natdexdraft',log:['|player|p1|Alpha','|player|p2|Beta','|poke|p1|Ditto','|poke|p2|Gengar','|switch|p1a: Copy|Ditto|100/100','|switch|p2a: Ghost|Gengar|100/100','|turn|1','|-transform|p1a: Copy|p2a: Ghost','|move|p1a: Copy|Tackle|p2a: Ghost','|-damage|p2a: Ghost|80/100','|win|Alpha'].join('\n')}];
- for(let i=0;i<samples.length;i++){const result=await runner.parse(samples[i],'activation-test-'+i);
+ const makeSample=lines=>({formatid:'gen9nationaldex',log:lines.join('\n')});
+ const samples=[
+  makeSample(['|player|p1|Alpha','|player|p2|Beta','|poke|p1|Pikachu','|poke|p2|Eevee','|switch|p1a: Pika|Pikachu|100/100','|switch|p2a: Eev|Eevee|100/100','|turn|1','|move|p1a: Pika|Tackle|p2a: Eev','|-damage|p2a: Eev|50/100','|turn|2','|win|Alpha']),
+  makeSample(['|player|p1|Alpha','|player|p2|Beta','|poke|p1|Ditto','|poke|p2|Gengar','|switch|p1a: Copy|Ditto|100/100','|switch|p2a: Ghost|Gengar|100/100','|turn|1','|-transform|p1a: Copy|p2a: Ghost','|detailschange|p1a: Copy|Gengar, L50','|move|p1a: Copy|Tackle|p2a: Ghost','|-damage|p2a: Ghost|80/100','|win|Alpha']),
+  makeSample(['|player|p1|Alpha','|player|p2|Beta','|poke|p1|Zoroark','|poke|p1|Gengar','|poke|p2|Pikachu','|switch|p1a: Trickster|Gengar, L50|100/100','|switch|p2a: Pika|Pikachu, L50|100/100','|turn|1','|move|p1a: Trickster|Tackle|p2a: Pika','|-damage|p2a: Pika|80/100','|replace|p1a: Trickster|Zoroark, L50|100/100','|move|p1a: Trickster|Tackle|p2a: Pika','|win|Alpha']),
+  makeSample(['|player|p1|Alpha','|player|p2|Beta','|poke|p1|Charizard','|poke|p2|Pikachu','|switch|p1a: Blaze|Charizard, L50|100/100','|switch|p2a: Pika|Pikachu, L50|100/100','|turn|1','|move|p1a: Blaze|Tackle|p2a: Pika','|-formechange|p1a: Blaze|Charizard-Mega-X','|move|p1a: Blaze|Tackle|p2a: Pika','|win|Alpha'])
+ ];
+ for(let i=0;i<samples.length;i++){
+  const result=await runner.parse(samples[i],'activation-test-'+i);
   if(!result?.mons||!result?.players||!result?.luck||!result?.winner)throw Error('Fixture '+(i+1)+' returned incomplete data');
-  if(i===1&&!result.mons['p1|ditto'])throw Error('Transform ownership regression');}
+  const mons=result.mons;
+  if(i===1 && (!mons['p1|ditto'] || mons['p1|gengar'] || Number(mons['p1|ditto'].moves?.Tackle||0)!==1))
+   throw Error('Transform ownership regression: copied species credited instead of Ditto');
+  if(i===2 && (Number(mons['p1|zoroark']?.moves?.Tackle||0)!==2 || Number(mons['p1|gengar']?.moves?.Tackle||0)!==0 || Number(mons['p1|zoroark']?.appearances||0)!==1))
+   throw Error('Illusion attribution regression: disguised actions or appearances credited incorrectly');
+  if(i===3 && (!mons['p1|charizard mega x'] || mons['p1|charizard'] || Number(mons['p1|charizard mega x'].moves?.Tackle||0)!==2))
+   throw Error('Mega evolution regression: base and Mega counted separately');
+ }
  return {count:samples.length};
  }finally{runner.close();}};
 })();

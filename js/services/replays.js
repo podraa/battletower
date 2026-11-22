@@ -550,6 +550,17 @@
     return map[id] || raw;
   }
 
+  // Convert a Mega's identifier into its untransformed species key. Supports
+  // Showdown (Charizard-Mega-X), display names (Mega Charizard X), and
+  // compact Showdown ids (Charizard-MegaX) without confusing ordinary forms.
+  function megaBaseKey(species){
+    const normalized=normName(species);
+    let match=normalized.match(/^mega (.+?)(?: [xy])?$/);
+    if(match) return normName(match[1]);
+    match=normalized.match(/^(.+?) mega(?: ?[xy])?$/);
+    return match ? normName(match[1]) : '';
+  }
+
   function parseLog(json, replayId){
     const lines = json.log.split('\n');
     const players = {p1:'', p2:''};
@@ -568,6 +579,9 @@
     let winner = null;
     const parseWarnings=[];
     const transformedSlots=new Set();
+    // A reveal is authoritative for the physical Pokémon, even if a copied
+    // appearance (Transform) is active in the same slot.
+    const revealedIllusionIds=new Set();
     // Track side screens independently so we can infer Light Clay only when a
     // screen is demonstrably active for longer than the normal 5 turns.
     // Showdown does not print the held item for this case, but it does print
@@ -890,7 +904,12 @@
       if(!s || !newSpecies) return;
       s.species = newSpecies;
       const k = monKey(slot);
-      if(k && mons[k]) mons[k].species = newSpecies;
+      if(k && mons[k]) {
+        mons[k].species = newSpecies;
+        // A later switch/form event cannot undo a Mega evolution that already
+        // occurred in this battle. Credit belongs to the Mega for the match.
+        if(megaBaseKey(newSpecies)) mons[k].megaSpecies = newSpecies;
+      }
       if(k && luckPokemon[k]) luckPokemon[k].species = newSpecies;
       // All miscellaneous events already stored against this individual's
       // identity now follow its revealed species as well.
@@ -1049,8 +1068,13 @@
           monId = side + '|' + (++nextMonInstance);
           persistentMonIds[stableKey] = monId;
         }
-        slots[slot] = {species, hp, hpMax: parseMaxHP(parts[4] || '100/100'), side, monId};
+        // Prefer a previously confirmed Illusion identity over a new
+        // cosmetic switch-in species; the species used for crediting should
+        // never regress after an authoritative reveal.
+        const creditedSwitchSpecies=(revealedIllusionIds.has(monId) && mons[monId]?.species) ? mons[monId].species : species;
+        slots[slot] = {species:creditedSwitchSpecies, hp, hpMax: parseMaxHP(parts[4] || '100/100'), side, monId};
         const newStats = ensureMon(slot);
+        if(newStats && megaBaseKey(species)) newStats.megaSpecies = species;
         if(oldMonKey){
           finishActive(oldMonKey,currentTurn-1);
           // A real replacement: count the incoming Pokémon as a switch.
@@ -1093,11 +1117,26 @@
         const slotFull = parts[2];
         const slot = slotFull ? slotFull.split(':')[0].trim() : null;
         const species = parts[3] ? parts[3].split(',')[0].trim() : '';
-        if(slot && species){
-          if(transformedSlots.has(slot)){
-            parseWarnings.push({turn:currentTurn,code:'transform-reveal-ambiguous',detail:'Species reveal during Transform retained original battle identity; review its individual events.'});
-          } else migrateSlotSpecies(slot, species);
-          parseWarnings.push({turn:currentTurn,code:'illusion-reveal',detail:'A displayed species was replaced by a true identity. Per-individual move and damage attribution was corrected; some pre-reveal battle milestones may still need review.'});
+        if(slot && species && slots[slot]){
+          // `replace` is Showdown's authoritative Illusion reveal, not a real
+          // switch or a Transform target. Even if Transform is active, the
+          // revealed species is this physical Pokémon's true identity.
+          const mk=monKey(slot);
+          migrateSlotSpecies(slot, species);
+          if(mk) revealedIllusionIds.add(mk);
+          // A replay may use the disguised nickname in the switch line and
+          // the true nickname in `replace`/later switch-ins. Both refer to the
+          // same physical Pokémon: link aliases instead of creating a second
+          // appearance and duplicating its earlier stats.
+          const side=sideOf(slot);
+          const revealedNickname=slotFull.includes(':') ? slotFull.split(':').slice(1).join(':').trim() : '';
+          if(mk && revealedNickname){
+            const alias=side+'|nick:'+normName(revealedNickname);
+            if(!persistentMonIds[alias] || persistentMonIds[alias]===mk) persistentMonIds[alias]=mk;
+          }
+          // The display has been corrected; future changes from Transform
+          // remain cosmetic until the copied transformation ends.
+          parseWarnings.push({turn:currentTurn,code:'illusion-reveal',detail:'Illusion reveal credited the physical Pokémon, not its disguise; earlier moves and damage were reassigned to the revealed species.'});
         }
       } else if(cmd === '-formechange' || cmd === 'detailschange'){
         // Mid-battle forme change with no accompanying switch — e.g.
@@ -1952,6 +1991,37 @@
     for(const mk of Object.keys(sleeping)) finalizeStatusDuration(mk, 'slp');
     for(const mk of Object.keys(frozen)) finalizeStatusDuration(mk, 'frz');
     finalizePendingStatusChecks();
+
+    // Mega evolution is a match-wide identity decision. Team preview lists the
+    // base form even when the same individual evolves later. Resolve it once,
+    // *after* every battle event, so a base preview never adds a second game.
+    const megaFormBySideBase = new Map();
+    for(const stint of Object.values(mons)){
+      const mega = stint.megaSpecies || (megaBaseKey(stint.species) ? stint.species : '');
+      const baseKey = megaBaseKey(mega);
+      if(baseKey) megaFormBySideBase.set(stint.side+'|'+baseKey, canonicalBattleSpecies(mega));
+    }
+    function creditedBattleSpecies(side, rawSpecies){
+      const species=canonicalBattleSpecies(rawSpecies);
+      const baseKey=megaBaseKey(species);
+      // The observed Mega takes priority over base preview and over a stale
+      // pre-Mega stint species, but does not alter unrelated species/forms.
+      return megaFormBySideBase.get(side+'|'+(baseKey || normName(species))) || species;
+    }
+    for(const side of ['p1','p2']){
+      teamRoster[side] = [...new Map(teamRoster[side].map(species => {
+        const credited=creditedBattleSpecies(side,species);
+        return [normName(credited),credited];
+      })).values()];
+    }
+    // Re-label all per-individual ledgers before they are combined into the
+    // final appearance, luck, and miscellaneous statistics.
+    for(const stint of Object.values(mons)){
+      stint.species=creditedBattleSpecies(stint.side,stint.megaSpecies||stint.species);
+    }
+    for(const [key,entry] of Object.entries(luckPokemon)){
+      if(entry?.species) entry.species=creditedBattleSpecies(String(key).split('|')[0],entry.species);
+    }
 
     // Finalize active-time records and battle-level Misc records.
     for(const [slot,entry] of Object.entries(slots)){ const mk=monKey(slot); if(mk) finishActive(mk,currentTurn); }
