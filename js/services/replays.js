@@ -46,6 +46,54 @@
     return `${leagueId}|${season.id}|${season.key || ''}`;
   }
 
+  // CP4.166: persistent Showdown alts point to a league account, not a
+  // mutable franchise name. The active franchise is resolved at read time.
+  function showdownAliasKey(name) {
+    return SBL.domain?.showdownKey ? SBL.domain.showdownKey(name) : String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+  async function listShowdownAliases(leagueId, client) {
+    if (!leagueId) return [];
+    const db = client || SBL.getSupabase();
+    const {data,error} = await db.from('showdown_account_aliases')
+      .select('id,league_id,user_id,showdown_username,username_key,created_at')
+      .eq('league_id',leagueId).order('showdown_username',{ascending:true});
+    if (error) throw error;
+    return data || [];
+  }
+  async function addShowdownAlias(leagueId, userId, showdownName, client) {
+    const name=String(showdownName||'').trim();
+    if (!leagueId || !userId || !showdownAliasKey(name) || name.length > 80)
+      throw new Error('Choose a league member and a valid Showdown username (1–80 characters).');
+    const db=client||SBL.getSupabase();
+    const {data,error}=await db.from('showdown_account_aliases')
+      .insert({league_id:leagueId,user_id:userId,showdown_username:name})
+      .select('id,league_id,user_id,showdown_username,username_key').single();
+    if (error) {
+      if (error.code === '23505') throw new Error('This Showdown name is already assigned in this league. Remove the existing alias before reassigning it.');
+      throw error;
+    }
+    invalidateLoadCache();
+    return data;
+  }
+  async function removeShowdownAlias(leagueId, aliasId, client) {
+    if (!leagueId || !aliasId) throw new Error('League and alias are required.');
+    const db=client||SBL.getSupabase();
+    const {data,error}=await db.from('showdown_account_aliases')
+      .delete().eq('league_id',leagueId).eq('id',aliasId)
+      .select('id');
+    if (error) throw error;
+    if (!data?.length) throw new Error('The alias was not removed. Check league administrator permissions.');
+    invalidateLoadCache();
+    return data;
+  }
+  async function applyAuthoritativeAliases(db, leagueId, scopedState, replayRows) {
+    if (!SBL.domain?.fetchReplayAliasProjection) {
+      throw new Error('The shared domain service is required for current-season replay identity.');
+    }
+    const projection=await SBL.domain.fetchReplayAliasProjection(db,leagueId,replayRows);
+    SBL.domain.applyAliasProjection(scopedState,projection);
+  }
+
   async function loadNormalized(db, isCurrent) {
     const current = typeof isCurrent === 'function' ? isCurrent : () => true;
     // Capture the league ONCE. Everything below is read for this league only.
@@ -67,7 +115,9 @@
     // season selections from another league can never select that league's row.
     let sr;
     try {
-      sr = await SBL.leagueDb.getSeasonContext(id, db);
+      // Shared scope is the only season resolver used by live replay reads.
+      const scope=await SBL.domain.resolveScope({leagueId:id,client:db});
+      sr=scope.season;
     } catch (seasonError) {
       throw new Error('Could not load the selected season: ' + (seasonError?.message || seasonError));
     }
@@ -75,7 +125,7 @@
       throw new Error('Could not load the selected season for this league.');
     }
     const seasonData = sr.data || {};
-    scopedState = { teamMap: seasonData.teamMap || {}, settings: seasonData.settings || {} };
+    scopedState = { teamMap: {...(seasonData.teamMap || {})}, settings: {...(seasonData.settings || {})} };
     scopedState.settings.activeSeason = sr.name || scopedState.settings.activeSeason;
     // Remember the resolved season, but only if this is still the newest
     // request. A superseded load must not drag the selection back.
@@ -103,7 +153,10 @@
     // re-reading the (mutable) browser selection: the state and the replay
     // rows of one payload must always describe the same season.
     const replayRows = await SBL.leagueDb.loadReplays(id, db, { seasonId: sr.id });
-    return [{ replay_id: STATE_ID, replay_data: snapshot.state, normalizedSeason: scopedState.__normalizedSeason }, ...replayRows.map(r => ({ replay_id:r.replay_id, replay_data:r.replay_data, updated_at:r.updated_at }))];
+    if (!(SBL.domain?.archivedSeason?.(sr.status) ?? ['archived','complete','completed','finalized','closed'].includes(String(sr.status||'').toLowerCase()))) {
+      await applyAuthoritativeAliases(db,id,scopedState,replayRows);
+    }
+    return [{ replay_id: STATE_ID, replay_data: scopedState, normalizedSeason: scopedState.__normalizedSeason }, ...replayRows.map(r => ({ replay_id:r.replay_id, replay_data:r.replay_data, updated_at:r.updated_at }))];
   }
 
   function invalidateLoadCache() {
@@ -262,83 +315,102 @@
     };
   }
 
-  // Build current-season Showdown username mappings only from active player
-  // memberships and authoritative franchise_assignments. Profiles.team_name is
-  // a legacy sitewide field and must never decide current league ownership.
+  // Build current-season replay aliases from *authoritative* active assignments.
+  // CP4.165: a punctuation-insensitive account match (e.g. fabel vv ->
+  // fabel_vv) previously caused the replay to be skipped rather than mapped.
+  // Always write an explicit raw Showdown alias; Stats reads teamMap by that key.
   async function autoMapReplayUsernames(state, options={}){
-    if(!state || !state.replays || !state.teamMap) return {exact:0,alts:0};
+    if(!state || !state.replays || !state.teamMap) return {exact:0,alts:0,conflicts:0};
     const db=options.client || SBL.getSupabase?.();
     const leagueId=String(options.leagueId || SBL.leagueDb?.selectedLeagueId?.() || '').trim();
-    if(!db || !leagueId || !SBL.franchiseOwnership?.listActiveMemberFranchises || !SBL.profiles?.list || !SBL.rosters?.getAll) return {exact:0,alts:0};
-    let assignments, profiles, rosters;
+    if(!db || !leagueId || !SBL.franchiseOwnership?.listActiveMemberFranchises || !SBL.profiles?.list)
+      return {exact:0,alts:0,conflicts:0};
+    let assignments, profiles, rosters={};
     try{
-      [assignments,rosters]=await Promise.all([
-        SBL.franchiseOwnership.listActiveMemberFranchises(leagueId,db),
-        SBL.rosters.getAll({force:!!options.force})
-      ]);
+      assignments=await SBL.franchiseOwnership.listActiveMemberFranchises(leagueId,db);
       const userIds=[...new Set((assignments||[]).map(x=>String(x.userId||'')).filter(Boolean))];
-      if(!userIds.length) return {exact:0,alts:0};
+      if(!userIds.length) return {exact:0,alts:0,conflicts:0};
       profiles=await SBL.profiles.list({fields:'id,username',userIds},db);
-    }catch(_){ return {exact:0,alts:0}; }
+      // Rosters are needed only for conservative unmatched-name inference.
+      // An unavailable roster service must not block verified account aliases.
+      if(SBL.rosters?.getAll) {
+        try{ rosters=await SBL.rosters.getAll({force:!!options.force})||{}; }
+        catch(e){ console.warn('Replay roster-based name matching unavailable:',e); }
+      }
+    }catch(e){ console.warn('Automatic replay mapping could not load league ownership:',e); return {exact:0,alts:0,conflicts:0}; }
     let archivedSeason=false;
     try{
-      const selectedSeason=await SBL.leagueDb?.getSeasonContext?.(leagueId,db);
+      const seasonOptions=options.seasonId ? {seasonId:String(options.seasonId)} : {};
+      const selectedSeason=await SBL.leagueDb?.getSeasonContext?.(leagueId,db,seasonOptions);
       archivedSeason=!!selectedSeason && ['archived','complete'].includes(String(selectedSeason.status||'').toLowerCase());
-    }catch(_){ /* Legacy deployments have no normalized season context. */ }
-    const norm=v=>String(v||'').trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+    }catch(e){ console.warn('Replay mapping could not verify season status:',e); return {exact:0,alts:0,conflicts:0}; }
+    // An active ownership assignment is not proof of historical ownership.
+    if(archivedSeason) return {exact:0,alts:0,conflicts:0};
+    const norm=v=>SBL.domain?.showdownKey?.(v) ?? String(v||'').trim().toLowerCase().replace(/[^a-z0-9]/g,'');
     const species=v=>norm(typeof v==='string'?v:(v?.species||v?.name||v?.pokemon||''));
     const assignmentByUser=new Map((assignments||[]).map(x=>[String(x.userId),x]));
     const known=(profiles||[]).filter(p=>p?.username && assignmentByUser.has(String(p.id))).map(p=>{
       const assignment=assignmentByUser.get(String(p.id));
-      return {id:p.id,username:p.username,team_name:assignment.franchise.name};
-    });
+      return {id:p.id,username:p.username,team_name:String(assignment.franchise?.name||'')};
+    }).filter(p=>p.team_name);
+    // Never guess an owner for normalized account names that collide.
+    const byUsername=new Map();
+    for(const profile of known){
+      const key=norm(profile.username);
+      if(byUsername.has(key)) byUsername.set(key,null);
+      else byUsername.set(key,profile);
+    }
+    state.settings=state.settings||{};
+    state.settings.replayUsernameAliases=state.settings.replayUsernameAliases||{};
+    let exact=0,alts=0,conflicts=0;
+    function mapAlias(raw,profile,kind){
+      const key=String(raw||'').trim().toLowerCase();
+      if(!key||!profile) return false;
+      const old=String(state.teamMap[key]||'').trim();
+      // Do not silently steal an existing manually assigned alias.
+      if(old && norm(old)!==norm(profile.team_name)){ conflicts++; return false; }
+      if(old!==profile.team_name){state.teamMap[key]=profile.team_name; if(kind==='exact')exact++;else alts++;}
+      state.settings.replayUsernameAliases[key]=profile.username;
+      return true;
+    }
+    for(const profile of known) mapAlias(profile.username,profile,'exact');
+    const observations=new Map();
+    for(const replay of Object.values(state.replays)) for(const side of ['p1','p2']){
+      const username=String(replay?.players?.[side]||'').trim();
+      if(!username) continue;
+      // Key fix: matching an account MUST create the raw Showdown alias.
+      const profile=byUsername.get(norm(username));
+      if(profile){mapAlias(username,profile,'alias');continue;}
+      if(byUsername.has(norm(username))) { conflicts++; continue; }
+      const obs=observations.get(norm(username))||{username,mons:new Set()};
+      for(const mon of replay?.teamRoster?.[side]||[]){const k=species(mon);if(k)obs.mons.add(k);}
+      observations.set(norm(username),obs);
+    }
     const rosterSets={};
     for(const [team,raw] of Object.entries(rosters||{})){
       const arr=Array.isArray(raw)?raw:(raw?.pokemon||raw?.roster||raw?.members||[]);
       rosterSets[norm(team)]=new Set(arr.map(species).filter(Boolean));
-    }
-    const byUsername=new Map(known.map(p=>[norm(p.username),p]));
-    let exact=0, alts=0;
-    state.settings=state.settings||{};
-    state.settings.replayUsernameAliases=state.settings.replayUsernameAliases||{};
-    for(const profile of known){
-      const key=String(profile.username).trim().toLowerCase();
-      // Exact current account names follow the active assignment. This is a
-      // season-scoped replay identity mapping, not the ownership record.
-      if(!state.teamMap[key] || !archivedSeason){
-        if(state.teamMap[key] !== profile.team_name){ state.teamMap[key]=profile.team_name; exact++; }
-      }
-      if(!state.settings.replayUsernameAliases[key] || !archivedSeason) state.settings.replayUsernameAliases[key]=profile.username;
-    }
-    const observations=new Map();
-    for(const replay of Object.values(state.replays)) for(const side of ['p1','p2']){
-      const username=String(replay?.players?.[side]||'').trim();
-      if(!username || byUsername.has(norm(username))) continue;
-      const obs=observations.get(norm(username))||{username,mons:new Set()};
-      for(const mon of replay?.teamRoster?.[side]||[]){ const k=species(mon); if(k) obs.mons.add(k); }
-      observations.set(norm(username),obs);
     }
     for(const obs of observations.values()){
       if(obs.mons.size<4 || state.teamMap[obs.username.toLowerCase()]) continue;
       const matches=[];
       for(const profile of known){
         const roster=rosterSets[norm(profile.team_name)]; if(!roster?.size) continue;
-        let overlap=0; for(const mon of obs.mons) if(roster.has(mon)) overlap++;
+        let overlap=0;for(const mon of obs.mons)if(roster.has(mon))overlap++;
         const ratio=overlap/obs.mons.size;
-        if(ratio>0.70) matches.push({profile,ratio});
+        if(ratio>0.70)matches.push({profile,ratio});
       }
-      if(!matches.length) continue;
-      matches.sort((a,b)=>b.ratio-a.ratio); const best=matches[0];
-      if(matches.some((m,i)=>i>0 && Math.abs(m.ratio-best.ratio)<0.000001 && norm(m.profile.team_name)!==norm(best.profile.team_name))) continue;
-      const alias=obs.username.toLowerCase();
-      state.teamMap[alias]=best.profile.team_name;
-      state.settings.replayUsernameAliases[alias]=best.profile.username;
-      alts++;
+      if(!matches.length)continue;
+      matches.sort((a,b)=>b.ratio-a.ratio);
+      const best=matches[0];
+      if(matches.some((m,i)=>i>0 && Math.abs(m.ratio-best.ratio)<0.000001 && norm(m.profile.team_name)!==norm(best.profile.team_name)))continue;
+      mapAlias(obs.username,best.profile,'alias');
     }
-    return {exact,alts};
+    return {exact,alts,conflicts};
   }
 
   SBL.replays = {
+    showdownAliasKey, listShowdownAliases, addShowdownAlias, removeShowdownAlias,
     passiveFingerprint,
     STATE_ID,
     ROSTERS_ID,

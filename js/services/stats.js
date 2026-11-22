@@ -21,6 +21,7 @@
   // Canonical Mega identity: both public-facing "Mega Charizard X" and
   // Showdown "Charizard-Mega-X" must select the SAME row/profile.
   function identity(name){
+    if(SBL.domain?.pokemonKey)return SBL.domain.pokemonKey(name);
     const id=rawIdentity(name);
     let m=id.match(/^mega-(.+?)-([xyz])$/);
     if(m) return `${m[1]}-mega-${m[2]}`;

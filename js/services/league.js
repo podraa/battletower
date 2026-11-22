@@ -15,28 +15,20 @@
   const STATE_ID = '__dashboard_state__';
 
   async function loadRows(client) {
-    if (SBL.replays?.load) return SBL.replays.load(client);
-    const db = client || (SBL.getSupabase ? SBL.getSupabase() : null);
-    if (!db) throw new Error('Supabase client is not available.');
-    let query = db.from('replays').select('replay_id,replay_data');
-    const leagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
-    if(leagueId) query=query.eq('league_id',leagueId);
-    const { data, error } = await query;
-    if (error) throw error;
-    return { data: data || [], error: null };
+    if(!SBL.replays?.load)throw new Error('Replay service unavailable; cannot load legacy table.');
+    return SBL.replays.load(client);
   }
 
   async function loadState(client) {
-    const db = client || (SBL.getSupabase ? SBL.getSupabase() : null);
-    if (!db) throw new Error('Supabase client is not available.');
-
-    let query = db.from('replays').select('replay_id,replay_data').eq('replay_id', STATE_ID);
-    const leagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
-    if(leagueId) query=query.eq('league_id',leagueId);
-    const { data, error } = await query.maybeSingle();
-
-    if (error) throw error;
-    return data?.replay_data || {};
+    // CP4.167: a league's current-season state is loaded ONLY through the
+    // canonical league+season replay service. Reading the old "replays"
+    // __dashboard_state__ record here silently returned the wrong tenant or
+    // season when called by newer consumers.
+    if(!SBL.replays?.load || !SBL.replays?.partition)
+      throw new Error('Replay state service unavailable; cannot read legacy state directly.');
+    const result=await SBL.replays.load(client);
+    if(result?.error)throw result.error;
+    return SBL.replays.partition(result?.data||[]).sharedState||{};
   }
 
   function getTeamMap(state) {

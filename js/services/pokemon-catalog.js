@@ -13,7 +13,7 @@
     return SBL.getSupabase();
   }
   function normalizeId(value) {
-    return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    return SBL.domain?.pokemonCatalogId ? SBL.domain.pokemonCatalogId(value) : String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   }
   async function getMeta() {
     const { data, error } = await client()
