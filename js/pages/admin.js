@@ -173,16 +173,28 @@
      }
    }
 
-  async function saveReplays(){
-     try { await SBL.replays.autoMapReplayUsernames?.(STATE); } catch(e) { console.warn('Automatic replay username mapping skipped:',e); }
+  async function saveReplays(options={}){
      requireAdmin();
+     // Use the same confirmed league/season context for replay rows and shared
+     // settings. A missing browser selection must not put rows in a null season.
+     const context=await resolveAdminPersistenceContext();
+     try { await SBL.replays.autoMapReplayUsernames?.(STATE); } catch(e) { console.warn('Automatic replay username mapping skipped:',e); }
      const rows = Object.values(STATE.replays).map(r => ({
        replay_id: r.id,
        replay_data: r,
+       season_id: context.seasonId,
        updated_at: new Date().toISOString()
      }));
-     if(rows.length) await SBL.replays.upsertRows(rows, supabase);
-     await saveSharedState();
+     if(rows.length){
+       const result=await SBL.replays.upsertRows(rows,supabase);
+       // An empty PostgREST response is not successful persistence. This also
+       // detects RLS policies that silently suppress a write.
+       const written=new Set((result?.data||[]).map(row=>String(row.replay_id)));
+       const missing=rows.filter(row=>!written.has(String(row.replay_id)));
+       if(missing.length) throw new Error(`Supabase did not confirm ${missing.length} replay save(s). Check league/season selection and replay write permissions.`);
+     }
+     if(!options.skipSharedState) await saveSharedState(context);
+     return {saved:rows.length,seasonId:context.seasonId};
    }
 
   async function deleteReplayRemote(id){
@@ -887,7 +899,7 @@ Choose Cancel to keep draft status unchanged.`);
         try{
           const parsed = await fetchReplayForImport(id);
           STATE.replays[id] = parsed;
-          appendLog(logEl, `✓ ${id}  (${parsed.players.p1 || '?'} vs ${parsed.players.p2 || '?'})`, false, true);
+          appendLog(logEl, `Parsed ${id} (${parsed.players.p1 || '?'} vs ${parsed.players.p2 || '?'}); awaiting database save`, false);
           added++;
         }catch(e){
           appendLog(logEl, `✗ ${id} — ${e.message}`, true);
@@ -899,29 +911,41 @@ Choose Cancel to keep draft status unchanged.`);
     // while avoiding an unbounded burst of requests.
     await Promise.all(Array.from({length: Math.min(6, ids.length)}, worker));
 
-    // Assign ALL automatic weeks only after the complete bulk is loaded. This
-    // makes the result deterministic regardless of paste order or fetch timing.
-    let persisted = true;
+    // Wait until all fetch/parse jobs are complete, then verify the database
+    // has accepted the rows before displaying any "imported" success message.
+    let persisted = false;
     if(added > 0){
       assignAutomaticWeeks();
       try {
-        await saveSettings();
-        await saveReplays();
+        await saveReplays({skipSharedState:true});
+        persisted = true;
+        appendLog(logEl, `✓ Saved ${added} replay(s) to the selected season in Supabase.`, false, true);
+        try { await saveSettings(); }
+        catch(settingsError){
+          appendLog(logEl, `⚠ Replay rows were saved, but season settings could not be saved: ${settingsError?.message || settingsError}`, true);
+        }
       } catch(e) {
-        persisted = false;
-        appendLog(logEl, `⚠ ${added} replay(s) parsed but could not be saved: ${e?.message || e}`, true);
+        appendLog(logEl, `✗ ${added} replay(s) were parsed but NOT confirmed saved: ${e?.message || e}`, true);
+        appendLog(logEl, 'Check the selected league/season and Supabase permissions before retrying. Parsed records remain on this page until reload.', true);
       }
     }
-    const persistenceNote = persisted ? '' : ' Persistence failed; do not leave this page until the data is recovered.';
-    appendLog(logEl, `Done. ${added} added, ${skipped} already had, ${invalid} invalid, ${failed} failed.${persistenceNote}`, !persisted);
-    await logAdminAction(
-      'process_replays',
-      `Processed replays: ${added} added, ${skipped} skipped, ${invalid} invalid, ${failed} failed, persisted=${persisted}.`,
-      {added, skipped, invalid, failed, persisted}
-    );
-    appendLog(logEl, `Done. ${added} added, ${skipped} already had, ${invalid} invalid, ${failed} failed.`, false);
+    appendLog(logEl, `Finished. ${persisted ? added : 0} saved, ${skipped} already had, ${invalid} invalid, ${failed} parse failures${!persisted && added ? `, ${added} unsaved` : ''}.`, !persisted && added>0);
+    // Logging is non-critical. In particular, an audit-RPC failure must never
+    // stop the replay list from reflecting successfully persisted imports.
+    try {
+      await logAdminAction('process_replays',
+        `Processed replays: ${added} parsed, ${persisted?added:0} saved, ${skipped} skipped, ${invalid} invalid, ${failed} failed.`,
+        {added, saved:persisted?added:0, skipped, invalid, failed, persisted});
+    } catch(auditError) {
+      console.warn('Replay import audit logging failed; import status is unaffected:',auditError);
+    }
     renderTicker();
+    // Preserve the completed import report across the re-render. The prior
+    // implementation recreated #processLog and erased the useful final result.
+    const report=logEl.innerHTML;
     render();
+    const nextLog=document.getElementById('processLog');
+    if(nextLog) nextLog.innerHTML=report;
   }
   function appendLog(el, text, isErr, isOk){
     const line = document.createElement('div');
