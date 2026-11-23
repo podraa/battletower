@@ -143,3 +143,12 @@ table tbody tr[style*="--team-color"] td:first-child{box-shadow:inset 4px 0 0 va
 .tp-mon strong{display:block;font-size:13px}
 .tp-mon span{font-size:11px;opacity:.75}
 .tp-empty{grid-column:1/-1;padding:18px;text-align:center;opacity:.7}
+
+/* CP4.170: optional read-only Pokémon history inside the shared roster dialog. */
+.tp-history-btn{margin-top:6px;background:transparent;color:inherit;font:inherit;font-weight:600;font-size:11px;border:1px solid currentColor;border-radius:7px;padding:4px 7px;cursor:pointer}
+.tp-history-btn:hover,.tp-history-btn:focus-visible{background:rgba(127,127,127,.2)}
+.tp-history{margin:0 18px 18px;padding:14px;border:1px solid var(--border,#444);border-radius:12px;background:var(--panel-alt,rgba(127,127,127,.08))}
+.tp-history h3{font-size:15px;margin:0 0 8px}.tp-history p{font-size:12px;margin:4px 0 10px}
+.tp-history-list{display:grid;gap:8px;max-height:30vh;overflow:auto}
+.tp-history-row{display:grid;gap:3px;padding:9px;border-radius:8px;background:rgba(127,127,127,.1);font-size:12px}
+.tp-history-row span{opacity:.82}.tp-history-row a{margin-left:8px;color:inherit;text-decoration:underline}
