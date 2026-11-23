@@ -275,7 +275,7 @@
       settings:STATE.settings,
       updates,
       loadCurrent:()=>SBL.leagueDb.getSeasonContext(leagueId,supabase,{seasonId}),
-      saveCurrent:payload=>SBL.leagueDb.saveSeasonState(leagueId,seasonId,payload,supabase),
+      patchCurrent:changes=>SBL.leagueDb.patchSeasonSections(leagueId,seasonId,changes,supabase),
       readCurrent:()=>SBL.leagueDb.getSeasonContext(leagueId,supabase,{seasonId}),
       invalidate:async()=>{try{SBL.replays?.invalidateCache?.();await SBL.performance?.invalidate?.('replays:all');}catch(cacheError){console.warn('Fixture saved and verified; cache invalidation was non-fatal:',cacheError);}}
     });
@@ -365,7 +365,6 @@ Choose Cancel to keep draft status unchanged.`);
     STATE.settings.rosters = {};
     if(clearFreeAgency) STATE.settings.freeAgency = {mons:[]};
     if(resetDraft) STATE.settings.draft = normalizeDraftState(STATE.settings.draft);
-    await savePublishedRosters({});
     await saveSharedState();
     await logAdminAction('clear_current_rosters', `Cleared current-season rosters (${count} Pokémon).${clearFreeAgency ? ` Cleared Free Agency (${freeAgencyCount} Pokémon).` : ''}${resetDraft ? ` Reset draft status and cleared ${pickCount} picks.` : ''}`, {pokemonCount:count, freeAgencyCleared:clearFreeAgency, freeAgencyPokemonCount:clearFreeAgency?freeAgencyCount:0, draftReset:resetDraft, draftPickCount:resetDraft?pickCount:0});
     return {cleared:true, freeAgencyCleared:clearFreeAgency, draftReset:resetDraft};
@@ -420,10 +419,10 @@ Choose Cancel to keep draft status unchanged.`);
     // writes. Ordinary saveSharedState() calls are deliberately non-activating.
     const newSeason=await SBL.leagueDb.createSeason(rolloverLeagueId,newName,{teamMap:STATE.teamMap,settings:STATE.settings,replays:{}},supabase);
     ADMIN_PERSISTENCE_CONTEXT={leagueId:rolloverLeagueId,seasonId:newSeason.id};
-    await saveSharedState({leagueId:rolloverLeagueId,seasonId:newSeason.id});
+    // State was persisted atomically when the season was created. Do not
+    // perform an immediate second full-state write from this browser copy.
     await deleteAllRemote();          // clear only stale replay rows in the newly activated season
-    await saveReplays();              // persist the new season's empty live replay set
-    await savePublishedRosters({});   // clear the new season's published-roster compatibility row
+    await saveReplays({skipSharedState:true}); // state was created transactionally
     // Franchise ownership is league-scoped and persistent: registered users keep
     // their franchise when a season rolls over. Ownership is intentionally NOT
     // touched here. Admins can still reassign it explicitly, or use People &
@@ -471,13 +470,19 @@ Choose Cancel to keep draft status unchanged.`);
     const normalizedSeasons=await SBL.leagueDb.listSeasons(rolloverLeagueId,supabase);
     let restoredSeason=normalizedSeasons.find(row=>String(row.season_key)===seasonKey(restoredName));
     const restoredPayload={teamMap:STATE.teamMap,settings:STATE.settings,replays:STATE.replays};
-    if(restoredSeason) restoredSeason=await SBL.leagueDb.activateSeason(rolloverLeagueId,restoredSeason.id,restoredPayload,supabase);
+    const restoringNormalized=!!restoredSeason;
+    if(restoringNormalized) restoredSeason=await SBL.leagueDb.activateSeason(rolloverLeagueId,restoredSeason.id,undefined,supabase);
     else restoredSeason=await SBL.leagueDb.createSeason(rolloverLeagueId,restoredName,restoredPayload,supabase);
     ADMIN_PERSISTENCE_CONTEXT={leagueId:rolloverLeagueId,seasonId:restoredSeason.id};
-    await saveSharedState({leagueId:rolloverLeagueId,seasonId:restoredSeason.id});
-    await deleteAllRemote();                       // clear stale rows in the target season only
-    await saveReplays();                           // write restored replay rows under the target season ID
-    await savePublishedRosters(STATE.settings.rosters||{}); // keep restored season's roster copy in sync
+    if(restoringNormalized){
+      // Historical replay rows and data are already present. Never delete and
+      // reimport them using a possibly stale legacy archive browser snapshot.
+      SBL.replays?.invalidateCache?.();
+      await loadState();
+    }else{
+      await deleteAllRemote();
+      await saveReplays({skipSharedState:true});
+    }
     // Ownership is league-scoped and persistent; restoring a season does not change it.
     await logAdminAction('restore_season', `Restored archived season "${archive.name || key}" as the current season.`, {archiveKey:key, season:archive.name || key, previousSeason:currentName});
   }
@@ -486,12 +491,12 @@ Choose Cancel to keep draft status unchanged.`);
     const archives = STATE.settings.seasonArchives || {};
     const archive = archives[key];
     if(!archive) return;
-    if(!confirm(`Permanently delete the "${archive.name || key}" archive? This cannot be undone.`)) return;
+    if(!confirm(`Remove the old archive shortcut "${archive.name || key}" from this season? Normalized historical records and frozen snapshots will be preserved.`)) return;
     const newArchives = {...archives};
     delete newArchives[key];
     STATE.settings.seasonArchives = newArchives;
     await saveSharedState();
-    await logAdminAction('delete_season_archive', `Permanently deleted season archive "${archive.name || key}".`, {archiveKey:key, season:archive.name || key});
+    await logAdminAction('remove_legacy_archive_shortcut', `Removed old archive shortcut "${archive.name || key}" without deleting normalized history.`, {archiveKey:key, season:archive.name || key});
   }
 
   async function migrateLocalData(){
@@ -1573,10 +1578,13 @@ Choose Cancel to keep draft status unchanged.`);
       const feedback=season?.data?.settings?.feedback;
       const row=Array.isArray(feedback)?feedback.find(x=>String(x.id||'')===id):null;
       if(!season||!row){control.value=previous;message.textContent='That submission could not be found. Refresh and try again.';return;}
+      const originalFeedback=JSON.parse(JSON.stringify(feedback));
       control.disabled=true;row.status=next;row.updatedAt=new Date().toISOString();
       try{
-        const {error}=await supabase.from('league_seasons').update({data:season.data,updated_at:new Date().toISOString()}).eq('league_id',leagueId).eq('id',seasonId);
-        if(error)throw error;
+        await SBL.leagueDb.patchSeasonSections(leagueId,seasonId,[{
+          scope:'settings',key:'feedback',was_present:true,
+          before:originalFeedback,value:feedback
+        }],supabase);
         const currentSeasonId=String(SBL.leagueDb?.selectedSeasonId?.(leagueId)||'');
         if(currentSeasonId===seasonId) STATE.settings.feedback=feedback;
         control.dataset.previousStatus=next;message.textContent=`Updated “${row.title||'submission'}” to ${statusLabel(next)}.`;
@@ -2186,13 +2194,36 @@ Choose Cancel to keep draft status unchanged.`);
     const normalized = normalizeStoredRosters(rosters);
     if(!Object.keys(normalized).length) throw new Error('No rosters to publish.');
 
-    STATE.settings = STATE.settings || {};
-    STATE.settings.rosters = normalized;
-
-    // These two writes intentionally remain separate: dashboard state contains
-    // all admin settings, while __rosters__ is the public roster-page contract.
-    await saveSharedState(context);
-    await savePublishedRosters(normalized,context);
+    // Calculate a change plan against the authoritative active-season rosters.
+    // The atomic RPC validates ownership, preserves metadata and updates the
+    // Free Agency pool; its trigger publishes the resulting rosters in one commit.
+    const {data:season,error:readError}=await supabase.from('league_seasons')
+      .select('data').eq('league_id',context.leagueId).eq('id',context.seasonId).maybeSingle();
+    if(readError) throw readError;
+    if(!season) throw new Error('Selected active season is unavailable.');
+    const before=season.data?.settings?.rosters||{};
+    const key=SBL.rosterMutations.key;
+    const original=new Map();
+    const pool=new Map();
+    for(const list of Object.values(before)) for(const mon of list||[]) original.set(key(mon),mon);
+    for(const mon of season.data?.settings?.freeAgency?.mons||[]) pool.set(key(mon),mon);
+    const desired={};
+    for(const [team,list] of Object.entries(normalized)){
+      desired[team]=list.map(mon=>{
+        const existing=original.get(key(mon));
+        const available=pool.get(key(mon));
+        // Keep exact previously stored form and cost metadata. A workbook
+        // controls membership, never silently edits canonical Pokémon data.
+        return existing||available||{name:mon.name};
+      });
+    }
+    const changes=SBL.rosterMutations.planReplace(before,desired);
+    if(changes.length) await SBL.rosterMutations.apply(changes,{
+      leagueId:context.leagueId,seasonId:context.seasonId,
+      reason:'Commissioner roster workbook publication',client:supabase
+    });
+    SBL.replays.invalidateCache?.();
+    await loadState();
     await logAdminAction(
       'publish_rosters',
       `Published rosters for ${Object.keys(normalized).length} franchise${Object.keys(normalized).length===1?'':'s'}.`,
@@ -2652,7 +2683,6 @@ Choose Cancel to keep draft status unchanged.`);
     if(result?.pick && !result.pick.faRemoved && (STATE.settings?.freeAgency?.mons||[]).length){
       alert(`${target.name} was drafted, but it was not found in Free Agency, so it was not removed from that list. Check the name match.`);
     }
-    await savePublishedRosters(STATE.settings.rosters||{});
     const pick=result?.state?.settings?.draft?.picks?.find(p=>String(p.poolId)===String(target.id)&&String(p.team)===String(team));
     await logAdminAction('admin_draft_pick',`Commissioner selected ${target.name} for ${team}.`,{team,pokemon:target.name,points:Number(target.points)||0,pickNumber:pick?.pickNumber});
     return result;
@@ -2993,7 +3023,6 @@ function renderDraft(){ return drawDraft(); }
           d = STATE.settings.draft;
         }
         // Publish the roster snapshot immediately so the public roster page is finalized.
-        await savePublishedRosters(STATE.settings.rosters || {});
         await logAdminAction('end_draft', 'Ended the draft and finalized the current rosters.', {status:d.status, picks:d.picks?.length || 0});
         drawDraft();
       }catch(e){ err.textContent = e.message; }
@@ -4396,8 +4425,7 @@ function renderDraft(){ return drawDraft(); }
       try{
         const enteredReason=String(document.getElementById('adminRosterTransactionReason')?.value||COMM_ADMIN_ROSTER_UI.reason||'').trim();
         const reason=enteredReason||(ui.mode==='mulligan'?'Admin 1-for-1 mulligan override':ui.mode==='trade'?'Admin-entered manual trade':'Admin Free Agency roster adjustment');
-        const {data,error}=await supabase.rpc('sbl_admin_apply_roster_transaction',{p_league_id:leagueId,p_season_id:seasonId,p_operations:operations,p_reason:reason});
-        if(error) throw error;
+        const {result:data}=await SBL.rosterMutations.apply(operations,{leagueId,seasonId,reason,client:supabase});
         try{await logAdminAction('admin_roster_transaction',`Applied an administrator ${ui.mode} transaction: ${data?.removed_count||0} removed, ${data?.added_count||0} added, ${data?.transfers||0} transferred.`,{seasonId,operations,reason,transactionResult:data});}catch(logError){console.warn('Secondary admin log entry failed; database transaction audit is retained.',logError);}
         COMM_ADMIN_ROSTER_UI.removePrimary=[];COMM_ADMIN_ROSTER_UI.removeSecondary=[];COMM_ADMIN_ROSTER_UI.addPool=[];COMM_ADMIN_ROSTER_UI.reason='';
         status.className='note';status.textContent=`Transaction committed. ${data?.removed_count||0} removed, ${data?.added_count||0} added, ${data?.transfers||0} transferred. Refreshing…`;
@@ -4481,58 +4509,12 @@ function renderDraft(){ return drawDraft(); }
               await SBL.trades.accept(id, supabase);
             }
           } else if(action === 'reject-fa'){
-            await SBL.trades.respond(id, 'rejected', adminUser.id, supabase);
-          } else if(action === 'revoke'){
-            const trade = COMM_TRADES.find(t => Number(t.id) === id);
-            if(!trade) throw new Error('Trade not found.');
-            await SBL.trades.respond(id, 'pending', null, supabase);
-
-            // Revoke means the previously accepted trade is being reopened.
-            // Restore the pre-trade roster ownership immediately so that if the
-            // proposer subsequently withdraws the pending trade, the published
-            // roster is already back in its original state.
-            if(trade.status === 'accepted' || trade.status === 'reverted'){
-              reconcileRevertedTradeRoster(trade);
-              await saveSharedState();
-              await savePublishedRosters(STATE.settings.rosters || {});
-            }
-
-            // A pending trade does not consume a completed trade slot. Moving an
-            // accepted trade back to pending therefore restores one trade credit
-            // to each involved franchise/player immediately. This is deliberately
-            // not written into profile.trade_credits: those are separate
-            // commissioner-granted bonus credits, and adding one there as well
-            // would refund the same trade twice.
-            if(trade.status === 'accepted'){
-              console.info(`Trade #${id} revoked: one trade allowance restored to ${trade.proposer_team}${trade.target_team ? ` and ${trade.target_team}` : ''}.`);
-            }
-          } else if(action === 'revert'){
-            const trade = COMM_TRADES.find(t => Number(t.id) === id);
-            if(!trade) throw new Error('Trade not found.');
-
-            if((trade.target_team == null || String(trade.target_team).trim() === '')){
-              // Free Agency reversions must not depend on the team-to-team
-              // commissioner_revert_trade RPC. That RPC validates both sides
-              // of a roster swap and can reject a FA pickup when the receiving
-              // roster has since changed. A FA trade has only one recipient,
-              // so revert it directly and restore the Pokémon to the FA pool.
-              await SBL.trades.respond(id, 'reverted', adminUser.id, supabase);
-
-              reconcileRevertedTradeRoster(trade);
-              restoreRevertedFreeAgencyPool(trade);
-              await saveSharedState();
-              await savePublishedRosters(STATE.settings.rosters || {});
-            } else {
-              await SBL.trades.revert(id, supabase);
-
-              // Older deployments of the RPC can end the trade without restoring
-              // the roster snapshot. Reconcile the roster locally and persist both
-              // dashboard state and the public roster row. The reconciliation is
-              // idempotent, so it is safe if the RPC already restored the rosters.
-              reconcileRevertedTradeRoster(trade);
-              await saveSharedState();
-              await savePublishedRosters(STATE.settings.rosters || {});
-            }
+            await SBL.trades.revert(id,supabase,'reject-fa');
+          } else if(action === 'revoke' || action === 'revert'){
+            // Both commissioner reversal actions are one scoped database
+            // transaction: validate accepted status, restore ownership and
+            // Free Agency, and update trade status. No stale browser writes.
+            await SBL.trades.revert(id,supabase,action);
           }
           const trade = COMM_TRADES.find(t => Number(t.id) === id);
           await SBL.performance?.invalidate('trades:all');
@@ -4557,91 +4539,6 @@ function renderDraft(){ return drawDraft(); }
   // The database RPC is responsible for ending the trade; this client-side
   // reconciliation keeps the roster snapshot in STATE.settings.rosters in sync
   // even when an older/alternate RPC only updates the trade status.
-  function restoreRevertedFreeAgencyPool(trade){
-    if(!trade || (trade.target_team != null && String(trade.target_team).trim() !== '')) return;
-    STATE.settings = STATE.settings || {};
-    STATE.settings.freeAgency = STATE.settings.freeAgency || {mons:[]};
-    const pool = Array.isArray(STATE.settings.freeAgency.mons) ? STATE.settings.freeAgency.mons : [];
-    const key = name => rosterKey(name);
-    const existing = new Set(pool.map(mon => key(typeof mon === 'string' ? mon : mon?.name)));
-
-    // Prefer the point value from the draft pool, then from any remaining
-    // published FA metadata. The Pokémon is restored exactly once.
-    const pointLookup = {};
-    for(const mon of (STATE.settings?.draft?.pool || [])){
-      if(mon?.name) pointLookup[key(mon.name)] = mon.points ?? null;
-    }
-    for(const mon of pool){
-      const name = typeof mon === 'string' ? mon : mon?.name;
-      if(name && pointLookup[key(name)] == null && typeof mon !== 'string') pointLookup[key(name)] = mon.points ?? null;
-    }
-
-    const requested = Array.isArray(trade.mons_requested) ? trade.mons_requested : [];
-    for(const name of requested){
-      const k = key(name);
-      if(!k || existing.has(k)) continue;
-      pool.push({name, points: pointLookup[k] ?? null});
-      existing.add(k);
-    }
-    STATE.settings.freeAgency.mons = pool;
-  }
-
-  function reconcileRevertedTradeRoster(trade){
-    if(!trade) throw new Error('Trade not found while reverting roster.');
-    STATE.settings = STATE.settings || {};
-    STATE.settings.rosters = normalizeStoredRosters(STATE.settings.rosters || {});
-    const rosters = STATE.settings.rosters;
-    const proposer = String(trade.proposer_team || '').trim();
-    const target = trade.target_team == null ? null : String(trade.target_team || '').trim();
-    if(!proposer) throw new Error('Trade has no proposer team.');
-
-    const offered = (Array.isArray(trade.mons_offered) ? trade.mons_offered : []).map(normalizeRosterName).filter(Boolean);
-    const requested = (Array.isArray(trade.mons_requested) ? trade.mons_requested : []).map(normalizeRosterName).filter(Boolean);
-    const key = n => rosterKey(n);
-
-    // Capture point metadata before removing anything. This matters because the
-    // accepted trade may have moved the only copy of a Pokémon to the other side.
-    const pointLookup = {};
-    for(const list of Object.values(rosters)){
-      for(const mon of (Array.isArray(list) ? list : [])){
-        if(mon?.name) pointLookup[key(mon.name)] = mon;
-      }
-    }
-    for(const mon of (STATE.settings?.draft?.pool || [])){
-      if(mon?.name && !pointLookup[key(mon.name)]) pointLookup[key(mon.name)] = {name:mon.name, points:mon.points ?? null};
-    }
-    const entry = name => {
-      const found = pointLookup[key(name)];
-      return {name, points: found?.points ?? null};
-    };
-    const remove = (team, names) => {
-      if(!team) return;
-      const list = Array.isArray(rosters[team]) ? rosters[team] : [];
-      const removeKeys = new Set(names.map(key));
-      rosters[team] = list.filter(mon => !removeKeys.has(key(mon.name)));
-    };
-    const addMissing = (team, names) => {
-      if(!team) return;
-      const list = Array.isArray(rosters[team]) ? rosters[team] : [];
-      const have = new Set(list.map(mon => key(mon.name)));
-      for(const name of names){
-        if(!have.has(key(name))){ list.push(entry(name)); have.add(key(name)); }
-      }
-      rosters[team] = list;
-    };
-
-    // Restore the exact pre-trade ownership:
-    // proposer gets offered back; target gets requested back. For Free Agency,
-    // the offered Pokémon return to the proposer and requested Pokémon leave.
-    remove(proposer, requested);
-    addMissing(proposer, offered);
-    if(target){
-      remove(target, offered);
-      addMissing(target, requested);
-    }
-    STATE.settings.rosters = normalizeStoredRosters(rosters);
-  }
-
   async function logAdminAction(actionType, message, metadata={}){
     const user = adminUser || (await supabase.auth.getUser()).data?.user;
     // Keep the existing admin_email column for backwards compatibility, but
@@ -6427,38 +6324,24 @@ function renderDraft(){ return drawDraft(); }
   }
   async function switchLeague(nextId){
     requireAdmin();
-    const leagues = ensureLeagueRegistry();
-    const target = leagues[nextId];
+    if(!SBL.leagueDb?.isUuid?.(nextId)) throw new Error('Select an existing league ID.');
+    const leagues=ensureLeagueRegistry();
+    const currentId=SBL.leagueDb.selectedLeagueId();
+    if(nextId===currentId) return;
+    const target=leagues[nextId];
     if(!target) throw new Error('League not found.');
-    const currentId = STATE.settings.activeLeagueId;
-    if(nextId === currentId) return;
-    if(!confirm(`Switch from "${leagues[currentId]?.name || currentId}" to "${target.name || nextId}"?\n\nThe current league will be saved as-is, and the selected league will become the live league for this site.`)) return;
-    // Persist the currently selected league before changing the local selection.
-    // The normalized Supabase adapter uses the browser selection to choose its
-    // write target, so switching the selection too early would save the wrong league.
-    if(SBL.leagueDb?.setSelectedLeagueId && currentId) SBL.leagueDb.setSelectedLeagueId(currentId);
-    leagues[currentId] = {...leagues[currentId], state:snapshotLeagueState()};
-    const restored = target.state || {teamMap:{},settings:{},replays:{}};
-    STATE.teamMap = JSON.parse(JSON.stringify(restored.teamMap || {}));
-    STATE.replays = JSON.parse(JSON.stringify(restored.replays || {}));
-    STATE.settings = Object.assign(
-      {caseInsensitiveNames:true, rosters:{}, franchises:{}, franchiseDefinitions:{}, conferenceNames:{a:'Conference A',b:'Conference B'}, draft:defaultDraftState(), seasonArchives:{}, leagueUpdates:[], finals:SBL.finals.defaultFinalsState()},
-      JSON.parse(JSON.stringify(restored.settings || {}))
-    );
-    STATE.settings.leagues = leagues;
-    STATE.settings.activeLeagueId = nextId;
-    STATE.settings.draft = normalizeDraftState(STATE.settings.draft);
-    STATE.settings.seasonArchives = STATE.settings.seasonArchives || {};
-    STATE.settings.franchiseDefinitions = STATE.settings.franchiseDefinitions || {};
-    if(SBL.leagueDb?.setSelectedLeagueId) SBL.leagueDb.setSelectedLeagueId(nextId);
-    ACTIVE_MEMBER_FRANCHISES=[]; ACTIVE_LEAGUE_FRANCHISES=[]; ACTIVE_SEASON_SITOUT_USERS=new Set(); ACTIVE_MEMBER_PROFILES=[]; ACTIVE_MEMBER_FRANCHISES_LOADED=false;
+    if(!confirm(`Switch to "${target.name||nextId}"? No current or historical league data will be rewritten.`)) return;
+    SBL.leagueDb.setSelectedLeagueId(nextId);
+    SBL.leagueDb.setSelectedSeasonId('',nextId);
+    SBL.replays?.invalidateCache?.();
+    ACTIVE_MEMBER_FRANCHISES=[]; ACTIVE_LEAGUE_FRANCHISES=[];
+    ACTIVE_SEASON_SITOUT_USERS=new Set();ACTIVE_MEMBER_PROFILES=[];
+    ACTIVE_MEMBER_FRANCHISES_LOADED=false;
+    await loadState();
+    STATE.settings.activeLeagueId=nextId;
     await loadActiveMemberFranchiseList();
-    await deleteAllRemote();
-    await saveReplays();
-    await savePublishedRosters(STATE.settings.rosters || {});
-    await logAdminAction('switch_league', `Switched active league to "${target.name || nextId}".`, {from:currentId,to:nextId});
-    renderTicker();
-    render();
+    await logAdminAction('switch_league',`Switched league view to "${target.name||nextId}".`,{from:currentId,to:nextId});
+    renderTicker();render();
   }
   let leagueSetupStep = 1;
   let leagueSetupDraft = null;
@@ -6594,7 +6477,7 @@ function renderDraft(){ return drawDraft(); }
             for(const l of visible){ const full=await SBL.leagueDb.getLeague(l.id,supabase); if(full) STATE.settings.leagues[l.id]=full; }
             await loadState();
           }else{
-            await deleteAllRemote();await saveReplays();await savePublishedRosters({});
+            throw new Error('League creation requires the authoritative Supabase service.');
           }
           await logAdminAction('create_league',`Created and activated league "${d.name}".`,{leagueId:STATE.settings.activeLeagueId,name:d.name});
           leagueSetupDraft=null;leagueSetupStep=1;focusManageFranchisesAfterCreate=true;renderTicker();goToTab('league');
@@ -6952,11 +6835,11 @@ function renderDraft(){ return drawDraft(); }
 
       memberUser.innerHTML='<option value="">Select a user…</option>'+[...LEAGUE_PROFILE_CACHE.values()].filter(p=>!leagueMembers(active).some(m=>String(m.userId)===String(p.id))).map(p=>`<option value="${SBL.pokemon.escapeHtml(p.id)}">${SBL.pokemon.escapeHtml(displayNameForUser(p.id))}</option>`).join('');
       drawPending(); drawActive();
-      document.getElementById('addLeagueMember').onclick=async()=>{const userId=memberUser.value;if(!userId){memberStatus.textContent='Select a user first.';return;}if(leagueMembers(active).some(m=>String(m.userId)===String(userId))){memberStatus.textContent='That user is already a member.';return;}const p=LEAGUE_PROFILE_CACHE.get(String(userId));const member={userId,username:p?.username||'',role:memberRole.value||'manager',status:'active',addedAt:new Date().toISOString()};leagueMembers(active).push(member);await saveSharedState();await refreshLeagueProfileCache();await logAdminAction('add_league_member',`Added ${displayNameForUser(member.userId)} to league "${active.name||activeId}".`,{leagueId:activeId,userId,role:member.role});memberUser.value='';drawPending();drawActive();memberStatus.textContent='Member added.';};
+      document.getElementById('addLeagueMember').onclick=async()=>{const userId=memberUser.value;if(!userId){memberStatus.textContent='Select a user first.';return;}if(leagueMembers(active).some(m=>String(m.userId)===String(userId))){memberStatus.textContent='That user is already a member.';return;}const p=LEAGUE_PROFILE_CACHE.get(String(userId));const member={userId,username:p?.username||'',role:memberRole.value||'manager',status:'active',addedAt:new Date().toISOString()};const {data:confirmed,error:memberError}=await supabase.rpc('sbl_admin_add_league_member',{p_league_id:activeId,p_user_id:userId,p_role:member.role});if(memberError)throw memberError;leagueMembers(active).push({...member,role:confirmed?.role||member.role,status:confirmed?.status||'active'});await refreshLeagueProfileCache();await logAdminAction('add_league_member',`Added ${displayNameForUser(member.userId)} to league "${active.name||activeId}".`,{leagueId:activeId,userId,role:member.role});memberUser.value='';drawPending();drawActive();memberStatus.textContent='Member added.';};
     }catch(e){const pendingList=document.getElementById('leagueMembersList');if(pendingList) pendingList.innerHTML=`<div class="empty-state">Could not load membership requests: ${SBL.pokemon.escapeHtml(e.message||e)}</div>`;}})();
     } // End legacy inline membership/franchise manager (replaced by People workspace).
     document.getElementById('openPeopleWorkspace')?.addEventListener('click',()=>goToTab('people'));
-    document.getElementById('regenerateLeagueCode')?.addEventListener('click',async()=>{active.joinCode=makeLeagueJoinCode();await saveSharedState();await logAdminAction('regenerate_league_code',`Regenerated invite code for league "${active.name||activeId}".`,{leagueId:activeId});renderLeagueManager();});
+    document.getElementById('regenerateLeagueCode')?.addEventListener('click',async()=>{active.joinCode=makeLeagueJoinCode();await SBL.leagueDb.updateLeague(activeId,{join_code:active.joinCode},supabase);await logAdminAction('regenerate_league_code',`Regenerated invite code for league "${active.name||activeId}".`,{leagueId:activeId});renderLeagueManager();});
     document.getElementById('commissionerDeleteLeague')?.addEventListener('click',async event=>{
       const button=event.currentTarget;
       const name=String(active.name||'').trim();

@@ -41,6 +41,10 @@ const STATE_ID='__dashboard_state__';
 
 const supabase=window.SBL.getSupabase();
 let STATE={profileUserId:'',replays:{},teamMap:{},settings:{caseInsensitiveNames:true,rosters:{}},profileTeam:'',compareOpponent:'',comparePokemon:'',setPokemon:'',prepSection:'overview',prepCoverageMon:'',prepSwitchAtkItem:'',prepSwitchDefItem:'',prepSwitchWeather:'',prepSwitchTerrain:'',prepSwitchHits:'',prepSwitchAtkEVs:{hp:0,atk:0,def:0,spa:0,spd:0,spe:0},prepSwitchAttackerSide:'opponent'};
+// CP4.170: page-scoped, bounded read models. Repeated team switches never
+// rescan every replay and requery the same species; invalidated on reload.
+const TEAM_AGGREGATE_CACHE=new Map(), TEAM_MON_CACHE=new Map();
+function clearMatchPrepReadModels(){TEAM_AGGREGATE_CACHE.clear();TEAM_MON_CACHE.clear();}
 const $=id=>document.getElementById(id);
 function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 function roleDisplayLabel(value){const spaced=String(value??'').trim().replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[._-]+/g,' ').replace(/\s+/g,' ').trim();if(/^(?:cleric|celric)$/i.test(spaced))return 'Recovery';if(/^speed control$/i.test(spaced)||/^sticky web(?: setter|s)?$/i.test(spaced))return 'Sticky Webs';if(/^hazard setter$/i.test(spaced))return '';if(/^stealth rock setter$/i.test(spaced))return 'Stealth Rock';if(/^spikes setter$/i.test(spaced))return 'Spikes';if(/^toxic spikes setter$/i.test(spaced))return 'Toxic Spikes';return spaced.replace(/\b\w/g,c=>c.toUpperCase());}
@@ -205,7 +209,7 @@ function canonicalSpecies(s){
   return compactMap[compact]||raw;
 }
 function hasCurrentRoster(team){return rosterForTeam(team).length>0}
-function aggregate(team){
+function aggregateUncached(team){
   const games=rowsForTeam(team);const mons={};let wins=0;const pairCounts={};
   const currentRoster=rosterForTeam(team);
   // Seed the analysis with every current-roster Pokémon so the page represents
@@ -262,6 +266,14 @@ function aggregate(team){
     Object.keys(pairCounts).forEach(k=>{const [x,y]=k.split('|');if(!allowed.has(x)||!allowed.has(y))delete pairCounts[k]});
   }
   return {games,wins,losses:Math.max(0,games.length-wins),mons,pairCounts}
+}
+function aggregate(team){
+  const key=teamKey(team);
+  if(TEAM_AGGREGATE_CACHE.has(key))return TEAM_AGGREGATE_CACHE.get(key);
+  const value=aggregateUncached(team);
+  if(TEAM_AGGREGATE_CACHE.size>=36)TEAM_AGGREGATE_CACHE.delete(TEAM_AGGREGATE_CACHE.keys().next().value);
+  TEAM_AGGREGATE_CACHE.set(key,value);
+  return value;
 }
 function formatGameDate(v){if(!v)return '—';const d=new Date(v);return Number.isNaN(d.getTime())?'—':d.toLocaleDateString()}
 function replayUrl(id){
@@ -529,42 +541,38 @@ function matchPrepApiCandidates(species){
   const id=exactMegaApiId(species);
   return [...(id?[String(id)]:[]),...pokemonDexCandidates(species)];
 }
+// The legacy fallback is shared by Speed, scouting and move selectors.
+// Cache both completed and in-flight requests rather than fetching the same
+// full PokéAPI species payload again each time the team is switched.
+const POKEAPI_REQUEST_CACHE=new Map();
 async function requestPokemonApi(slug){
-  try{
-    const r=await fetch('https://pokeapi.co/api/v2/pokemon/'+encodeURIComponent(slug),{cache:'force-cache'});
-    return r.ok?await r.json():null;
-  }catch(_){return null;}
+  const key=String(slug||'').trim().toLowerCase();
+  if(!key)return null;
+  const hit=POKEAPI_REQUEST_CACHE.get(key);
+  if(hit && hit.until>Date.now())return hit.promise;
+  const promise=(async()=>{
+    try{
+      const r=await fetch('https://pokeapi.co/api/v2/pokemon/'+encodeURIComponent(key),{cache:'force-cache'});
+      return r.ok?await r.json():null;
+    }catch(_){return null;}
+  })();
+  if(POKEAPI_REQUEST_CACHE.size>=100)POKEAPI_REQUEST_CACHE.delete(POKEAPI_REQUEST_CACHE.keys().next().value);
+  POKEAPI_REQUEST_CACHE.set(key,{promise,until:Date.now()+2*60*1000});
+  return promise;
 }
 
 async function fetchBaseSpeed(species){
-  const cacheKey=String(species||'').trim().toLowerCase();
-  if(SPEED_CACHE.has(cacheKey))return SPEED_CACHE.get(cacheKey);
-
-  const embedded=baseSpeedForSpecies(species);
-  if(embedded!==null){SPEED_CACHE.set(cacheKey,embedded);return embedded;}
-
-  // Use the same canonical Pokédex data that Showdown itself uses. This is
-  // much more complete than maintaining a hand-written speed table.
-  const dex=await loadShowdownDex();
-  if(dex){
-    for(const slug of (exactMegaApiId(species)?window.SBL.pokemon.showdownStatsIdCandidates(species):showdownDexCandidates(species))){
-      const d=dex[slug];
-      const value=Number(d?.baseStats?.spe);
-      if(Number.isFinite(value)){
-        SPEED_CACHE.set(cacheKey,value); return value;
-      }
-    }
+  const key=norm(canonicalSpecies(species));
+  if(SPEED_CACHE.has(key))return SPEED_CACHE.get(key);
+  // The SAME exact-form profile supplies the analyser's speed, typing and
+  // damage inputs. Never use base-species speed for an unsupported Mega.
+  const profile=await fetchPokemonData(species);
+  let value=Number(profile?.stats?.speed);
+  if(!profile || !Number.isFinite(value) || value<=0){
+    value=isProtectedBattleForm(species)?null:baseSpeedForSpecies(species);
   }
-
-  // Final fallback for anything not present in the Showdown data.
-  for(const slug of (exactMegaApiId(species)?[String(exactMegaApiId(species))]:pokemonDexCandidates(species))){
-    const d=await requestPokemonApi(slug);
-    if(!d)continue;
-    const st=(d.stats||[]).find(x=>x.stat?.name==='speed');
-    const value=Number(st?.base_stat);
-    if(Number.isFinite(value)){SPEED_CACHE.set(cacheKey,value);return value;}
-  }
-  SPEED_CACHE.set(cacheKey,null); return null;
+  SPEED_CACHE.set(key,value);
+  return value;
 }
 
 function minSpeedFromBase(base,level=100){
@@ -617,7 +625,7 @@ function displaySpecies(m){
 }
 
 
-async function franchiseMons(team){
+async function franchiseMonsUncached(team){
   // Match Prep operates on one row per current-roster species.
   // Do not use groupEquivalentVariants here: that function intentionally groups
   // Pokémon with identical speed signatures, which can incorrectly merge two
@@ -655,6 +663,15 @@ async function franchiseMons(team){
   return enriched;
 }
 
+async function franchiseMons(team){
+  const key=teamKey(team);
+  if(TEAM_MON_CACHE.has(key))return TEAM_MON_CACHE.get(key);
+  const pending=franchiseMonsUncached(team);
+  if(TEAM_MON_CACHE.size>=36)TEAM_MON_CACHE.delete(TEAM_MON_CACHE.keys().next().value);
+  TEAM_MON_CACHE.set(key,pending);
+  try{return await pending;}catch(error){if(TEAM_MON_CACHE.get(key)===pending)TEAM_MON_CACHE.delete(key);throw error;}
+}
+
 // All matchup calculations now use the shared service; no page-local chart.
 const MATCHUPS=window.SBL?.matchups;
 if(!MATCHUPS)throw new Error('Matchup engine unavailable.');
@@ -677,79 +694,89 @@ function pokemonDexCandidates(species){
   for(let i=parts.length-1;i>=1;i--) add(parts.slice(0,i).join('-'));
   return out;
 }
-async function fetchPokemonData(species){
-  const key=norm(canonicalSpecies(species));
-  if(POKEMON_DATA_CACHE.has(key)) return POKEMON_DATA_CACHE.get(key);
+const POKEMON_DATA_PENDING=new Map();
+let CATALOG_READ_FAILED=false;
+function isProtectedBattleForm(species){
+  const slug=String(window.SBL?.domain?.pokemonKey?.(species)||spriteId(species)||'').toLowerCase();
+  return /(?:-mega(?:-[xyz])?|-primal|-hisui|-galar|-alola|-therian|-origin|-crowned|-terastal|-stellar|-battle-bond|-blaze|-combat|-aqua)$/.test(slug)
+    || /^(?:mega-|primal-)/.test(slug);
+}
+async function exactCatalogueProfile(species){
+  if(CATALOG_READ_FAILED || !window.SBL.pokemonCatalog?.getBattleProfile)return null;
+  try{return await window.SBL.pokemonCatalog.getBattleProfile(species);}
+  catch(error){
+    CATALOG_READ_FAILED=true;
+    console.warn('Global Pokémon catalogue unavailable; using verified exact-form fallbacks.',error);
+    return null;
+  }
+}
+function showdownProfileCandidates(species){
+  const list=exactMegaApiId(species) && window.SBL.pokemon?.showdownStatsIdCandidates
+    ? window.SBL.pokemon.showdownStatsIdCandidates(species)
+    : showdownDexCandidates(species);
+  if(!isProtectedBattleForm(species))return list;
+  const id=window.SBL.domain?.pokemonCatalogId?.(species)||spriteId(species).replace(/[^a-z0-9]/g,'');
+  // A missing exact form is UNAVAILABLE, never the base Pokémon's data.
+  return list.filter(x=>String(x).toLowerCase().replace(/[^a-z0-9]/g,'')===id);
+}
+function apiProfileCandidates(species){
+  const numeric=exactMegaApiId(species);
+  if(numeric)return [String(numeric)];
+  const list=pokemonDexCandidates(species);
+  return isProtectedBattleForm(species)?list.filter(x=>String(x).replace(/[^a-z0-9]/g,'')===window.SBL.domain.pokemonCatalogId(species)):list;
+}
+async function loadPokemonData(species){
+  const canonical=await exactCatalogueProfile(species);
+  if(canonical)return {stats:canonical.stats,types:canonical.types,abilities:canonical.abilities,source:canonical.source,version:canonical.version};
   const dex=await loadShowdownDex();
   if(dex){
-    // Showdown's pokedex.json keys are fully compacted (no hyphens/spaces —
-    // e.g. "landorustherian", "taurospaldeacombat"), so forme lookups need
-    // showdownDexCandidates (which runs everything through spriteCandidates
-    // and includes that compacted form). pokemonDexCandidates only trims
-    // hyphenated segments off the end, which never produces a compacted key,
-    // so every Pokémon with a non-cosmetic forme (Therian, regional forms,
-    // Paldean Tauros, Ogerpon masks, etc.) was skipping the Showdown dex
-    // entirely and falling through to a much less reliable PokeAPI guess
-    // (or no data at all) — this was the root cause of formes not showing
-    // data in the scouting popup.
-    for(const slug of (exactMegaApiId(species)?window.SBL.pokemon.showdownStatsIdCandidates(species):showdownDexCandidates(species))){
+    for(const slug of showdownProfileCandidates(species)){
       const d=dex[slug];
-      if(d?.baseStats || d?.types || d?.abilities){
-        const bs=d.baseStats||{};
-        const stats={
-          hp:bs.hp,
-          attack:bs.attack??bs.atk,
-          defense:bs.defense??bs.def,
+      if(!d?.baseStats && !d?.types && !d?.abilities)continue;
+      const bs=d.baseStats||{};
+      return {
+        stats:{hp:bs.hp,attack:bs.attack??bs.atk,defense:bs.defense??bs.def,
           'special-attack':bs['special-attack']??bs.spa,
-          'special-defense':bs['special-defense']??bs.spd,
-          speed:bs.speed??bs.spe
-        };
-        const data={
-          stats,
-          types:(d.types||[]).map(String),
-          abilities:Object.values(d.abilities||{}).map(String).filter(Boolean)
-        };
-        POKEMON_DATA_CACHE.set(key,data); return data;
-      }
+          'special-defense':bs['special-defense']??bs.spd,speed:bs.speed??bs.spe},
+        types:(d.types||[]).map(String),abilities:Object.values(d.abilities||{}).map(String).filter(Boolean),
+        source:'showdown-exact-form'
+      };
     }
   }
-  // Never silently apply the base species' stats or typing to a newer Mega
-  // whose exact form ID is known. Its typing and stats may have changed.
-  const candidates=exactMegaApiId(species)?[String(exactMegaApiId(species))]:pokemonDexCandidates(species);
-  for(const slug of candidates){
+  for(const slug of apiProfileCandidates(species)){
     const d=await requestPokemonApi(slug);
     if(!d)continue;
-    const data={
+    return {
       stats:Object.fromEntries((d.stats||[]).map(x=>[x.stat?.name,x.base_stat]).filter(x=>x[0])),
-      types:(d.types||[]).sort((a,b)=>a.slot-b.slot).map(x=>x.type?.name).filter(Boolean),
-      abilities:(d.abilities||[]).map(x=>x.ability?.name).filter(Boolean)
+      types:(d.types||[]).slice().sort((a,b)=>a.slot-b.slot).map(x=>x.type?.name).filter(Boolean),
+      abilities:(d.abilities||[]).map(x=>x.ability?.name).filter(Boolean),source:'pokeapi-exact-form'
     };
-    POKEMON_DATA_CACHE.set(key,data); return data;
   }
-  POKEMON_DATA_CACHE.set(key,null); return null;
+  return null;
+}
+async function fetchPokemonData(species){
+  const key=norm(canonicalSpecies(species));
+  if(POKEMON_DATA_CACHE.has(key))return POKEMON_DATA_CACHE.get(key);
+  if(POKEMON_DATA_PENDING.has(key))return POKEMON_DATA_PENDING.get(key);
+  const pending=loadPokemonData(species);
+  POKEMON_DATA_PENDING.set(key,pending);
+  try{
+    const value=await pending;
+    POKEMON_DATA_CACHE.set(key,value);
+    return value;
+  }finally{
+    if(POKEMON_DATA_PENDING.get(key)===pending)POKEMON_DATA_PENDING.delete(key);
+  }
 }
 async function fetchTypes(species){
   const key=norm(canonicalSpecies(species));
   if(TYPE_CACHE.has(key))return TYPE_CACHE.get(key);
-
-  // Prefer Showdown's own canonical Pokédex so unusual names/forms and
-  // aliases don't depend on guessing a third-party URL slug.
-  const dex=await loadShowdownDex();
-  if(dex){
-    for(const slug of (exactMegaApiId(species)?window.SBL.pokemon.showdownStatsIdCandidates(species):showdownDexCandidates(species))){
-      const types=normalizedTypes(dex[slug]?.types||[]);
-      if(types.length){TYPE_CACHE.set(key,types);return types;}
-    }
-  }
-
-  const candidates=exactMegaApiId(species)?[String(exactMegaApiId(species))]:pokemonDexCandidates(species);
-  for(const slug of candidates){
-    const d=await requestPokemonApi(slug);
-    if(!d)continue;
-    const types=normalizedTypes((d.types||[]).sort((a,b)=>a.slot-b.slot).map(x=>x.type?.name).filter(Boolean));
-    if(types.length){TYPE_CACHE.set(key,types);return types}
-  }
-  TYPE_CACHE.set(key,[]);return [];
+  // Share the same form-level read with scouting and damage analysis. This
+  // eliminates a separate Pokédex/PokeAPI waterfall for every type tile.
+  const data=await fetchPokemonData(species);
+  const types=normalizedTypes(data?.types||[]);
+  TYPE_CACHE.set(key,types);
+  return types;
 }
 
 function typePills(types){return types.length?`<div class="type-row">${types.map(t=>`<span class="type-pill type-${esc(t)}">${esc(t)}</span>`).join('')}</div>`:'<div class="type-row"><span class="type-pill type-unknown">Type unknown</span></div>'}
@@ -886,11 +913,18 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
   const opponent=selectedOpponent && !sameTeam(selectedOpponent,yourTeam)
     ? selectedOpponent
     : (names.find(n=>!sameTeam(n,yourTeam))||'');
-  const your=await franchiseMons(yourTeam);
-  const opp=await franchiseMons(opponent);
   if(!opponent){
     return `<section class="panel"><h2>Match Prep</h2><p class="panel-desc">Choose an opponent franchise to start preparing for the match.</p><div class="empty">No opposing franchise is available.</div></section>`;
   }
+  // One catalogue request for both rosters, before any per-Pokémon helpers run.
+  // An unpopulated/offline catalogue still permits existing verified sources.
+  if(!CATALOG_READ_FAILED && window.SBL.pokemonCatalog?.preloadBattleProfiles){
+    try{
+      const species=[...Object.values(aggregate(yourTeam).mons),...Object.values(aggregate(opponent).mons)].map(m=>m.species);
+      await window.SBL.pokemonCatalog.preloadBattleProfiles(species);
+    }catch(error){CATALOG_READ_FAILED=true;console.warn('Catalogue preload unavailable; using exact-form sources.',error);}
+  }
+  const [your,opp]=await Promise.all([franchiseMons(yourTeam),franchiseMons(opponent)]);
   const all=[...your,...opp];
   const typePairs=await Promise.all(all.map(async m=>[m.species,await fetchTypes(m.species)]));
   const typeMap=Object.fromEntries(typePairs);
@@ -1184,8 +1218,24 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
   const loadCoverageMoves=async(species)=>{
     const key=norm(species);
     if(coverageMoveCache.has(key))return coverageMoveCache.get(key);
+    // Shared, versioned move catalogue is the preferred source for both
+    // coverage and Switch-In. Avoid hundreds of individual PokeAPI requests.
+    if(window.SBL.pokemonCatalog?.getDamagingLearnset && !CATALOG_READ_FAILED){
+      try{
+        const result=await window.SBL.pokemonCatalog.getDamagingLearnset(species);
+        if(result){
+          const moves=result.moves.map(m=>({...m,type:String(m.type||'').replace(/\b\w/g,c=>c.toUpperCase())}));
+          coverageMoveCache.set(key,moves);return moves;
+        }
+      }catch(error){CATALOG_READ_FAILED=true;console.warn('Move catalogue unavailable; using legacy data.',error);}
+    }
     let raw=[];
     const megaId=exactMegaApiId(species);
+    // Unversioned custom Z-Mega rulesets are not interchangeable with the
+    // base species. Never show a guessed legal movepool when data is missing.
+    if(/-mega-z$/.test(SBL.domain?.pokemonKey?.(species)||'')){
+      coverageMoveCache.set(key,[]);return [];
+    }
     // A Mega ordinarily inherits its base species' learnset. Query its own
     // form first for newer moves, then the base species only for moves.
     // Mega forms use the base species learnset if the form has no distinct
@@ -1727,6 +1777,7 @@ async function render(){
       const main=$('main');
       if(main){ main.innerHTML=nextMarkup; window.__sblRefreshPrepThreatBoard?.(); window.__sblRefreshPrepTeamPlanner?.(); }
     }catch(e){
+      if(renderToken!==STATE.prepRenderToken)return;
       console.error('Match Prep render failed:',e);
       $('main').innerHTML=`<section class="panel"><div class="empty">Match Prep could not load: ${esc(e.message||e)}</div></section>`;
       return;
@@ -2331,13 +2382,18 @@ requestAnimationFrame(()=>host.classList.add('open'));
     async function damagingLearnset(species){
       const cacheKey=norm(species);
       if(switchMoveCache[cacheKey]) return switchMoveCache[cacheKey];
-      const candidates=pokemonDexCandidates(species);
+      if(window.SBL.pokemonCatalog?.getDamagingLearnset && !CATALOG_READ_FAILED){
+        try{
+          const result=await window.SBL.pokemonCatalog.getDamagingLearnset(species);
+          if(result){switchMoveCache[cacheKey]=result.moves;return result.moves;}
+        }catch(error){CATALOG_READ_FAILED=true;console.warn('Move catalogue unavailable; using legacy data.',error);}
+      }
+      const candidates=isProtectedBattleForm(species)?apiProfileCandidates(species):pokemonDexCandidates(species);
       let learnset=[];
       for(const slug of candidates){
         try{
-          const r=await fetch(`https://pokeapi.co/api/v2/pokemon/${encodeURIComponent(slug)}`,{cache:'force-cache'});
-          if(!r.ok) continue;
-          const data=await r.json();
+          const data=await requestPokemonApi(slug);
+          if(!data) continue;
           learnset=(data.moves||[]).map(entry=>({name:entry.move?.name,url:entry.move?.url})).filter(x=>x.name&&x.url);
           if(learnset.length) break;
         }catch(e){}
@@ -2388,11 +2444,11 @@ requestAnimationFrame(()=>host.classList.add('open'));
         }
         // Never default to an arbitrary observed move: some observed moves are
         // status/setup moves and are invalid for damage calculations.
-        sel.innerHTML='<option value="">No legal damaging moves found</option>';
+        sel.innerHTML='<option value="">No recorded damaging moves for this form</option>';
         STATE.prepSwitchMove='';
         return [];
       }catch(err){
-        sel.innerHTML='<option value="">No legal damaging moves found</option>';
+        sel.innerHTML='<option value="">No recorded damaging moves for this form</option>';
         STATE.prepSwitchMove='';
         return [];
       }
@@ -2511,27 +2567,18 @@ requestAnimationFrame(()=>host.classList.add('open'));
               rows.push({target,min:0,max:0,pctMin:0,pctMax:0,ko:null,immune:true,ability:defenderAbility,desc:''});
               continue;
             }
-            const makeCalcPokemon=(species,opts)=>{
-              const raw=canonicalSpecies(species);
-              const form=(SBL.domain?.pokemonKey||((x)=>String(x).toLowerCase()))(raw);
-              const isPermanentForm=/(?:-mega(?:-[xyz])?|-primal)$/.test(form);
-              const candidates=[raw,...(isPermanentForm?[]:spriteCandidates(raw).map(x=>String(x).replace(/-/g,' ')))].filter(Boolean);
-              let lastErr;
-              for(const candidate of candidates){
-                try{
-                  const mon=new C.Pokemon(gen,candidate,opts);
-                  // Custom draft forms absent from @smogon/calc must fail
-                  // visibly, rather than produce fictitious base-form damage.
-                  const returned=(SBL.domain?.pokemonKey||((x)=>String(x).toLowerCase()))(mon.name||candidate);
-                  if(isPermanentForm&&returned!==form)continue;
-                  return mon;
-                }catch(e){lastErr=e;}
-              }
-              throw lastErr||new Error('Unsupported form in calculator: '+raw);
+            // Shared catalogue adapter uses native form data when available;
+            // otherwise an exact versioned form profile with explicit stats,
+            // type and ability overrides. An unknown custom form is never
+            // calculated as its weaker base form.
+            const makeCalcPokemon=async (species,opts)=>{
+              if(!SBL.pokemonCatalog?.createCalcPokemon)
+                throw new Error('Centralised battle-form adapter is unavailable.');
+              return SBL.pokemonCatalog.createCalcPokemon(C,gen,canonicalSpecies(species),opts);
             };
-            const atk=makeCalcPokemon(mon,{level:100,item:atkItem||undefined,ability:attackerAbility||undefined,evs:STATE.prepSwitchAtkEVs||{hp:0,atk:0,def:0,spa:0,spd:0,spe:0},boosts:chargeBoost||undefined});
+            const atk=await makeCalcPokemon(mon,{level:100,item:atkItem||undefined,ability:attackerAbility||undefined,evs:STATE.prepSwitchAtkEVs||{hp:0,atk:0,def:0,spa:0,spd:0,spe:0},boosts:chargeBoost||undefined});
             const evs=(STATE.prepSwitchEVsByMon||{})[target.species]||{hp:0,atk:0,def:0,spa:0,spd:0,spe:0};
-            const def=makeCalcPokemon(target.species,{level:100,item:STATE.prepSwitchDefItem||undefined,ability:defenderAbility||undefined,evs});
+            const def=await makeCalcPokemon(target.species,{level:100,item:STATE.prepSwitchDefItem||undefined,ability:defenderAbility||undefined,evs});
             const res=switchField?C.calculate(gen,atk,def,mv,switchField):C.calculate(gen,atk,def,mv);
             const flattenSwitch=v=>{const out=[];const walk=x=>{if(Array.isArray(x))x.forEach(walk);else if(Number.isFinite(Number(x)))out.push(Number(x));};walk(v);return out;};
             const dmg=res.damage;
@@ -2759,6 +2806,7 @@ async function openPokemonScoutPopup(team,key){
 }
 
 async function load(){
+  clearMatchPrepReadModels();
   try{
     const {data:authData}=await supabase.auth.getUser();
     const user=authData?.user||null;
