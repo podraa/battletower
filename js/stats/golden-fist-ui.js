@@ -1,4 +1,4 @@
-/* SBL Stats UI — Phase 3: Golden Fist renderer */
+/* SBL Stats UI - Phase 3: Golden Fist renderer */
 (function(){
   'use strict';
   window.SBLStatsUI = window.SBLStatsUI || {};

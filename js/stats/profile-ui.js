@@ -1,4 +1,4 @@
-/* SBL Stats UI — Phase 3: Pokémon profile renderer (luck-rank-kills-per-game-ui-v2) */
+/* SBL Stats UI - Phase 3: Pokémon profile renderer (luck-rank-kills-per-game-ui-v2) */
 (function(){
   'use strict';
   window.SBLStatsUI = window.SBLStatsUI || {};
@@ -56,10 +56,10 @@
       };
     };
     const safeReplayContext = replayId => {
-      try { return replayContext(replayId || ''); } catch(e) { return {week:'—', matchup:'—'}; }
+      try { return replayContext(replayId || ''); } catch(e) { return {week:'N/A', matchup:'N/A'}; }
     };
     const safeCause = cause => {
-      try { return displayCause(cause); } catch(e) { return cause ? String(cause) : '—'; }
+      try { return displayCause(cause); } catch(e) { return cause ? String(cause) : 'N/A'; }
     };
     // Victim/killer cells intentionally show only the Pokémon name.
     // Do not render type badges here; those make the event tables unnecessarily busy.
@@ -74,7 +74,7 @@
     const avg = s.games ? (s.dealt/s.games).toFixed(1) : '0';
     const luckScope = weekFilter || 'ALL';
     const luckRank = typeof luckPokemonRank === 'function' ? luckPokemonRank(s.species, luckScope) : null;
-    const luckRankLabel = luckRank ? `#${luckRank.rank}` : '—';
+    const luckRankLabel = luckRank ? `#${luckRank.rank}` : 'N/A';
     const killRows = (Array.isArray(s.killLog) ? s.killLog : []).map(x=>normalizeProfileLog(x,'kill')).sort((a,b)=>(a.replayDate-b.replayDate)||(a.turn-b.turn));
     const assistRows = (Array.isArray(s.assistLog) ? s.assistLog : []).map(x=>normalizeProfileLog(x,'assist')).sort((a,b)=>(a.replayDate-b.replayDate)||(a.turn-b.turn));
     const deathRows = (Array.isArray(s.deathLog) ? s.deathLog : []).map(x=>normalizeProfileLog(x,'death')).sort((a,b)=>(a.replayDate-b.replayDate)||(a.turn-b.turn));
