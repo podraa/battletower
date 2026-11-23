@@ -228,8 +228,11 @@
     return String(species||'').toLowerCase().replace(/[^a-z0-9]/g,'');
   }
   function pokemonTypes(species){
-    const d = POKEDEX_TYPES[dexKey(species)];
-    return d?.types || [];
+    // Central type lookup is used by My Team, Rosters and Match Prep too.
+    // The Showdown Dex map remains a compatibility fallback only.
+    const shared=SBL.pokemonTypes?.lookupTypes?.(species)||[];
+    const raw=shared.length?shared:(POKEDEX_TYPES[dexKey(species)]?.types||[]);
+    return raw.map(type=>String(type).charAt(0).toUpperCase()+String(type).slice(1).toLowerCase());
   }
   const TYPE_CLASS = {Normal:'normal',Fire:'fire',Water:'water',Electric:'electric',Grass:'grass',Ice:'ice',Fighting:'fighting',Poison:'poison',Ground:'ground',Flying:'flying',Psychic:'psychic',Bug:'bug',Rock:'rock',Ghost:'ghost',Dragon:'dragon',Dark:'dark',Steel:'steel',Fairy:'fairy'};
   function typeBadges(species){
@@ -1274,7 +1277,7 @@
       const wantedType = typeFilter.value;
       const stats = pokemonSearchCache.filter(s => {
         const name=s.species.toLowerCase();
-        return (!q || name.includes(q)) && (wantedType==='all' || pokemonTypes(s.species).includes(wantedType));
+        return (!q || name.includes(q)) && (wantedType==='all' || pokemonTypes(s.species).some(t=>t.toLowerCase()===String(wantedType).toLowerCase()));
       }).sort((a,b)=>a.species.localeCompare(b.species,undefined,{sensitivity:'base'}));
       if(!stats.length){
         table.innerHTML = `<div class="empty-state">${q ? `No Pokémon matching <strong>${SBL.pokemon.escapeHtml(input.value.trim())}</strong> in this scope.` : 'No Pokémon data for this scope yet.'}</div>`;

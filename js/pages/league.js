@@ -1522,7 +1522,7 @@
         ${roster.length?`<div class="myteam-roster-grid">${roster.map(mon=>{
           const st=myPokemonStats(mon.name); const has=st&&st.games>0;
           return `<div class="myteam-mon">
-            <div class="myteam-mon-top">${SBL.pokemon.spriteMarkup(mon.name,'sprite')}<div><div class="myteam-mon-name">${SBL.pokemon.escapeHtml(SBL.pokemon.displayName(mon.name))}</div><div class="myteam-mon-points">${mon.points!=null?SBL.pokemon.escapeHtml(mon.points)+' pts':'Unranked'}</div></div></div>
+            <button type="button" class="myteam-mon-profile" data-myteam-profile="${SBL.pokemon.escapeHtml(mon.name)}" aria-label="Open ${SBL.pokemon.escapeHtml(mon.name)} Pokémon Profile"><div class="myteam-mon-top">${SBL.pokemon.spriteMarkup(mon.name,'sprite')}<div><div class="myteam-mon-name">${SBL.pokemon.escapeHtml(SBL.pokemon.displayName(mon.name))}</div><div class="myteam-mon-points">${mon.points!=null?SBL.pokemon.escapeHtml(mon.points)+' pts':'Unranked'}</div></div></div></button>
             <div class="myteam-mon-stats">
               <div class="myteam-mon-stat"><div class="v">${has?st.games:'—'}</div><div class="l">Games</div></div>
               <div class="myteam-mon-stat"><div class="v" style="color:var(--teal)">${has?st.kills:'—'}</div><div class="l">Kills</div></div>
@@ -1562,6 +1562,12 @@
       </div>`;
 
     SBL.rosterAnalysis?.bind(contentEl);
+    // The profile click is tied to this render; replacing the roster DOM removes
+    // old handlers. No additional document listeners accumulate on refresh.
+    contentEl.querySelectorAll('[data-myteam-profile]').forEach(button=>button.addEventListener('click',()=>{
+      const species=button.dataset.myteamProfile;
+      window.SBL.pokemonProfile?.open({species,performance:myPokemonStats(species)});
+    }));
     document.getElementById('rerollTradeBtn').onclick=()=>renderMyTeam();
     if(suggestion){ document.getElementById('useTradeSuggestionBtn').onclick=()=>useRandomTradeSuggestion(suggestion); }
     wireNextBattle();

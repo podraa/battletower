@@ -17,14 +17,20 @@
     const existing=normalizeCalcModule(window.calc);
     if(existing){ window.calc=existing; return existing; }
     if(!calcEnginePromise){
-      calcEnginePromise=import('https://cdn.jsdelivr.net/npm/@smogon/calc@0.11.0/+esm')
-        .then(mod=>{
-          const C=normalizeCalcModule(mod);
-          if(!C) throw new Error('The Smogon calculator loaded, but its Pokemon/Move API was not exposed correctly.');
-          window.calc=C;
-          return C;
-        })
-        .catch(err=>{calcEnginePromise=null; throw err;});
+      calcEnginePromise=(async()=>{
+        let lastError=null;
+        for(const source of [
+          'https://cdn.jsdelivr.net/npm/@smogon/calc@0.11.0/+esm',
+          'https://esm.sh/@smogon/calc@0.11.0?bundle'
+        ]){
+          try{
+            const C=normalizeCalcModule(await import(source));
+            if(C){window.calc=C;return C;}
+            lastError=new Error('Calculator API was not exposed by '+source);
+          }catch(error){lastError=error;}
+        }
+        throw new Error('Switch-In calculator could not load from either provider: '+(lastError?.message||'network unavailable'));
+      })().catch(err=>{calcEnginePromise=null;throw err;});
     }
     return calcEnginePromise;
   }
@@ -40,7 +46,7 @@
 const STATE_ID='__dashboard_state__';
 
 const supabase=window.SBL.getSupabase();
-let STATE={profileUserId:'',replays:{},teamMap:{},settings:{caseInsensitiveNames:true,rosters:{}},profileTeam:'',compareOpponent:'',comparePokemon:'',setPokemon:'',prepSection:'overview',prepCoverageMon:'',prepSwitchAtkItem:'',prepSwitchDefItem:'',prepSwitchWeather:'',prepSwitchTerrain:'',prepSwitchHits:'',prepSwitchAtkEVs:{hp:0,atk:0,def:0,spa:0,spd:0,spe:0},prepSwitchAttackerSide:'opponent'};
+let STATE={profileUserId:'',replays:{},teamMap:{},settings:{caseInsensitiveNames:true,rosters:{}},profileTeam:'',compareOpponent:'',comparePokemon:'',setPokemon:'',prepSection:'overview',prepCoverageMon:'',prepSwitchAtkItem:'',prepSwitchDefItem:'',prepSwitchWeather:'',prepSwitchTerrain:'',prepSwitchHits:'',prepSwitchAtkEVs:{hp:0,atk:0,def:0,spa:0,spd:0,spe:0},prepSwitchAllDefEVs:{hp:0,def:0,spd:0},prepSwitchAttackerSide:'opponent'};
 // CP4.170: page-scoped, bounded read models. Repeated team switches never
 // rescan every replay and requery the same species; invalidated on reload.
 const TEAM_AGGREGATE_CACHE=new Map(), TEAM_MON_CACHE=new Map();
@@ -72,7 +78,9 @@ function formBaseKey(s){
 function resolveReplaySpecies(raw, rosterSpecies){
   const species=canonicalSpecies(raw);
   if(!Array.isArray(rosterSpecies)||!rosterSpecies.length)return species;
-  const exact=rosterSpecies.find(r=>norm(r)===norm(species));
+  // A display prefix (Mega Greninja) and a Showdown suffix
+  // (Greninja-Mega) are one permanent form, never two roster entries.
+  const exact=rosterSpecies.find(r=>speciesKey(r)===speciesKey(species));
   if(exact)return exact;
   // Replay parsers sometimes lose the forme suffix. If exactly one rostered
   // Pokémon shares the same base species, attach the roster's real forme.
@@ -88,7 +96,7 @@ function monsForSide(r,side,preferredRoster=[]){
   for(const m of Object.values(r.mons||{})){
     if(String(m?.side||'').toLowerCase()!==side || !m.species)continue;
     const species=resolveReplaySpecies(m.species,resolutionRoster);
-    const k=norm(species);
+    const k=speciesKey(species);
     if(!out[k])out[k]={...m,species,_fromReplay:true};
     else{
       const x=out[k];
@@ -106,7 +114,7 @@ function monsForSide(r,side,preferredRoster=[]){
   // A submitted team member is an appearance even when there was no switch-in
   // event. This is the sitewide definition used by Match Prep and Stats.
   for(const sp of replaySpecies){
-    const k=norm(sp);
+    const k=speciesKey(sp);
     if(!out[k])out[k]={species:sp,appearances:1,kills:0,deaths:0,damageDealt:0,damageTaken:0,moves:{},items:{},leads:0,sentOut:0,_fromReplay:true};
     else out[k].appearances=1;
   }
@@ -208,6 +216,9 @@ function canonicalSpecies(s){
   };
   return compactMap[compact]||raw;
 }
+function speciesKey(name){
+  return SBL.domain?.pokemonKey?.(canonicalSpecies(name))||norm(canonicalSpecies(name)).replace(/\s+/g,'-');
+}
 function hasCurrentRoster(team){return rosterForTeam(team).length>0}
 function aggregateUncached(team){
   const games=rowsForTeam(team);const mons={};let wins=0;const pairCounts={};
@@ -215,7 +226,7 @@ function aggregateUncached(team){
   // Seed the analysis with every current-roster Pokémon so the page represents
   // the current roster even when a Pokémon has not appeared in a processed replay.
   for(const mon of currentRoster){
-    const species=canonicalSpecies(rosterMonName(mon)); const k=norm(species);
+    const species=canonicalSpecies(rosterMonName(mon)); const k=speciesKey(species);
     if(species && !mons[k]) mons[k]={species,appearances:0,kills:0,deaths:0,dealt:0,taken:0,replays:new Set(),gameSets:[],weeks:new Set(),items:{},confirmedItems:{},inferredItems:{},itemEvidence:{}};
   }
   for(const r of games){
@@ -227,7 +238,7 @@ function aggregateUncached(team){
       // A teamRoster entry is only a roster snapshot. It must not count as an
       // appearance or replay participation unless it exists in r.mons.
       if(m._fromReplay!==true) continue;
-      const k=norm(m.species);
+      const k=speciesKey(m.species);
       if(!mons[k])mons[k]={species:m.species,appearances:0,kills:0,deaths:0,dealt:0,taken:0,replays:new Set(),gameSets:[],weeks:new Set(),items:{},confirmedItems:{},inferredItems:{},itemEvidence:{}};
       const a=mons[k];
       // Sitewide appearance semantics: m.appearances means the Pokémon was
@@ -255,14 +266,14 @@ function aggregateUncached(team){
     const allowed=new Set(shared.roster.map(x=>SBL.stats.identity(x.species)));
     for(const k of Object.keys(mons))if(!allowed.has(SBL.stats.identity(mons[k].species)))delete mons[k];
     for(const row of shared.roster){
-      const k=norm(canonicalSpecies(row.species));
+      const k=speciesKey(row.species);
       if(!mons[k])mons[k]={species:row.species,appearances:0,kills:0,deaths:0,dealt:0,taken:0,replays:new Set(),gameSets:[],weeks:new Set(),items:{},confirmedItems:{},inferredItems:{},itemEvidence:{}};
       Object.assign(mons[k],{species:row.species,appearances:row.appearances,kills:row.kills,deaths:row.deaths,dealt:row.dealt,taken:row.taken});
     }
     Object.keys(pairCounts).forEach(k=>{const [x,y]=k.split('|');if(!mons[x]||!mons[y])delete pairCounts[k];});
   } else if(hasCurrentRoster(team)){
-    const allowed=new Set(currentRoster.map(x=>norm(canonicalSpecies(rosterMonName(x)))).filter(Boolean));
-    Object.keys(mons).forEach(k=>{if(!allowed.has(norm(mons[k].species)))delete mons[k]});
+    const allowed=new Set(currentRoster.map(x=>speciesKey(rosterMonName(x))).filter(Boolean));
+    Object.keys(mons).forEach(k=>{if(!allowed.has(speciesKey(mons[k].species)))delete mons[k]});
     Object.keys(pairCounts).forEach(k=>{const [x,y]=k.split('|');if(!allowed.has(x)||!allowed.has(y))delete pairCounts[k]});
   }
   return {games,wins,losses:Math.max(0,games.length-wins),mons,pairCounts}
@@ -617,7 +628,7 @@ function groupEquivalentVariants(list){
 function displaySpecies(m){
   const rawNames = Array.isArray(m?.names) && m.names.length ? m.names : [m?.species];
   const names = rawNames.map(x=>canonicalSpecies(x)).filter(Boolean);
-  const unique = [...new Map(names.map(x=>[norm(x),x])).values()];
+  const unique = [...new Map(names.map(x=>[speciesKey(x),x])).values()];
   // Battle-only formes (Aegislash Blade, Mimikyu Busted, etc.) are internal
   // replay representations, not separate roster Pokémon. If they resolve to
   // the same canonical species, only show the canonical name.
@@ -634,7 +645,7 @@ async function franchiseMonsUncached(team){
   const merged=new Map();
   for(const m of Object.values(source)){
     const species=canonicalSpecies(m.species);
-    const key=norm(species);
+    const key=speciesKey(species);
     if(!key) continue;
     if(!merged.has(key)){
       merged.set(key,{...m,species,replays:m.replays instanceof Set?new Set(m.replays):new Set(),gameSets:Array.isArray(m.gameSets)?m.gameSets.slice():[]});
@@ -755,7 +766,7 @@ async function loadPokemonData(species){
   return null;
 }
 async function fetchPokemonData(species){
-  const key=norm(canonicalSpecies(species));
+  const key=speciesKey(species);
   if(POKEMON_DATA_CACHE.has(key))return POKEMON_DATA_CACHE.get(key);
   if(POKEMON_DATA_PENDING.has(key))return POKEMON_DATA_PENDING.get(key);
   const pending=loadPokemonData(species);
@@ -769,7 +780,7 @@ async function fetchPokemonData(species){
   }
 }
 async function fetchTypes(species){
-  const key=norm(canonicalSpecies(species));
+  const key=speciesKey(species);
   if(TYPE_CACHE.has(key))return TYPE_CACHE.get(key);
   // Share the same form-level read with scouting and damage analysis. This
   // eliminates a separate Pokédex/PokeAPI waterfall for every type tile.
@@ -1695,7 +1706,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
   const switchWeatherOptions=[['','Clear'],['Rain','Rain'],['Sun','Sun'],['Sand','Sand'],['Snow','Snow'],['Hail','Hail'],['Strong Winds','Strong Winds'],['Heavy Rain','Heavy Rain'],['Harsh Sunshine','Harsh Sunshine']];
   const switchTerrainOptions=[['','None'],['Electric','Electric'],['Grassy','Grassy'],['Misty','Misty'],['Psychic','Psychic']];
   const switchFieldSelect=(id,value,options)=>`<select id="${id}">${options.map(([v,label])=>`<option value="${esc(v)}" ${v===value?'selected':''}>${esc(label)}</option>`).join('')}</select>`;
-  const switchSection=`<section id="prepSwitchAnalyser" class="panel prep-selectable-section" data-prep-section="switch"><div class="switch-analyser-head"><div><h2>Switch-In Analyser</h2><p class="panel-desc">Choose the attacking side, damaging move, and switch-in defender.</p></div><button type="button" id="prepSwitchRoleToggle" class="switch-role-toggle" aria-pressed="false">↔ Swap attacker / defender</button></div><p class="panel-desc">Choose an attacking Pokémon and one of its damaging learnset moves. Set the attacker EVs and each switch-in Pokémon's defensive EVs individually. Weather and terrain only affect moves they actually influence.</p><div class="prep-switch-controls"><div><label>Attacker Pokémon <span class="switch-side-label">(${switchAttackerSide==='your'?'Your Team':'Opponent Team'})</span></label><select id="prepSwitchMon">${switchAttackerMons.map(m=>`<option value="${esc(m.species)}" ${m.species===switchMon?.species?'selected':''}>${esc(displaySpecies(m))}</option>`).join('')}</select></div><div><label>Damaging Move</label><select id="prepSwitchMove"><option value="">${observedMoveOptions.length?'Select a damaging move':'Loading moves…'}</option>${observedMoveOptions.map(m=>`<option value="${esc(m)}" ${norm(m)===norm(defaultMove)?'selected':''}>${esc(m)}</option>`).join('')}</select></div><div id="prepSwitchHitsField" style="display:none"><label>Number of Hits</label><select id="prepSwitchHits"><option value="">Auto</option></select></div></div><div class="prep-item-controls"><div><label>Attacker Item</label>${switchItemSelect('prepSwitchAtkItem',switchAtkItem,'offensive')}</div><div><label>Switch-In Item</label>${switchItemSelect('prepSwitchDefItem',switchDefItem,'defensive')}</div><div><label>Attacker EVs</label><button type="button" id="prepSwitchAtkEVs" class="damage-calc-primary">Set EVs</button></div><div><label>Defensive EVs</label><button type="button" id="prepSwitchAllDefEVs" class="prep-all-evs-btn">Set All EVs</button></div></div><div class="prep-item-controls"><div><label>Weather</label>${switchFieldSelect('prepSwitchWeather',switchWeather,switchWeatherOptions)}</div><div><label>Terrain</label>${switchFieldSelect('prepSwitchTerrain',switchTerrain,switchTerrainOptions)}</div></div>${switchRows}</section>`;
+  const switchSection=`<section id="prepSwitchAnalyser" class="panel prep-selectable-section" data-prep-section="switch"><div class="switch-analyser-head"><div><h2>Switch-In Analyser</h2><p class="panel-desc">Choose the attacking side, damaging move, and switch-in defender.</p></div><button type="button" id="prepSwitchRoleToggle" class="switch-role-toggle" aria-pressed="false">↔ Swap attacker / defender</button></div><p class="panel-desc">Choose an attacking Pokémon and one of its damaging learnset moves. Set the offensive EVs and each switch-in Pokémon's defensive EVs individually. Weather and terrain only affect moves they actually influence.</p><div class="prep-switch-controls"><div><label>Attacker Pokémon <span class="switch-side-label">(${switchAttackerSide==='your'?'Your Team':'Opponent Team'})</span></label><select id="prepSwitchMon">${switchAttackerMons.map(m=>`<option value="${esc(m.species)}" ${m.species===switchMon?.species?'selected':''}>${esc(displaySpecies(m))}</option>`).join('')}</select></div><div><label>Damaging Move</label><select id="prepSwitchMove"><option value="">${observedMoveOptions.length?'Select a damaging move':'Loading moves…'}</option>${observedMoveOptions.map(m=>`<option value="${esc(m)}" ${norm(m)===norm(defaultMove)?'selected':''}>${esc(m)}</option>`).join('')}</select></div><div id="prepSwitchHitsField" style="display:none"><label>Number of Hits</label><select id="prepSwitchHits"><option value="">Auto</option></select></div></div><div class="prep-item-controls"><div><label>Attacker Item</label>${switchItemSelect('prepSwitchAtkItem',switchAtkItem,'offensive')}</div><div><label>Switch-In Item</label>${switchItemSelect('prepSwitchDefItem',switchDefItem,'defensive')}</div><div><label>Offensive EVs</label><button type="button" id="prepSwitchAtkEVs" class="damage-calc-primary">Set EVs</button></div><div><label>Defensive EVs</label><button type="button" id="prepSwitchAllDefEVs" class="prep-all-evs-btn">Set All EVs</button></div></div><div class="prep-item-controls"><div><label>Weather</label>${switchFieldSelect('prepSwitchWeather',switchWeather,switchWeatherOptions)}</div><div><label>Terrain</label>${switchFieldSelect('prepSwitchTerrain',switchTerrain,switchTerrainOptions)}</div></div>${switchRows}</section>`;
 
   const latestMatchesSection=matchHistoryForTeam(opponent,false).replace('<section class="panel">','<section id="prepLatestMatches" class="panel prep-selectable-section" data-prep-section="matches">');
   return `<section class="panel prep-hero-panel"><div class="prep-hero"><div><h2>Match Prep</h2><p class="panel-desc" style="margin:0">Prepare <strong>${esc(yourTeam)}</strong> for a match against <strong>${esc(opponent)}</strong>. Match usage, scouting, recent replays and battle tools are combined here.</p></div><div class="prep-hero-controls"><div><label>Your Team</label><select id="prepYourTeam">${names.map(n=>`<option value="${esc(n)}" ${sameTeam(n,yourTeam)?'selected':''}>${esc(n)}</option>`).join('')}</select></div><div><label>Opponent</label><select id="prepOpponent">${names.filter(n=>!sameTeam(n,yourTeam)).map(n=>`<option value="${esc(n)}" ${sameTeam(n,opponent)?'selected':''}>${esc(n)}</option>`).join('')}</select></div></div><div class="prep-side-swap"><span class="prep-side-swap-label">Team sides</span><button type="button" id="prepSwapTeams" aria-label="Swap your team and opponent">↔ Swap Team</button><button type="button" id="prepNotesToggle" class="prep-notes-toggle" aria-expanded="false" aria-controls="prepNotesPanel">✎ Notes <kbd>Alt+N</kbd>${matchupNote?.content?.trim()?' ·':''}</button></div></div></section>
@@ -1974,34 +1985,12 @@ async function render(){
       const data=card.querySelector('.prep-popout-data');
       const usage=data?.dataset.usage||'<div class="small">No usage data.</div>';
       const scouting=data?.dataset.scouting||'<div class="small">No scouting data.</div>';
-      // Page 1: recreate the old Team Overview Pokémon popup layout exactly.
-      // Page 2: Match Prep analysis only — matchup, observed moves and likely roles.
-      const teamOverview=`
-        <div class="scout-popup-section">
-          <h3>Performance</h3>
-          <div class="scout-performance-grid">
-            <div class="scout-performance-stat"><span>Appearances</span><strong>${esc(data?.dataset?.appearances||'—')}</strong></div>
-            <div class="scout-performance-stat"><span>KOs</span><strong>${esc(data?.dataset?.kills||'—')}</strong></div>
-            <div class="scout-performance-stat"><span>Deaths</span><strong>${esc(data?.dataset?.deaths||'—')}</strong></div>
-            <div class="scout-performance-stat"><span>Damage dealt</span><strong>${esc(data?.dataset?.dealt||'—')}</strong></div>
-            <div class="scout-performance-stat"><span>Damage taken</span><strong>${esc(data?.dataset?.taken||'—')}</strong></div>
-          </div>
-        </div>
-        <div class="scout-popup-section">
-          <h3>Abilities</h3><div id="prepScoutAbilities" class="scout-abilities"><div class="muted">Loading…</div></div>
-        </div>
-        <div class="scout-popup-columns">
-          <div class="scout-popup-section">
-            <h3>Base stat spread</h3>
-            <div id="prepScoutBaseStats" class="scout-base-grid"><div class="muted">Loading…</div></div>
-            <div id="prepScoutBaseTotal"></div>
-            <div id="prepScoutNatureStats"></div>
-          </div>
-          <div class="scout-popup-section">
-            <h3>Type effectiveness</h3>
-            <div id="prepScoutTypeEffectiveness"><div class="muted">Loading…</div></div>
-          </div>
-        </div>`;
+      // This is the same Pokémon Profile pane used in Rosters and My Team.
+      const teamOverview=SBL.pokemonProfile.pane({performance:{
+        appearances:Number(data?.dataset?.appearances)||0,kills:Number(data?.dataset?.kills)||0,
+        deaths:Number(data?.dataset?.deaths)||0,dealt:Number(data?.dataset?.dealt)||0,
+        taken:Number(data?.dataset?.taken)||0
+      }});
       const rawAnalysis=card.querySelector('.prep-popout-data')?.dataset.analysis || '<div class="small">No analysis data.</div>'; const analysisOverview=`<div class="prep-analysis-grid">${rawAnalysis}</div>`;
       const modal=document.createElement('div');
       modal.id='prepOpponentDetailModal';
@@ -2040,37 +2029,8 @@ async function render(){
 
       async function loadPrepPokemonData(){
         const root=modal.querySelector('#prepModeContent');
-        if(!root || !root.querySelector('#prepScoutBaseStats')) return;
-        try{
-          const pd=await fetchPokemonData(species);
-          if(!pd){
-            root.querySelector('#prepScoutBaseStats').innerHTML='<div class="muted">Base stats unavailable.</div>';
-            root.querySelector('#prepScoutTypeEffectiveness').innerHTML='<div class="muted">Type data unavailable.</div>';
-            root.querySelector('#prepScoutAbilities').innerHTML='<div class="muted">Abilities unavailable.</div>';
-            return;
-          }
-          const statMap=pd.stats||{};
-          const statNames=[['hp','HP'],['attack','Atk'],['defense','Def'],['special-attack','SpA'],['special-defense','SpD'],['speed','Spe']];
-          root.querySelector('#prepScoutBaseStats').innerHTML=statNames.map(([k,label])=>{const value=Number(statMap[k])||0;return `<div class="scout-base-stat"><div class="scout-base-stat-head"><span>${label}</span><strong>${value||'—'}</strong></div><div class="scout-stat-bar"><i style="width:${Math.min(100,value/180*100)}%"></i></div></div>`;}).join('');
-          root.querySelector('#prepScoutBaseTotal').innerHTML=`<div class="scout-stat-total"><span>Total base stats</span><strong>${statNames.reduce((sum,[k])=>sum+(Number(statMap[k])||0),0)}</strong></div>`;
-          const statValue=(base,hp,boost)=>{base=Number(base)||0;if(hp)return 2*base+31+63+110;const neutral=Math.floor((2*base+31+63))+5;return boost?Math.floor(neutral*1.1):neutral;};
-          const natureRows=boost=>statNames.map(([k,label])=>{const v=statValue(statMap[k],k==='hp',boost);return `<div class="scout-nature-row"><span>${label}</span><div class="bar"><i style="width:${Math.min(100,v/500*100)}%"></i></div><strong>${v}</strong></div>`;}).join('');
-          root.querySelector('#prepScoutNatureStats').innerHTML=`<div class="scout-nature-stats"><div class="scout-nature-card"><h4>Neutral nature · Lv. 100 · 31 IV / 252 EV</h4>${natureRows(false)}</div><div class="scout-nature-card"><h4>Boosting nature · Lv. 100 · 31 IV / 252 EV</h4>${natureRows(true)}</div></div>`;
-          const abilities=pd.abilities||[];
-          const prettyAbility=a=>String(a).replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
-          root.querySelector('#prepScoutAbilities').innerHTML=abilities.length?abilities.map(a=>`<span class="scout-ability">${esc(prettyAbility(a))}</span>`).join(''):'<div class="muted">No abilities listed.</div>';
-          const types=normalizedTypes(pd.types||[]);
-          const allTypes=['Normal','Fire','Water','Electric','Grass','Ice','Fighting','Poison','Ground','Flying','Psychic','Bug','Rock','Ghost','Dragon','Dark','Steel','Fairy'];
-          const eff=allTypes.map(type=>({type,mult:types.reduce((v,def)=>v*typeChartMultiplier(type,def),1)})).filter(x=>x.mult!==1);
-          const group=(name,cls,items)=>`<div class="scout-type-group ${cls}"><h4>${name}</h4>${items.length?`<div class="scout-type-list">${items.map(x=>`<span class="scout-type-pill">${x.type} <b>${fmtMult(x.mult)}</b></span>`).join('')}</div>`:'<div class="muted">None</div>'}</div>`;
-          root.querySelector('#prepScoutTypeEffectiveness').innerHTML=`<div class="scout-type-groups">${group('Weaknesses','weak',eff.filter(x=>x.mult>1))}${group('Resistances','resist',eff.filter(x=>x.mult>0&&x.mult<1))}${group('Immunities','immune',eff.filter(x=>x.mult===0))}</div>`;
-        }catch(err){
-          root.querySelector('#prepScoutBaseStats').innerHTML='<div class="muted">Base stats unavailable.</div>';
-          root.querySelector('#prepScoutTypeEffectiveness').innerHTML='<div class="muted">Type data unavailable.</div>';
-          root.querySelector('#prepScoutAbilities').innerHTML='<div class="muted">Abilities unavailable.</div>';
-        }
+        if(root)await SBL.pokemonProfile.fill(root,{species,loadProfile:fetchPokemonData});
       }
-      document.addEventListener('keydown',onKey);
       loadPrepPokemonData();
     }));
 
@@ -2180,7 +2140,7 @@ $('prepYourTeam')?.addEventListener('change',async e=>{
       STATE.prepSwitchAttackerSide=STATE.prepSwitchAttackerSide==='your'?'opponent':'your';
       STATE.prepSwitchMon=''; STATE.prepSwitchMove=''; STATE.prepSwitchHits='';
       STATE.prepSwitchAtkItem=''; STATE.prepSwitchDefItem='';
-      STATE.prepSwitchEVsByMon={}; STATE.prepSwitchAtkEVs={hp:0,atk:0,def:0,spa:0,spd:0,spe:0};
+      STATE.prepSwitchEVsByMon={}; // New side takes stored Set All defensive preset.
       await render();
     });
 
@@ -2324,7 +2284,7 @@ $('prepYourTeam')?.addEventListener('change',async e=>{
     function openSwitchEvModal(mode,species){
       const isAtk=mode==='attacker';
       const current=isAtk ? {...(STATE.prepSwitchAtkEVs||{})} : {...((STATE.prepSwitchEVsByMon||{})[species]||{})};
-      const title=isAtk ? `EVs for ${displaySpecies({species})}` : `Defensive EVs for ${displaySpecies({species})}`;
+      const title=isAtk ? `Offensive EVs for ${displaySpecies({species})}` : `Defensive EVs for ${displaySpecies({species})}`;
       const stats=isAtk ? ['atk','spa'] : ['hp','def','spd'];
       const labels={hp:'HP',atk:'Attack',def:'Defence',spa:'Sp. Attack',spd:'Sp. Defence',spe:'Speed'};
       const host=document.createElement('div');host.className='switch-ev-modal';
@@ -2353,7 +2313,7 @@ requestAnimationFrame(()=>host.classList.add('open'));
     function openSwitchDefEvModal(species){openSwitchEvModal('defender',species);}
     function openSwitchAtkEvModal(){const species=$('prepSwitchMon')?.value;if(species)openSwitchEvModal('attacker',species);}
     function openSwitchAllDefEvModal(){
-      const current={hp:0,def:0,spd:0};
+      const current={hp:0,def:0,spd:0,...(STATE.prepSwitchAllDefEVs||{})};
       const host=document.createElement('div');host.className='switch-ev-modal';
       const labels={hp:'HP',def:'Defence',spd:'Sp. Defence'};
       host.innerHTML=`<div class="switch-ev-card" role="dialog" aria-modal="true"><div class="switch-ev-head"><div><h3>Set EVs for all switch-ins</h3><p>Apply the same defensive EVs to every Pokémon on the defending side of this analyser.</p></div><button type="button" id="switchAllEvClose">Close ✕</button></div><div class="switch-ev-grid-modal">${['hp','def','spd'].map(k=>`<div class="switch-ev-field"><span class="switch-ev-field-label">${labels[k]}</span><div class="switch-ev-cell"><button type="button" class="switch-ev-step" data-ev-target="switchAllEv_${k}" data-delta="-4" aria-label="Decrease ${labels[k]} EV">−</button><input id="switchAllEv_${k}" type="number" min="0" max="252" step="4" value="${!current[k]?'':Number(current[k])}" inputmode="numeric"><button type="button" class="switch-ev-step" data-ev-target="switchAllEv_${k}" data-delta="4" aria-label="Increase ${labels[k]} EV">+</button></div></div>`).join('')}</div><div class="switch-ev-actions"><button type="button" id="switchAllEvReset">Reset to 0</button><button type="button" id="switchAllEvSave" class="damage-calc-primary">Apply to all</button></div></div>`;
@@ -2371,6 +2331,7 @@ requestAnimationFrame(()=>host.classList.add('open'));
       host.querySelector('#switchAllEvReset').onclick=()=>['hp','def','spd'].forEach(k=>host.querySelector('#switchAllEv_'+k).value=0);
       host.querySelector('#switchAllEvSave').onclick=async()=>{
         const next={...zeroEVs()};['hp','def','spd'].forEach(k=>next[k]=Math.max(0,Math.min(252,Number(host.querySelector('#switchAllEv_'+k).value)||0)));
+        STATE.prepSwitchAllDefEVs={hp:next.hp,def:next.def,spd:next.spd};
         const mons=await franchiseMons(switchDefenderTeamName);
         STATE.prepSwitchEVsByMon=STATE.prepSwitchEVsByMon||{};
         mons.forEach(m=>{STATE.prepSwitchEVsByMon[m.species]={...next};});
@@ -2385,7 +2346,7 @@ requestAnimationFrame(()=>host.classList.add('open'));
       if(window.SBL.pokemonCatalog?.getDamagingLearnset && !CATALOG_READ_FAILED){
         try{
           const result=await window.SBL.pokemonCatalog.getDamagingLearnset(species);
-          if(result){switchMoveCache[cacheKey]=result.moves;return result.moves;}
+          if(Array.isArray(result?.moves) && result.moves.length){switchMoveCache[cacheKey]=result.moves;return result.moves;}
         }catch(error){CATALOG_READ_FAILED=true;console.warn('Move catalogue unavailable; using legacy data.',error);}
       }
       const candidates=isProtectedBattleForm(species)?apiProfileCandidates(species):pokemonDexCandidates(species);
@@ -2433,7 +2394,19 @@ requestAnimationFrame(()=>host.classList.add('open'));
       sel.value='';
       try{
         const moves=species?await Promise.race([damagingLearnset(species),new Promise(resolve=>setTimeout(()=>resolve([]),7000))]):[];
-        const list=[...new Set((moves||[]).filter(Boolean).map(x=>typeof x==='string'?x:x.name))];
+        let list=[...new Set((moves||[]).filter(Boolean).map(x=>typeof x==='string'?x:x.name))];
+        if(!list.length && attacker){
+          try{
+            const C=await getCalcEngine(),gen=C.Generations.get(9);
+            // The replay parser is a source of observed moves, not legality.
+            // Only use a move the damage engine confirms has real base power.
+            list=[...new Set(observedFor(attacker).filter(name=>{
+              const known=gen.moves.get(name);
+              return Number(known?.bp??known?.basePower)>0 &&
+                ['Physical','Special'].includes(String(known?.category||''));
+            }))];
+          }catch(error){console.warn('Observed-move validation unavailable:',error);}
+        }
         if(list.length){
           const preferredNow=preferred||STATE.prepSwitchMove||'';
           sel.innerHTML=list.map(m=>`<option value="${esc(m)}" ${norm(m)===norm(preferredNow)?'selected':''}>${esc(m)}</option>`).join('');
@@ -2444,11 +2417,11 @@ requestAnimationFrame(()=>host.classList.add('open'));
         }
         // Never default to an arbitrary observed move: some observed moves are
         // status/setup moves and are invalid for damage calculations.
-        sel.innerHTML='<option value="">No recorded damaging moves for this form</option>';
+        sel.innerHTML='<option value="">No verified damaging moves available — check the Pokémon catalogue or replay observations</option>';
         STATE.prepSwitchMove='';
         return [];
       }catch(err){
-        sel.innerHTML='<option value="">No recorded damaging moves for this form</option>';
+        sel.innerHTML='<option value="">No verified damaging moves available — check the Pokémon catalogue or replay observations</option>';
         STATE.prepSwitchMove='';
         return [];
       }
@@ -2469,7 +2442,7 @@ requestAnimationFrame(()=>host.classList.add('open'));
     async function renderSwitchResults(){
       const mount=$('switchResults');if(!mount)return;
       const mon=$('prepSwitchMon')?.value;const move=$('prepSwitchMove')?.value;
-      if(!mon||!move){mount.innerHTML='<div class="empty">Select an observed move to analyse switch-ins.</div>';return;}
+      if(!mon||!move){mount.innerHTML='<div class="empty">Select a damaging move to analyse switch-ins.</div>';return;}
       mount.innerHTML='<div class="empty">Calculating switch-in ranges…</div>';
       try{
         const C=await getCalcEngine();const gen=C.Generations.get(9);
@@ -2577,7 +2550,7 @@ requestAnimationFrame(()=>host.classList.add('open'));
               return SBL.pokemonCatalog.createCalcPokemon(C,gen,canonicalSpecies(species),opts);
             };
             const atk=await makeCalcPokemon(mon,{level:100,item:atkItem||undefined,ability:attackerAbility||undefined,evs:STATE.prepSwitchAtkEVs||{hp:0,atk:0,def:0,spa:0,spd:0,spe:0},boosts:chargeBoost||undefined});
-            const evs=(STATE.prepSwitchEVsByMon||{})[target.species]||{hp:0,atk:0,def:0,spa:0,spd:0,spe:0};
+            const evs=(STATE.prepSwitchEVsByMon||{})[target.species]||STATE.prepSwitchAllDefEVs||{hp:0,atk:0,def:0,spa:0,spd:0,spe:0};
             const def=await makeCalcPokemon(target.species,{level:100,item:STATE.prepSwitchDefItem||undefined,ability:defenderAbility||undefined,evs});
             const res=switchField?C.calculate(gen,atk,def,mv,switchField):C.calculate(gen,atk,def,mv);
             const flattenSwitch=v=>{const out=[];const walk=x=>{if(Array.isArray(x))x.forEach(walk);else if(Number.isFinite(Number(x)))out.push(Number(x));};walk(v);return out;};
@@ -2645,7 +2618,7 @@ requestAnimationFrame(()=>host.classList.add('open'));
           }catch(err){rows.push({target,error:err.message||String(err)});}
         }
         /* Preserve roster order; switch-in cards are never sorted by damage. */
-        mount.innerHTML=`<div class="prep-switch-grid">${rows.map(r=>`<article class="prep-switch-card prep-switch-ev-card" data-switch-ev-mon="${esc(r.target.species)}"><div class="switch-card-top">${sprite(r.target.species,'prep-switch-sprite')}<div class="switch-card-identity"><strong class="switch-card-name">${esc(displaySpecies(r.target))}</strong><div class="switch-card-types">${typePills(typeMapForSpecies[r.target.species]||[])}</div><div class="switch-card-evs">EVs: ${esc(formatSwitchEVs((STATE.prepSwitchEVsByMon||{})[r.target.species]||{hp:0,atk:0,def:0,spa:0,spd:0,spe:0}))}</div></div><button type="button" class="prep-switch-ev-toggle">Set EVs</button></div>${r.error?`<div class="switch-card-detail">Calculation unavailable: ${esc(r.error)}</div>`:r.immune?`<div class="switch-card-result"><div><div class="switch-card-result-label">Damage</div><div class="prep-damage-range">No effect</div></div><div class="switch-card-verdict">Immune</div></div><div class="switch-card-detail">${esc(move)} does no damage to ${esc(displaySpecies(r.target))}.</div><div class="switch-card-footer"><span class="prep-switch-note">Safe switch-in</span></div>`:`<div class="switch-card-result"><div><div class="switch-card-result-label">Damage taken</div><div class="prep-damage-range">${Number.isFinite(r.pctMin)&&Number.isFinite(r.pctMax)?`${r.pctMin.toFixed(1)}%–${r.pctMax.toFixed(1)}%`:'Unavailable'}</div></div><div class="switch-card-verdict">${r.ko==='sash'?'Would KO without Focus Sash':r.ko==='guaranteed'?'Guaranteed KO':r.ko==='possible'?`KO ${Number.isInteger(r.koChance)?r.koChance:r.koChance.toFixed(2)}% of the time`:r.pctMax<=35?'Excellent':r.pctMax<=55?'Generally safe':'Risky'}</div></div><div class="switch-card-detail">${r.min}–${r.max} raw damage from ${esc(move)}${r.hits>1?` (${r.hits}× hits)`:''}${r.heal?` · ${r.heal} HP healed (${r.healPctLabel} max HP when triggered) · ${r.netMin}–${r.netMax} net damage`:''}</div><div class="switch-card-footer"><span class="prep-switch-note">${r.ko==='sash'?'Would KO without Focus Sash':r.ko==='guaranteed'?'KO — guaranteed from the minimum roll':r.ko==='possible'?`KO ${Number.isInteger(r.koChance)?r.koChance:r.koChance.toFixed(2)}% of the time`:r.pctMax<=35?'Excellent switch-in':r.pctMax<=55?'Generally safe':'Risky switch-in'}</span>${Number.isFinite(r.hp)?`<span class="switch-card-hp">${r.hp} HP</span>`:''}</div>`}</article>`).join('')}</div>`;
+        mount.innerHTML=`<div class="prep-switch-grid">${rows.map(r=>`<article class="prep-switch-card prep-switch-ev-card" data-switch-ev-mon="${esc(r.target.species)}"><div class="switch-card-top">${sprite(r.target.species,'prep-switch-sprite')}<div class="switch-card-identity"><strong class="switch-card-name">${esc(displaySpecies(r.target))}</strong><div class="switch-card-types">${typePills(typeMapForSpecies[r.target.species]||[])}</div><div class="switch-card-evs">EVs: ${esc(formatSwitchEVs((STATE.prepSwitchEVsByMon||{})[r.target.species]||STATE.prepSwitchAllDefEVs||{hp:0,atk:0,def:0,spa:0,spd:0,spe:0}))}</div></div><button type="button" class="prep-switch-ev-toggle">Set EVs</button></div>${r.error?`<div class="switch-card-detail">Calculation unavailable: ${esc(r.error)}</div>`:r.immune?`<div class="switch-card-result"><div><div class="switch-card-result-label">Damage</div><div class="prep-damage-range">No effect</div></div><div class="switch-card-verdict">Immune</div></div><div class="switch-card-detail">${esc(move)} does no damage to ${esc(displaySpecies(r.target))}.</div><div class="switch-card-footer"><span class="prep-switch-note">Safe switch-in</span></div>`:`<div class="switch-card-result"><div><div class="switch-card-result-label">Damage taken</div><div class="prep-damage-range">${Number.isFinite(r.pctMin)&&Number.isFinite(r.pctMax)?`${r.pctMin.toFixed(1)}%–${r.pctMax.toFixed(1)}%`:'Unavailable'}</div></div><div class="switch-card-verdict">${r.ko==='sash'?'Would KO without Focus Sash':r.ko==='guaranteed'?'Guaranteed KO':r.ko==='possible'?`KO ${Number.isInteger(r.koChance)?r.koChance:r.koChance.toFixed(2)}% of the time`:r.pctMax<=35?'Excellent':r.pctMax<=55?'Generally safe':'Risky'}</div></div><div class="switch-card-detail">${r.min}–${r.max} raw damage from ${esc(move)}${r.hits>1?` (${r.hits}× hits)`:''}${r.heal?` · ${r.heal} HP healed (${r.healPctLabel} max HP when triggered) · ${r.netMin}–${r.netMax} net damage`:''}</div><div class="switch-card-footer"><span class="prep-switch-note">${r.ko==='sash'?'Would KO without Focus Sash':r.ko==='guaranteed'?'KO — guaranteed from the minimum roll':r.ko==='possible'?`KO ${Number.isInteger(r.koChance)?r.koChance:r.koChance.toFixed(2)}% of the time`:r.pctMax<=35?'Excellent switch-in':r.pctMax<=55?'Generally safe':'Risky switch-in'}</span>${Number.isFinite(r.hp)?`<span class="switch-card-hp">${r.hp} HP</span>`:''}</div>`}</article>`).join('')}</div>`;
         mount.querySelectorAll('.prep-switch-ev-toggle').forEach(btn=>btn.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();const card=btn.closest('.prep-switch-ev-card');const species=card?.dataset.switchEvMon;if(species)openSwitchDefEvModal(species);}));
         mount.querySelectorAll('.prep-switch-ev-card').forEach(card=>card.addEventListener('click',e=>{
           if(e.target.closest('button'))return;
@@ -2669,8 +2642,8 @@ requestAnimationFrame(()=>host.classList.add('open'));
 }
 async function openPokemonScoutPopup(team,key){
   const a=aggregate(team);
-  const wanted=norm(key);
-  const m=a.mons[key] || a.mons[wanted] || Object.values(a.mons).find(x=>norm(x.species)===wanted);
+  const wanted=speciesKey(key);
+  const m=a.mons[key] || a.mons[wanted] || Object.values(a.mons).find(x=>speciesKey(x.species)===wanted);
   if(!m){console.warn('Could not open Pokémon scout popup:',team,key,Object.keys(a.mons));return;}
 
   const host=document.createElement('div');

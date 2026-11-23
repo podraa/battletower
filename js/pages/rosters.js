@@ -141,24 +141,23 @@
       // History is deliberately lazy: visiting Rosters loads no replay corpus.
       // The first Pokémon click uses the season-scoped replay service once;
       // subsequent selections reuse the same in-page promise and data.
-      let historyPromise=null;
-      const getPokemonHistory=async(team,species)=>{
-        if(!historyPromise){
-          historyPromise=(async()=>{
+      // Profile statistics are fetched lazily only on a Pokémon click. The
+      // shared Pokémon Profile renders the same data view as Match Prep.
+      let profileReplaysPromise=null;
+      const getPokemonProfile=async(team,species)=>{
+        if(!profileReplaysPromise){
+          profileReplaysPromise=(async()=>{
             const payload=await SBL.replays.load(supabase);
             if(payload.error)throw payload.error;
             const part=SBL.replays.partition(payload.data);
-            const snapshot=SBL.seasons.getSnapshot(part.sharedState||{});
-            const records=snapshot.archived&&!part.normalizedSeason ? snapshot.replays : part.replays;
-            const rows=Object.entries(records||{}).map(([id,replay])=>({...replay,id:replay?.id||id}));
-            return {rows,sharedState:part.sharedState||{}};
-          })().catch(error=>{historyPromise=null;throw error;});
+            const snap=SBL.seasons.getSnapshot(part.sharedState||{});
+            return {rows:Object.values(snap.archived&&!part.normalizedSeason?snap.replays:part.replays),state:part.sharedState||{}};
+          })().catch(error=>{profileReplaysPromise=null;throw error;});
         }
-        const {rows,sharedState}=await historyPromise;
-        const teamFor=username=>SBL.domain.replayTeamLabel(sharedState,username);
-        return SBL.stats.franchisePokemonHistory(TEAM_ROSTERS,rows,teamFor,team,species);
+        const {rows,state}=await profileReplaysPromise;
+        return SBL.stats.franchisePokemonStat(TEAM_ROSTERS,rows,username=>SBL.domain.replayTeamLabel(state,username),team,species);
       };
-      SBL.teamPopup?.bind(document, () => ({settings: TEAM_SETTINGS, teamMap: TEAM_MAP, rosters: TEAM_ROSTERS, getPokemonHistory}));
+      SBL.teamPopup?.bind(document, () => ({settings: TEAM_SETTINGS, teamMap: TEAM_MAP, rosters: TEAM_ROSTERS, getPokemonProfile}));
       const teams = Object.keys(rosters).sort((a,b)=>a.localeCompare(b));
       const draftStatus=String(settings?.draft?.status||'').trim().toLowerCase();
       if(!teams.length){
