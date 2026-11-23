@@ -20,9 +20,8 @@
     return SBL.replays.savePublishedRosters(rosters, client());
   }
 
-  async function persistDraft(state, user){
-    await saveSharedState(state, user);
-    await savePublishedRosters(state.settings?.rosters || {}, user);
+  async function persistDraft(){
+    throw new Error('Draft state must be changed through the league-scoped draft command service.');
   }
 
   SBL.admin = {STATE_ID, ROSTER_ID, saveSharedState, savePublishedRosters, persistDraft};

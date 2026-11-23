@@ -12,7 +12,7 @@
     return v===undefined?null:v;
   }
   function equal(a,b){return JSON.stringify(canonical(a))===JSON.stringify(canonical(b));}
-  async function persistSettings({settings,updates,loadCurrent,saveCurrent,readCurrent,invalidate}={}){
+  async function persistSettings({settings,updates,loadCurrent,saveCurrent,patchCurrent,readCurrent,invalidate}={}){
     if(!settings||typeof settings!=='object') throw new Error('Fixture settings object is required.');
     const keys=Object.keys(updates||{}),previous={};
     keys.forEach(key=>{previous[key]={exists:Object.prototype.hasOwnProperty.call(settings,key),value:clone(settings[key])};});
@@ -20,9 +20,23 @@
     try{
       const current=await loadCurrent();
       if(!current) throw new Error('The selected season could not be found.');
-      const payload=clone(current.data||{});payload.settings=payload.settings||{};
-      Object.entries(updates||{}).forEach(([key,value])=>{payload.settings[key]=clone(value);});
-      await saveCurrent(payload);
+      const serverSettings=current.data?.settings||{};
+      if(typeof patchCurrent==='function'){
+        const changes=Object.entries(updates||{}).map(([key,value])=>{
+          const actual=Object.prototype.hasOwnProperty.call(serverSettings,key);
+          if(actual!==previous[key].exists ||
+             (actual&&!equal(serverSettings[key],previous[key].value)))
+            throw new Error(`Another administrator changed ${key}. Reload before saving.`);
+          return {scope:'settings',key,was_present:actual,
+            before:actual?clone(serverSettings[key]):null,value:clone(value)};
+        });
+        await patchCurrent(changes);
+      }else if(typeof saveCurrent==='function'){
+        // Compatibility for legacy unit tests; production uses patchCurrent.
+        const payload=clone(current.data||{});payload.settings=payload.settings||{};
+        Object.entries(updates||{}).forEach(([key,value])=>{payload.settings[key]=clone(value);});
+        await saveCurrent(payload);
+      }else throw new Error('A scoped persistence writer is required.');
       const verified=await readCurrent();
       if(!verified?.data?.settings) throw new Error('The season row could not be re-read after saving.');
       for(const [key,value] of Object.entries(updates||{})) if(!equal(verified.data.settings[key],value)) throw new Error(`Database verification failed for ${key}.`);

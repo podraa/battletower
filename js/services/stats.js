@@ -412,5 +412,46 @@
       roster.find(r=>permanentFormBaseIdentity(r.species)===wanted) ||null;
   }
 
-  SBL.stats={identity,pokemon,pokemonAsync,pokemonStats,getPokemonStats,pokemonProfile,team,kda,formatKD,franchiseRosterData,franchisePokemonStat};
+  // Read-only quick history for a rostered Pokémon. Identical form/crediting
+  // semantics to Stats: each replay is evaluated by franchiseRosterData(),
+  // not by an independent nickname or "species contains" match.
+  function franchisePokemonHistory(rosters,replays,teamFor,teamName,species){
+    const wanted=identity(species);
+    const baseWanted=permanentFormBaseIdentity(species);
+    const nameKey=x=>String(x||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+    const result=[];
+    for(const replay of (Array.isArray(replays)?replays:[])){
+      const projected=franchiseRosterData({[teamName]:rosters?.[teamName]||[]},[replay],teamFor)[teamName];
+      if(!projected)continue;
+      const entries=projected.roster.filter(row=>Number(row.games||0)>0 && (
+        identity(row.species)===wanted || (!baseWanted && permanentFormBaseIdentity(row.species)===wanted)
+      ));
+      if(!entries.length)continue;
+      const players=replay.players||{};
+      const p1=typeof teamFor==='function'?teamFor(players.p1):players.p1;
+      const p2=typeof teamFor==='function'?teamFor(players.p2):players.p2;
+      const ownSide=nameKey(p1)===nameKey(teamName)?'p1':nameKey(p2)===nameKey(teamName)?'p2':null;
+      if(!ownSide)continue;
+      const opponent=ownSide==='p1'?p2:p1;
+      const ownPlayer=players[ownSide];
+      const total=entries.reduce((row,entry)=>{
+        for(const key of ['games','kills','deaths','assists','dealt','taken'])row[key]+=Number(entry[key])||0;
+        return row;
+      },{games:0,kills:0,deaths:0,assists:0,dealt:0,taken:0});
+      const id=String(replay.id||replay.replay_id||'');
+      result.push({...total,id,opponent:String(opponent||'Opponent unknown'),
+        species:entries.map(row=>String(row.species)),
+        week:String(replay.week??replay.round??replay.roundNumber??''),
+        date:replay.date||replay.timestamp||replay.uploadtime||replay.created_at||null,
+        won:!!replay.winner && String(replay.winner).toLowerCase()===String(ownPlayer||'').toLowerCase(),
+        resultKnown:!!replay.winner});
+    }
+    result.sort((a,b)=>{
+      const ts=v=>{const n=Number(v);if(Number.isFinite(n)&&n>1000000000)return n* (n<10000000000?1000:1);return new Date(v||0).getTime()||0;};
+      return ts(b.date)-ts(a.date)||String(b.week).localeCompare(String(a.week),undefined,{numeric:true});
+    });
+    return result;
+  }
+
+  SBL.stats={identity,pokemon,pokemonAsync,pokemonStats,getPokemonStats,pokemonProfile,team,kda,formatKD,franchiseRosterData,franchisePokemonStat,franchisePokemonHistory};
 })();

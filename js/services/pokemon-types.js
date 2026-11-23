@@ -7,14 +7,18 @@ TYPE_TABLE.basculin=TYPE_TABLE.basculin||['water'];
 TYPE_TABLE.meowstic=TYPE_TABLE.meowstic||['psychic'];
 function key(v){return String(v??'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[’']/g,'').replace(/♀/g,'-f').replace(/♂/g,'-m').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');}
 function lookupTypes(name){
- let k=key(name);
+ let k=window.SBL?.domain?.pokemonKey?.(name)||key(name);
  // User-facing pool labels commonly put Mega first; the type table uses base-mega.
  if(k.startsWith('mega-')){let tail=k.slice(5);let z=tail.match(/^(.+)-([xyz])$/);k=z?`${z[1]}-mega-${z[2]}`:`${tail}-mega`;}
  // Also accept Showdown's mega naming and standard form suffixes.
  if(TYPE_TABLE[k])return TYPE_TABLE[k].slice();
  let m=k.match(/^(.+)-meg([xyz])$/);if(m&&TYPE_TABLE[`${m[1]}-mega-${m[2]}`])return TYPE_TABLE[`${m[1]}-mega-${m[2]}`].slice();
  m=k.match(/^(.+)-megax?$/);if(m&&TYPE_TABLE[`${m[1]}-mega`])return TYPE_TABLE[`${m[1]}-mega`].slice();
- // Mega forms not listed explicitly inherit the base species typing.
+ // Never borrow a base species' typing for a distinct form that has no
+ // exact entry. This is especially important for custom Mega/Z-Mega forms;
+ // the absence of catalogue data must be visible, not a false 1x matchup.
+ if(/(?:-mega(?:-[xyz])?|-primal|-hisui|-galar|-alola|-therian|-origin|-crowned|-terastal|-stellar)$/.test(k))return [];
+ // Non-battle-only names may use the historical prefix match below.
  if(k.endsWith('-mega'))k=k.slice(0,-5);
  else if(/-mega-[xyz]$/.test(k))k=k.replace(/-mega-[xyz]$/,'');
  let parts=k.split('-');

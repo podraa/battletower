@@ -34,6 +34,14 @@
   // season/league that is no longer selected still resolves for its own caller
   // but is inert: it cannot overwrite the newer selection or cache.
   let loadEpoch = 0;
+  const seasonBaselines = new Map();
+  const deepCopy = value => JSON.parse(JSON.stringify(value));
+  const stable = value => JSON.stringify(canonical(value));
+  function canonical(value){
+    if(Array.isArray(value))return value.map(canonical);
+    if(value&&typeof value==='object'){const out={};Object.keys(value).sort().forEach(k=>{out[k]=canonical(value[k]);});return out;}
+    return value;
+  }
 
   function selectionKey() {
     return `${SBL.leagueDb?.selectedLeagueId?.() || 'legacy'}|${SBL.leagueDb?.selectedSeasonId?.() || ''}|${SBL.leagueDb?.selectedSeasonKey?.() || ''}`;
@@ -125,6 +133,7 @@
       throw new Error('Could not load the selected season for this league.');
     }
     const seasonData = sr.data || {};
+    const persistentBaseline = deepCopy({teamMap:seasonData.teamMap||{},settings:seasonData.settings||{}});
     scopedState = { teamMap: {...(seasonData.teamMap || {})}, settings: {...(seasonData.settings || {})} };
     scopedState.settings.activeSeason = sr.name || scopedState.settings.activeSeason;
     // Remember the resolved season, but only if this is still the newest
@@ -166,6 +175,7 @@
     if (!(SBL.domain?.archivedSeason?.(sr.status) ?? ['archived','complete','completed','finalized','closed'].includes(String(sr.status||'').toLowerCase()))) {
       await applyAuthoritativeAliases(db,id,scopedState,replayRows);
     }
+    if(current())seasonBaselines.set(`${id}|${sr.id}`,{raw:persistentBaseline,view:deepCopy(scopedState)});
     return [{ replay_id: STATE_ID, replay_data: scopedState, normalizedSeason: scopedState.__normalizedSeason }, ...replayRows.map(r => ({ replay_id:r.replay_id, replay_data:r.replay_data, updated_at:r.updated_at }))];
   }
 
@@ -2354,69 +2364,88 @@
     return deleteIds(ids, db);
   }
 
-  async function saveSharedState(state, client, options={}){
-    const db = client || SBL.getSupabase();
-    const leagueId = String(options.leagueId || SBL.leagueDb?.selectedLeagueId?.() || '').trim();
-    const seasonId = String(options.seasonId || SBL.leagueDb?.selectedSeasonId?.(leagueId) || '').trim();
-    if(!leagueId) throw new Error('Cannot save shared state without a selected league.');
-    if(!seasonId) throw new Error('Cannot save shared state without a selected season.');
-    if(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db)){
-      const settings=state?.settings||{};
-      const registry=settings.leagues && typeof settings.leagues==='object' ? settings.leagues : {};
-      const hasRegistry=Object.keys(registry).length>0;
-      const entry=registry[leagueId]||null;
-      if(hasRegistry && !entry){
-        // A partial/stale registry is not authority to delete a real league.
-        // Refuse the save and leave all league and season records untouched.
-        throw new Error('The selected league is missing from the shared league registry. Reload the league before saving.');
+  // CP4.172: send only changed section keys. A semantic comparison ignores
+  // JSON object key order. The database rejects stale same-section changes,
+  // so independent Admin updates never erase one another.
+  async function saveSharedState(state,client,options={}){
+    const db=client||SBL.getSupabase();
+    const leagueId=String(options.leagueId||SBL.leagueDb?.selectedLeagueId?.()||'');
+    const seasonId=String(options.seasonId||SBL.leagueDb?.selectedSeasonId?.(leagueId)||'');
+    if(!leagueId||!seasonId)throw new Error('Select a league and season to save changes.');
+    const key=`${leagueId}|${seasonId}`;
+    let baseline=seasonBaselines.get(key);
+    if(!baseline){
+      // New season created by an RPC already has the proposed state. Do not
+      // synthesize a stale baseline for an existing season from its current row.
+      const row=await SBL.leagueDb.getSeasonContext(leagueId,db,{seasonId});
+      if(!row||row.status!=='active')throw new Error('Cannot write this season.');
+      const raw={teamMap:row.data?.teamMap||{},settings:row.data?.settings||{}};
+      const desired={teamMap:state?.teamMap||{},settings:state?.settings||{}};
+      const changed=Object.keys(desired.settings).some(k=>
+        !['leagues','activeLeagueId','activeSeason','draft','rosters','framework','seasonArchives'].includes(k)
+        &&stable(desired.settings[k])!==stable(raw.settings[k]));
+      if(changed||stable(desired.teamMap)!==stable(raw.teamMap))
+        throw new Error('Reload this season before editing: no verified original state is available.');
+      baseline={raw:deepCopy(raw),view:deepCopy(desired)};
+      seasonBaselines.set(key,baseline);
+    }
+    const forbidden=new Set(['leagues','activeLeagueId','activeSeason','draft','rosters','framework','seasonArchives','tradeRules','franchiseAssignments','currentPick','picks']);
+    const beforeSettings=baseline.view.settings||{},afterSettings=state?.settings||{},rawSettings=baseline.raw.settings||{};
+    const changes=[];
+    for(const k of new Set([...Object.keys(beforeSettings),...Object.keys(afterSettings)])){
+      if(forbidden.has(k))continue;
+      const prev=Object.prototype.hasOwnProperty.call(beforeSettings,k);
+      const next=Object.prototype.hasOwnProperty.call(afterSettings,k);
+      if(prev===next&&(!prev||stable(beforeSettings[k])===stable(afterSettings[k])))continue;
+      const rawPresent=Object.prototype.hasOwnProperty.call(rawSettings,k);
+      changes.push({scope:'settings',key:k,was_present:rawPresent,
+        before:rawPresent?rawSettings[k]:null,
+        ...(next?{value:afterSettings[k]}:{remove:true})});
+    }
+    if(stable(baseline.view.teamMap||{})!==stable(state?.teamMap||{})){
+      changes.push({scope:'teamMap',key:'',was_present:Object.prototype.hasOwnProperty.call(baseline.raw,'teamMap'),
+        before:baseline.raw.teamMap||{},value:state?.teamMap||{}});
+    }
+    if(changes.length){
+      await SBL.leagueDb.patchSeasonSections(leagueId,seasonId,changes,db);
+      for(const c of changes){
+        if(c.scope==='teamMap'){
+          baseline.raw.teamMap=deepCopy(c.value);
+          baseline.view.teamMap=deepCopy(c.value);
+        }else if(c.remove){delete baseline.raw.settings[c.key];delete baseline.view.settings[c.key];}
+        else{baseline.raw.settings[c.key]=deepCopy(c.value);baseline.view.settings[c.key]=deepCopy(c.value);}
       }
-      await SBL.leagueDb.saveState(leagueId,{teamMap:state?.teamMap||{},settings},db,{seasonId});
-
-      const franchises=Object.entries(settings.franchiseDefinitions||settings.franchises||{}).map(([name,v])=>({name,conference:v?.conference||v?.division||''}));
-      if(franchises.length) await SBL.leagueDb.upsertFranchises(leagueId,franchises,db);
-
-      // CP2.1: authoritative league membership must never be synchronised from
-      // legacy shared-state members. This save path persists season/shared state
-      // only. Membership lifecycle is owned by the normalized membership and
-      // franchise services/RPCs.
-      if(entry && (entry.name || entry.description || entry.joinCode || entry.status)){ 
-        await SBL.leagueDb.updateLeague(leagueId,{name:entry.name,description:entry.description||'',join_code:entry.joinCode||null,status:entry.status||'active'},db);
-      }
+    }
+    // Normalized franchise definitions and league metadata have their own
+    // dedicated services. They cannot be used to rewrite ownership history.
+    const definitions=state?.settings?.franchiseDefinitions||{};
+    if(changes.some(c=>c.key==='franchiseDefinitions')){
+      const entries=Object.entries(definitions).map(([name,x])=>({name,conference:x?.conference||x?.division||''}));
+      if(entries.length)await SBL.leagueDb.upsertFranchises(leagueId,entries,db);
+    }
+    if(changes.length){
       invalidateReplayLoadCache();
       await SBL.performance?.invalidate?.('replays:all');
-      return {data:[],error:null};
     }
-    throw new Error('Normalized league storage is unavailable; shared state was not saved.');
+    return {data:[],error:null,changed:changes.length};
   }
 
-  async function savePublishedRosters(rosters, client, options={}){
-    const db = client || SBL.getSupabase();
-    const leagueId=String(options.leagueId || SBL.leagueDb?.selectedLeagueId?.() || '').trim();
-    const requestedSeasonId=String(options.seasonId || SBL.leagueDb?.selectedSeasonId?.(leagueId) || '').trim();
-    if(!leagueId) throw new Error('Select a league before publishing rosters.');
-    if(!requestedSeasonId) throw new Error('Select a season before publishing rosters.');
-    if(leagueId && SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db)){
-      const league=await SBL.leagueDb.getLeague(leagueId,db);
-      const season=await SBL.leagueDb.getSeasonContext(leagueId,db,{seasonId:requestedSeasonId});
-      if(season){
-        const payload=JSON.parse(JSON.stringify(season.data||{}));
-        payload.settings=payload.settings||{};
-        payload.settings.rosters=rosters||{};
-        await SBL.leagueDb.saveSeasonState(leagueId,season.id,payload,db);
-      }
-      // Keep the normalized special row as a compatibility/readback artifact.
-      if(!season) throw new Error('The selected season could not be found in this league.');
-      const rows=await SBL.leagueDb.upsertReplays(leagueId,[{replay_id:'__rosters__',replay_data:{rosters:rosters||{}},season_id:season.id,updated_at:new Date().toISOString()}],db);
-      invalidateReplayLoadCache();
-      return {data:rows,error:null};
-    }
-    return upsertRows([{
-      replay_id:'__rosters__',
-      league_id:leagueId||null,
-      season_id:requestedSeasonId,
-      replay_data:{rosters:rosters||{}},
-      updated_at:new Date().toISOString()
-    }],db);
+  async function savePublishedRosters(rosters,client,options={}){
+    const db=client||SBL.getSupabase();
+    const leagueId=String(options.leagueId||SBL.leagueDb?.selectedLeagueId?.()||'').trim();
+    const seasonId=String(options.seasonId||SBL.leagueDb?.selectedSeasonId?.(leagueId)||'').trim();
+    if(!leagueId||!seasonId)throw new Error('Select a league and season before publishing rosters.');
+    const {data,error}=await db.rpc('sbl_publish_season_rosters',{
+      p_league_id:leagueId,p_season_id:seasonId,p_rosters:rosters||{}
+    });
+    if(error)throw error;
+    // Server trigger automatically publishes the canonical roster in the same
+    // transaction as a draft, trade, or roster edit. This legacy call verifies
+    // that a caller is not trying to upload a stale browser-side replacement.
+    const baseline=seasonBaselines.get(`${leagueId}|${seasonId}`);
+    if(baseline){baseline.raw.settings.rosters=deepCopy(rosters||{});baseline.view.settings.rosters=deepCopy(rosters||{});}
+    invalidateReplayLoadCache();
+    return {data,error:null};
   }
 
   SBL.replays.parseLog=parseLog;

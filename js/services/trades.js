@@ -251,9 +251,9 @@
     return data;
   }
 
-  async function revert(id, client) {
+  async function revert(id, client, action='revert') {
     const db = client || SBL.getSupabase();
-    const { data, error } = await db.rpc('commissioner_revert_trade', { trade_id: id });
+    const { data, error } = await db.rpc('sbl_commissioner_trade_reversal', { p_trade_id: id, p_action: action });
     if (error) throw error;
     invalidateTradeCache();
     return data;

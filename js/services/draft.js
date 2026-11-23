@@ -1,17 +1,14 @@
 /* Shared Draft persistence/orchestration.
- * Draft state lives in replays.__dashboard_state__. The important rule here is
- * that a client never treats updated_at as a lock. A write may race another
- * legitimate write; after writing we verify the actual draft mutation and, if
- * it was overwritten, retry from the newest state.
+ * Draft state lives in selected league_seasons.data.settings.draft.
+ * Commissioner lifecycle and setup writes go through a season-row-locked RPC;
+ * browser snapshot overwrites are intentionally disabled.
  */
 (function(){
   'use strict';
   const SBL = window.SBL = window.SBL || {};
   const STATE_ID='__dashboard_state__';
-  let writeQueue=Promise.resolve();
 
   function db(){ return SBL.getSupabase(); }
-  function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
   function clone(v){ return JSON.parse(JSON.stringify(v ?? {})); }
   function normaliseDraft(d){
     const x=Object.assign({status:'setup',mode:'manual',defaultBudget:120,budgets:{},pool:[],order:[],currentPick:0,picks:[],minPicks:10,maxPicks:10}, d||{});
@@ -37,9 +34,11 @@
   function rememberCtx(leagueId,seasonId){ ctx=(leagueId&&seasonId)?{leagueId,seasonId}:null; }
   async function ensureCtx(){
     const lid=SBL.leagueDb?.selectedLeagueId?.()||'';
-    if(ctx && ctx.leagueId===lid) return ctx;
-    try{ await read(); }catch(_){ }
-    return (ctx && ctx.leagueId===lid) ? ctx : null;
+    const selected=SBL.leagueDb?.selectedSeasonId?.(lid)||'';
+    if(ctx && ctx.leagueId===lid && (!selected || ctx.seasonId===selected)) return ctx;
+    if(!lid) return null;
+    await read();
+    return (ctx && ctx.leagueId===lid && (!selected || ctx.seasonId===selected))?ctx:null;
   }
   function isMissingFn(error){ return !!error && ['PGRST202','42883','42P01'].includes(String(error.code||'')); }
   function nameKey(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
@@ -209,7 +208,8 @@
     let data=null,error=null;
     if(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db())){
       const id=SBL.leagueDb.selectedLeagueId();
-      const season=await SBL.leagueDb.getSeasonContext(id,db());
+      const requested=SBL.leagueDb.selectedSeasonId?.(id)||'';
+      const season=await SBL.leagueDb.getSeasonContext(id,db(),requested?{seasonId:requested}:{});
       if(season?.id){
         rememberCtx(id,season.id);
         SBL.leagueDb.setSelectedSeasonId?.(season.id,id);
@@ -243,58 +243,29 @@
     };
   }
 
-  async function write(snapshot){
-    const payload={league_id:SBL.leagueDb?.selectedLeagueId?.()||null,season_id:SBL.leagueDb?.selectedSeasonId?.()||null,replay_data:{teamMap:snapshot.teamMap||{},settings:snapshot.settings||{}},updated_at:new Date().toISOString()};
-    if(SBL.leagueDb?.isAvailable && await SBL.leagueDb.isAvailable(db())){
-      const leagueId=SBL.leagueDb.selectedLeagueId();
-      const season=await SBL.leagueDb.getSeasonContext(leagueId,db());
-      if(season) await SBL.leagueDb.saveSeasonState(leagueId,season.id,{teamMap:snapshot.teamMap||{},settings:snapshot.settings||{}},db());
-      else await SBL.leagueDb.saveState(leagueId,{teamMap:snapshot.teamMap||{},settings:snapshot.settings||{}},db());
-      return payload;
-    }
-    let q=db().from('replays').update(payload).eq('replay_id',STATE_ID);
-    const legacyLeagueId=SBL.leagueDb?.selectedLeagueId?.()||'';
-    if(legacyLeagueId) q=q.eq('league_id',legacyLeagueId);
-    const {error}=await q;
-    if(error) throw error;
-    return payload;
-  }
-
-  async function mutate(mutator, options={}){
-    const attempts=Math.max(1,Number(options.attempts||6));
-    const verify=options.verify;
-    // Serialize mutations from this browser. Cross-browser races are handled
-    // by post-write verification/retry below.
-    const run=writeQueue.then(async()=>{
-      for(let attempt=0;attempt<attempts;attempt++){
-        const fresh=await read();
-        const next=clone(fresh);
-        next.settings=next.settings||{};
-        next.settings.rosters=next.settings.rosters||{};
-        next.settings.draft=normaliseDraft(next.settings.draft);
-        const result=await mutator(next.settings.draft,next);
-        if(result===false) return {changed:false,state:fresh,result:null};
-        await write(next);
-        const committed=await read();
-        const ok=typeof verify==='function' ? await verify(committed,result) : true;
-        if(ok){
-          return {changed:true,state:committed,result};
-        }
-        await sleep(40*(attempt+1));
-      }
-      throw new Error('The draft could not be confirmed after several sync attempts. Refresh the room and try again.');
+  // CP4.171: the browser no longer writes a whole draft/roster snapshot.
+  // Every commissioner command locks the selected league_seasons row in SQL.
+  async function command(action,payload={}){
+    const c=await ensureCtx();
+    if(!c) throw new Error('Choose an active league and season before changing the draft.');
+    const {data,error}=await db().rpc('sbl_draft_admin_command',{
+      p_league_id:c.leagueId,p_season_id:c.seasonId,p_action:action,p_payload:payload
     });
-    writeQueue=run.catch(()=>{});
-    return run;
+    if(error){
+      if(isMissingFn(error)) throw new Error('Install migration 061_cp4171_atomic_draft_admin_commands.sql before using the draft controls. No changes were saved.');
+      throw error;
+    }
+    // No optimistic browser overlays: the returned season state is canonical.
+    const state=await read();
+    return {changed:data?.changed!==false,state,result:data||{action}};
   }
-
-  async function replaceDraft(draft, extraSettings={}, userRequired=true){
-    return mutate((d,next)=>{
-      next.settings.draft=normaliseDraft(draft);
-      Object.assign(next.settings, extraSettings||{});
-    },{attempts:4});
+  async function mutate(){
+    throw new Error('Generic browser draft mutations are disabled. Use the atomic commissioner commands.');
   }
-
+  async function replaceDraft(draft,extraSettings={}){
+    if(Object.keys(extraSettings||{}).length) throw new Error('Draft setup cannot overwrite other season settings.');
+    return command('save_setup',{draft:normaliseDraft(draft)});
+  }
 
   const teamKey = value => String(value ?? '').normalize('NFKC').trim().toLocaleLowerCase().replace(/\s+/g,' ');
   function canonicalDraftTeam(draft, team){
@@ -303,12 +274,6 @@
   }
   function hasSkippedSlot(draft,index,team){
     return (draft.skippedPicks||[]).some(x=>Number(x.slot)===index+1 && teamKey(x.team)===teamKey(team));
-  }
-  function addSkippedSlot(draft,index,team,reason){
-    draft.skippedPicks=Array.isArray(draft.skippedPicks)?draft.skippedPicks:[];
-    if(hasSkippedSlot(draft,index,team)) return false;
-    draft.skippedPicks.push({kind:'skip',team:String(team),slot:index+1,reason:String(reason||'Commissioner skipped this pick'),ts:new Date().toISOString()});
-    return true;
   }
   function endedTeamRecord(draft,team){
     const key=Object.keys(draft.endedTeams||{}).find(k=>teamKey(k)===teamKey(team));
@@ -334,16 +299,8 @@
     return advanced;
   }
   async function advanceEndedTeams(){
-    return mutate(draft=>{
-      if(draft.status!=='live'||draft.mode!=='ordered')return false;
-      const advanced=advancePastEndedTeams(draft);
-      return advanced?{kind:'advance_ended_teams',advanced,currentPick:draft.currentPick}:false;
-    },{attempts:6,verify:(committed,result)=>{
-      const d=normaliseDraft(committed.settings?.draft);
-      return !result || d.currentPick>=result.currentPick;
-    }});
+    return command('advance');
   }
-
   async function applyPick(poolId, team, madeBy='team_owner', base=null, opts={}){
     const c=await ensureCtx();
     const current=base || await read();
@@ -373,69 +330,9 @@
         throw new Error('The draft pick ledger is out of sync with the current draft. Apply Supabase migration 037_cp429_draft_active_pick_reconciliation.sql, then retry this pick. Your current pick has not been recorded.');
       }
       if(!isMissingFn(error)) throw error;
-      console.warn('sbl_draft_pick is not installed (run migration 021); using the legacy draft path.');
+      throw new Error('Install the required draft pick migration before drafting. Legacy writes are disabled.');
     }
-    return applyPickLegacy(poolId,canonicalTeam,madeBy);
-  }
-
-  async function applyPickLegacy(poolId, team, madeBy='team_owner'){
-    const rpc={
-      p_pool_id:String(poolId),
-      p_team:String(team),
-      p_made_by:String(madeBy)
-    };
-    const {data,error}=await db().rpc('sbl_apply_draft_pick',rpc);
-    if(!error){
-      // The RPC is the authoritative mutation. Read the row once after the
-      // transaction so every caller receives the same canonical shape.
-      const state=await read();
-      const d=state.settings?.draft || {};
-      const pick=d.picks?.find(p => String(p.poolId)===String(poolId)
-        && teamKey(p.team)===teamKey(team));
-      if(!pick){
-        throw new Error('The pick was accepted by the database but the updated draft state could not be read back.');
-      }
-      try{await advanceEndedTeams();}catch(e){console.warn('Could not advance franchises that have finished drafting:',e);}
-      const finalState=await read();
-      return {changed:true,state:finalState,result:{kind:'pick',poolId:String(poolId),team:String(team),pickNumber:Number(pick.pickNumber)}};
-    }
-
-    // The fallback is deliberately retained for deployments where the RPC has
-    // not been installed yet. Once the SQL migration is present, normal picks
-    // never use this path.
-    if(error.code && !['PGRST202','42883'].includes(String(error.code))) throw error;
-    return mutate((draft,snapshot)=>{
-      if(draft.status!=='live') throw new Error('The draft is not live.');
-      const target=draft.pool.find(m=>String(m.id)===String(poolId));
-      if(!target || target.drafted) throw new Error('That Pokémon is no longer available.');
-      if(endedTeamRecord(draft,team)) throw new Error(team+' has finished drafting and cannot make further picks.');
-      const currentTeam=draft.mode==='ordered' ? draft.order[draft.currentPick] : team;
-      if(!currentTeam || teamKey(currentTeam)!==teamKey(team)) throw new Error('It is not your turn.');
-      const spent=draft.picks.filter(p=>teamKey(p.team)===teamKey(team)).reduce((n,p)=>n+(Number(p.points)||0),0);
-      const budgetKey=Object.keys(draft.budgets||{}).find(k=>teamKey(k)===teamKey(team));
-      const budget=Number((budgetKey==null?draft.defaultBudget:draft.budgets[budgetKey]))||0;
-      if(spent+Number(target.points||0)>budget) throw new Error('That pick exceeds your remaining budget.');
-      if(draft.picks.filter(p=>teamKey(p.team)===teamKey(team)).length>=draft.maxPicks) throw new Error('Your roster has reached the maximum number of Pokémon.');
-      const pickNumber=draft.mode==='ordered' ? Number(draft.currentPick)+1 : draft.picks.length+1;
-      target.drafted=true; target.draftedBy=team; target.pickNumber=pickNumber;
-      draft.picks.push({poolId:String(target.id),name:target.name,points:Number(target.points)||0,team:String(team),pickNumber,ts:new Date().toISOString(),madeBy});
-      draft.currentPick=draft.mode==='ordered' ? Number(draft.currentPick)+1 : Number(draft.currentPick)||0;
-      if(draft.mode==='ordered') advancePastEndedTeams(draft);
-      if(draft.mode==='ordered') advancePastEndedTeams(draft);
-      if(draft.mode==='ordered' && draft.currentPick>=draft.order.length) draft.status='complete';
-      if(!snapshot.settings.rosters) snapshot.settings.rosters={};
-      snapshot.settings.rosters[team]=Array.isArray(snapshot.settings.rosters[team])?snapshot.settings.rosters[team]:[];
-      snapshot.settings.rosters[team].push({name:target.name,points:Number(target.points)||0});
-      return {kind:'pick',poolId:String(target.id),team:String(team),pickNumber};
-    },{
-      attempts:4,
-      verify:(committed,result)=>{
-        const d=normaliseDraft(committed.settings?.draft);
-        return d.picks.some(p=>String(p.poolId)===String(result?.poolId)
-          && String(p.team)===String(result?.team)
-          && Number(p.pickNumber)===Number(result?.pickNumber));
-      }
-    });
+    throw new Error('Select an active league season and install the draft migrations. Legacy writes are disabled.');
   }
 
   async function revertLastPick(base=null){
@@ -448,191 +345,39 @@
         return {changed:true,state,pick,result:{kind:'revert'}};
       }
       if(!isMissingFn(error)) throw error;
-      console.warn('sbl_draft_revert_last is not installed (run migration 021); using the legacy path.');
+      throw new Error('Install the required draft revert migration. Legacy writes are disabled.');
     }
-    return revertLastPickLegacy();
+    throw new Error('Select an active league season before reverting picks.');
   }
 
-  async function revertLastPickLegacy(){
-    const {data,error}=await db().rpc('sbl_revert_last_draft_pick');
-    if(!error){
-      const state=await read();
-      return {changed:true,state,result:{kind:'revert'}};
-    }
-    if(error.code && !['PGRST202','42883'].includes(String(error.code))) throw error;
-    return mutate((draft,snapshot)=>{
-      if(!draft.picks.length) throw new Error('There are no picks to revert.');
-      const last=draft.picks[draft.picks.length-1];
-      const target=draft.pool.find(x=>String(x.id)===String(last.poolId));
-      if(target){target.drafted=false;target.draftedBy=null;target.pickNumber=null;}
-      draft.picks.pop();
-      if(draft.mode==='ordered') draft.currentPick=Math.max(0,Number(draft.currentPick)-1);
-      if(draft.status==='complete') draft.status='live';
-      const roster=Array.isArray(snapshot.settings.rosters?.[last.team])?snapshot.settings.rosters[last.team]:[];
-      const idx=roster.findIndex(m=>String(m.name)===String(last.name)&&Number(m.points)===Number(last.points));
-      if(idx>=0) roster.splice(idx,1);
-      snapshot.settings.rosters[last.team]=roster;
-      return {kind:'revert'};
-    },{attempts:4});
-  }
-
-  async function openLobby(currentDraft, rosters={}){
-    return mutate((draft,snapshot)=>{
-      if(!Array.isArray(draft.pool) || !draft.pool.length) throw new Error('Add at least one Pokémon to the draft board first.');
-      draft.status='lobby';
-      draft.currentPick=0;
-      draft.picks=[];
-      draft.pool.forEach(m=>{m.drafted=false;m.draftedBy=null;m.pickNumber=null;});
-      draft.preDraftRosters=clone(rosters||{});
-      // Freeze the published Free Agency upload before the first pick mutates it.
-      const fa=snapshot.settings.freeAgency||{};
-      draft.preDraftFreeAgency=clone(fa.uploadedMons?.length?fa.uploadedMons:(fa.mons||[]));
-      snapshot.settings.rosters=clone(rosters||{});
-      return {kind:'open_lobby'};
-    },{attempts:4});
-  }
-
-  async function startDraft(){
-    return mutate((draft)=>{
-      if(draft.status!=='lobby') throw new Error('Open the Draft Room lobby before starting the draft.');
-      if(!draft.pool.length) throw new Error('Add at least one Pokémon to the draft board first.');
-      if(draft.mode==='ordered' && !draft.order.length) throw new Error('Generate a draft order first, or switch to manual mode.');
-      draft.status='live';
-      draft.currentPick=0;
-      return {kind:'start'};
-    },{attempts:4});
-  }
-
+  async function openLobby(){ return command('open_lobby'); }
+  async function startDraft(){ return command('start'); }
   async function skipCurrentPick(reason='Commissioner skipped this pick'){
-    return mutate(draft=>{
-      if(draft.status!=='live') throw new Error('Only a live draft pick can be skipped.');
-      if(draft.mode!=='ordered') throw new Error('Skip current pick is available in ordered draft mode.');
-      const team=String(draft.order[draft.currentPick]||'').trim();
-      if(!team) throw new Error('There is no active pick on the clock.');
-      const slot=draft.currentPick+1;
-      addSkippedSlot(draft,draft.currentPick,team,reason);
-      draft.currentPick++;
-      advancePastEndedTeams(draft);
-      return {kind:'skip',team,slot,reason:String(reason)};
-    },{attempts:6,verify:(committed,event)=>{
-      const d=normaliseDraft(committed.settings?.draft);
-      return d.skippedPicks.some(x=>Number(x.slot)===event.slot&&teamKey(x.team)===teamKey(event.team))&&d.currentPick>=event.slot;
-    }});
+    return command('skip',{reason:String(reason)});
   }
-
   async function endFranchiseDraft(team,reason='No points remaining'){
     const target=String(team||'').trim();
-    if(!target) throw new Error('Choose a franchise first.');
-    return mutate(draft=>{
-      if(draft.status!=='live') throw new Error('Only a live draft can be changed.');
-      const canonical=canonicalDraftTeam(draft,target);
-      draft.endedTeams=draft.endedTeams&&typeof draft.endedTeams==='object'?draft.endedTeams:{};
-      if(endedTeamRecord(draft,canonical)) return false;
-      draft.endedTeams[canonical]={reason:String(reason),ts:new Date().toISOString()};
-      if(draft.mode==='ordered'){
-        for(let i=draft.currentPick;i<draft.order.length;i++){
-          if(teamKey(draft.order[i])===teamKey(canonical)){
-            addSkippedSlot(draft,i,draft.order[i],'Franchise ended drafting: '+String(reason));
-          }
-        }
-        advancePastEndedTeams(draft);
-      }
-      return {team:canonical,reason:String(reason)};
-    },{attempts:6,verify:(committed,result)=>{
-      const d=normaliseDraft(committed.settings?.draft);
-      return !!endedTeamRecord(d,result?.team);
-    }});
+    if(!target)throw new Error('Choose a franchise first.');
+    return command('end_team',{team:target,reason:String(reason)});
   }
-
-  async function endDraft(){
-    return mutate((draft)=>{
-      if(draft.status!=='live') throw new Error('Only a live draft can be ended.');
-      draft.status='complete';
-      if(draft.mode==='ordered' && draft.order.length) draft.currentPick=Math.min(Number(draft.currentPick)||0,draft.order.length);
-      return {kind:'end'};
-    },{attempts:4});
-  }
+  async function endDraft(){ return command('end'); }
 
   async function resetDraft(queueAction){
-    if(!['restore','clear','keep'].includes(queueAction))throw new Error('Choose what to do with draft plans first.');
+    if(!['restore','clear','keep'].includes(queueAction)) throw new Error('Choose what to do with draft plans first.');
     const c=await ensureCtx();
-    if(c){
-      const {data,error}=await db().rpc('sbl_draft_reset',{
-        p_league_id:c.leagueId,p_season_id:c.seasonId,p_queue_action:queueAction
-      });
-      if(!error){
-        const state=await read();
-        return {changed:true,state,result:data||{kind:'reset'}};
-      }
-      if(!isMissingFn(error))throw error;
-      throw new Error('Install the CP4.142 Supabase migration before resetting drafts. The old reset cannot safely clear every coach’s plan.');
+    if(!c) throw new Error('Select an active league season before resetting the draft.');
+    const {data,error}=await db().rpc('sbl_draft_reset',{
+      p_league_id:c.leagueId,p_season_id:c.seasonId,p_queue_action:queueAction
+    });
+    if(error){
+      if(isMissingFn(error))throw new Error('Install the CP4.142 draft reset migration. Legacy resets are disabled.');
+      throw error;
     }
-    return mutate((draft,snapshot)=>{
-      // Picks may have removed entries from Free Agency. Restore the uploaded
-      // pool BEFORE discarding pick history; never overwrite point values.
-      const fa=snapshot.settings.freeAgency||{};
-      const saved=Array.isArray(draft.preDraftFreeAgency)?draft.preDraftFreeAgency:
-        (Array.isArray(fa.uploadedMons)?fa.uploadedMons:null);
-      let recovered=false;
-      let restored=[];
-      if(saved){
-        restored=clone(saved);
-      }else{
-        // Legacy draft without a saved upload snapshot: put back only picks
-        // that vanished from Free Agency. Leave every surviving row intact.
-        restored=clone(Array.isArray(fa.mons)?fa.mons:[]);
-        const key=x=>String(typeof x==='string'?x:(x?.name||x?.species||''))
-          .toLowerCase().replace(/[^a-z0-9]/g,'');
-        const present=new Set(restored.map(key));
-        for(const pick of draft.picks||[]){
-          const mon=(draft.pool||[]).find(m=>String(m.id)===String(pick.poolId));
-          const name=mon?.name||pick.name;
-          if(!name||present.has(key(name)))continue;
-          restored.push({name,points:Number(mon?.points??pick.points)||0,...(mon?.isMega?{isMega:true}:{})});
-          present.add(key(name));recovered=true;
-        }
-      }
-      snapshot.settings.freeAgency={...fa,mons:restored};
-      draft.pool.forEach(m=>{m.drafted=false;m.draftedBy=null;m.pickNumber=null;});
-      draft.picks=[];
-      draft.currentPick=0;
-      draft.status='setup';
-      if(draft.preDraftRosters){snapshot.settings.rosters=clone(draft.preDraftRosters);}
-      draft.preDraftRosters=null;
-      draft.preDraftFreeAgency=null;
-      return {kind:'reset',freeAgencyRestored:restored.length,recoveredFromPicks:recovered,usedUploadSnapshot:!!saved};
-    },{attempts:4});
+    return {changed:true,state:await read(),result:data||{kind:'reset'}};
   }
-
-  async function saveDraftState(draft, extraSettings={}){
-    return mutate((fresh,snapshot)=>{
-      const incoming=normaliseDraft(draft);
-      // Draft setup edits happen before live play. If a live draft is being
-      // edited, only preserve the live pick state from the fresh snapshot and
-      // merge non-pick configuration fields. This prevents an admin tab from
-      // accidentally overwriting a participant's latest pick.
-      if(fresh.status==='live' || fresh.status==='complete'){
-        const preserved={...fresh};
-        const editable=['defaultBudget','budgets','minPicks','maxPicks','mode','order','pool'];
-        for(const key of editable){
-          if(key==='pool'){
-            // Never overwrite drafted flags/pick metadata from a live snapshot.
-            const incomingById=new Map(incoming.pool.map(m=>[String(m.id),m]));
-            preserved.pool=preserved.pool.map(m=>{
-              const candidate=incomingById.get(String(m.id));
-              if(!candidate) return m;
-              return m.drafted ? {...m,baseStats:candidate.baseStats||m.baseStats} : candidate;
-            });
-          } else if(key!=='mode' || fresh.picks.length===0){
-            preserved[key]=clone(incoming[key]);
-          }
-        }
-        snapshot.settings.draft=preserved;
-      }else{
-        snapshot.settings.draft=incoming;
-      }
-      Object.assign(snapshot.settings,extraSettings||{});
-    },{attempts:4});
+  async function saveDraftState(draft,extraSettings={}){
+    if(Object.keys(extraSettings||{}).length) throw new Error('Draft setup cannot overwrite other season settings.');
+    return command('save_setup',{draft:normaliseDraft(draft)});
   }
 
   async function trackerStatus(){

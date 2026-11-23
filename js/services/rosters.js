@@ -11,7 +11,7 @@
   window.SBL.services=window.SBL.services||{};
   const SBL=window.SBL;
   const CACHE_TTL=15000;
-  let memory=null,memoryAt=0,memoryKey='',request=null,requestKey='';
+  let memory=null,memoryAt=0,memoryKey='',request=null,requestKey='',generation=0;
 
   function client(){ return SBL.getSupabase(); }
   function unwrap(raw){
@@ -22,7 +22,10 @@
   }
   async function load(options={}){
     const force=!!options.force, now=Date.now();
-    const cacheKey=`${SBL.leagueDb?.selectedLeagueId?.()||'legacy'}|${SBL.leagueDb?.selectedSeasonId?.()||''}|${options.season||''}`;
+    const leagueId=SBL.leagueDb?.selectedLeagueId?.()||'legacy';
+    const selectedSeasonId=SBL.leagueDb?.selectedSeasonId?.(leagueId)||'';
+    const cacheKey=`${leagueId}|${options.seasonId||selectedSeasonId}|${options.season||''}`;
+    const startedAtGeneration=generation;
     if(!force&&memory&&memoryKey===cacheKey&&(now-memoryAt)<CACHE_TTL)return memory;
     if(!force&&request&&requestKey===cacheKey)return request;
     requestKey=cacheKey;
@@ -51,27 +54,31 @@
         const legacy=await q.maybeSingle();
         if(!legacy.error&&legacy.data) rosters=unwrap(legacy.data)?.rosters||{};
       }
-      memory={rosters:rosters||{},settings:state||{},snapshot:snapshot||null};
-      memoryKey=`${SBL.leagueDb?.selectedLeagueId?.()||'legacy'}|${SBL.leagueDb?.selectedSeasonId?.()||''}|${options.season||''}`;
-      memoryAt=Date.now();
-      return memory;
+      const result={rosters:rosters||{},settings:state||{},snapshot:snapshot||null};
+      if(startedAtGeneration===generation){
+        memory=result;memoryKey=cacheKey;memoryAt=Date.now();
+      }
+      return result;
     })();
-    try{return await request;}finally{request=null;requestKey='';}
+    const pending=request;
+    try{return await pending;}finally{if(request===pending){request=null;requestKey='';}}
   }
   async function getAll(options={}){ return (await load(options))?.rosters||{}; }
   async function getTeam(teamName,options={}){ if(!teamName)return null; const all=await getAll(options); if(all[teamName])return all[teamName]; const target=String(teamName).trim().toLowerCase(); const key=Object.keys(all).find(k=>String(k).trim().toLowerCase()===target); return key?all[key]:null; }
   async function getPokemon(teamName,options={}){ const roster=await getTeam(teamName,options); if(!roster)return []; if(Array.isArray(roster))return roster; if(Array.isArray(roster.pokemon))return roster.pokemon; if(Array.isArray(roster.roster))return roster.roster; if(Array.isArray(roster.members))return roster.members; return []; }
   async function save(rosters,options={}){
-    const db=client(), leagueId=SBL.leagueDb?.selectedLeagueId?.();
-    if(!leagueId||!SBL.seasons?.loadSnapshot) throw new Error('A selected league is required to save rosters.');
-    const snapshot=await SBL.seasons.loadSnapshot({leagueId,seasonId:options.seasonId,season:options.season});
-    const settings=JSON.parse(JSON.stringify(snapshot?.settings||{}));
-    settings.rosters=rosters||{};
-    await SBL.seasons.saveSnapshot({teamMap:snapshot?.teamMap||{},settings,replays:snapshot?.replays||null},{leagueId,seasonId:snapshot?.seasonId});
-    memory={rosters:rosters||{},settings,snapshot:Object.assign({},snapshot,{settings})}; memoryAt=Date.now();
-    return memory;
+    if(!SBL.rosterMutations?.replace) throw new Error('Load the shared roster mutation service before editing rosters.');
+    const leagueId=SBL.leagueDb?.selectedLeagueId?.();
+    if(!leagueId) throw new Error('Select a league and season before editing rosters.');
+    const current=await load({...options,force:true});
+    const seasonId=options.seasonId||current.snapshot?.seasonId;
+    if(!seasonId)throw new Error('A canonical season is required for roster edits.');
+    await SBL.rosterMutations.replace(current.rosters,rosters||{},
+      {leagueId,seasonId,reason:options.reason||'Commissioner roster replacement'});
+    clearCache();
+    return load({...options,force:true,seasonId});
   }
-  function clearCache(){memory=null;memoryAt=0;request=null;}
+  function clearCache(){generation++;memory=null;memoryAt=0;memoryKey='';request=null;requestKey='';}
   SBL.services.rosters={load,getAll,getTeam,getPokemon,save,clearCache};
   SBL.rosters=SBL.services.rosters;
 })();

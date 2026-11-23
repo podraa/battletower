@@ -108,7 +108,7 @@
     const seasonId=options.seasonId || SBL.leagueDb?.selectedSeasonId?.();
     const season=seasonId ? await SBL.leagueDb.getSeasonContext(leagueId,db,{seasonId}) : await SBL.leagueDb.getSeasonContext(leagueId,db,{seasonKey:seasonKey(snapshot?.key||snapshot?.name||'')});
     if(!season) throw new Error('The selected season could not be found.');
-    return SBL.leagueDb.saveSeasonState(leagueId,season.id,{teamMap:snapshot?.teamMap||{},settings:snapshot?.settings||{},replays:snapshot?.replays||null},db);
+    throw new Error('Whole-season snapshot replacement is retired. Use the scoped season command for live changes; archived snapshots are immutable.');
   }
 
   async function loadState(){

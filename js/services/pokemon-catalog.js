@@ -26,7 +26,7 @@
     inflight.set(key,promise);
     try{return await promise;}finally{if(inflight.get(key)===promise)inflight.delete(key);}
   }
-  function clearCache(){cache.clear();inflight.clear();}
+  function clearCache(){cache.clear();inflight.clear();clearBattleCache();}
   function client() {
     if (typeof SBL.getSupabase !== 'function') throw new Error('Supabase client is not ready.');
     return SBL.getSupabase();
@@ -77,12 +77,25 @@
     const ids = [...new Set((Array.isArray(moveIds) ? moveIds : [moveIds]).map(normalizeId).filter(Boolean))];
     if (!ids.length) return [];
     return once('catalog:moves:'+ids.slice().sort().join(','),async()=>{
-    const { data, error } = await client()
-      .from('pokemon_moves_active')
-      .select('*')
-      .in('move_id', ids);
-    if (error) throw error;
-    return data || [];
+      const rows=[];
+      // Showdown species can have hundreds of legal move records. Split .in()
+      // to prevent oversized query strings and backend request failures.
+      const chunks=[];
+      for(let i=0;i<ids.length;i+=75)chunks.push(ids.slice(i,i+75));
+      // At most 3 concurrent requests, rather than a sequential 9+ request
+      // waterfall for large movesets or an unbounded burst.
+      for(let i=0;i<chunks.length;i+=3){
+        const responses=await Promise.all(chunks.slice(i,i+3).map(chunk=>
+          client().from('pokemon_moves_active')
+            .select('move_id,name,type,category,base_power,is_nonstandard,source_version')
+            .in('move_id',chunk)
+        ));
+        for(const response of responses){
+          if(response.error)throw response.error;
+          rows.push(...(response.data||[]));
+        }
+      }
+      return rows;
     });
   }
   async function getLearnset(pokemonId) {
@@ -106,6 +119,155 @@
     return { ...species, learnset: learnset.map(row => ({ ...row, move: byId.get(row.move_id) || null })) };
   }
 
+  // CP4.170: exact battle-form read model for all scouting and analyser pages.
+  // A profile must never inherit the base form's stats, type or abilities when
+  // an alternate form is missing from the active version. "null" is a real
+  // unavailable result, not permission to guess the base Pokemon.
+  const battleCache = new Map();
+  const BATTLE_PROFILE_MAX = 350;
+  let batchSerial = Promise.resolve();
+  function readBattleCache(key) {
+    const hit=battleCache.get(key);
+    if (!hit) return {found:false,value:null};
+    if (hit.expires<=Date.now()) { battleCache.delete(key);return {found:false,value:null}; }
+    return {found:true,value:hit.value};
+  }
+  function rememberBattle(key,value) {
+    if (battleCache.has(key))battleCache.delete(key);
+    if (battleCache.size>=BATTLE_PROFILE_MAX)battleCache.delete(battleCache.keys().next().value);
+    battleCache.set(key,{value,expires:Date.now()+TTL_MS});
+  }
+  function toBattleProfile(row) {
+    if(!row)return null;
+    const raw=row.base_stats||{};
+    if(!Object.values(raw).some(value=>Number.isFinite(Number(value))&&Number(value)>0))return null;
+    const stats={
+      hp: Number(raw.hp??raw.HP)||0,
+      attack: Number(raw.atk??raw.attack)||0,
+      defense: Number(raw.def??raw.defense)||0,
+      'special-attack':Number(raw.spa??raw['special-attack'])||0,
+      'special-defense':Number(raw.spd??raw['special-defense'])||0,
+      speed:Number(raw.spe??raw.speed)||0
+    };
+    const abilities=Array.isArray(row.abilities)?row.abilities:Object.values(row.abilities||{});
+    return Object.freeze({
+      id:String(row.pokemon_id),name:String(row.name||''),stats,
+      types:(Array.isArray(row.types)?row.types:[]).map(String),
+      abilities:abilities.map(String).filter(Boolean),
+      weightkg:row.weight_kg==null?null:Number(row.weight_kg),
+      source:'global-catalogue',version:String(row.source_version||'')
+    });
+  }
+  async function preloadBattleProfiles(names) {
+    // Serialize very short overlapping batches to avoid a remote request per
+    // species when several tabs and analysers render simultaneously.
+    const ids=[...new Set((names||[]).map(normalizeId).filter(Boolean))];
+    if(!ids.length)return new Map();
+    const populate=async()=>{
+      const requested=ids.filter(id=>!readBattleCache(id).found);
+      if(requested.length){
+        const meta=await getMeta();
+        if(!meta?.active_version){
+          requested.forEach(id=>rememberBattle(id,null));
+        }else{
+          // Pokemon lists are small (<100 in practice), but chunk anyway to
+          // keep PostgREST request URLs bounded.
+          for(let i=0;i<requested.length;i+=75){
+            const chunk=requested.slice(i,i+75);
+            const {data,error}=await client().from('pokemon_catalog_active')
+              .select('pokemon_id,name,types,base_stats,abilities,weight_kg,source_version')
+              .in('pokemon_id',chunk);
+            if(error)throw error;
+            const byId=new Map((data||[]).map(row=>[String(row.pokemon_id),toBattleProfile(row)]));
+            chunk.forEach(id=>rememberBattle(id,byId.get(id)||null));
+          }
+        }
+      }
+      return new Map(ids.map(id=>[id,readBattleCache(id).value]));
+    };
+    const pending=batchSerial.then(populate,populate);
+    batchSerial=pending.then(()=>undefined,()=>undefined);
+    return pending;
+  }
+  async function getBattleProfile(name){
+    const id=normalizeId(name);
+    if(!id)return null;
+    const hit=readBattleCache(id);
+    if(hit.found)return hit.value;
+    const rows=await preloadBattleProfiles([name]);
+    return rows.get(id)||null;
+  }
+  // Exact-form damage calculator adapter. @smogon/calc supports per-instance
+  // species overrides; use them only when the active catalogue contains all
+  // six real stats, typing and ability for that exact form. Never substitute
+  // base-form combat stats for an unsupported Mega/Z-Mega/Primal.
+  async function createCalcPokemon(C,gen,species,options={}){
+    if(!C?.Pokemon)throw new Error('Damage calculator is not available.');
+    const raw=String(species||'').trim();
+    const id=normalizeId(raw);
+    const protectedForm=/(?:mega(?:x|y|z)?|primal)$/.test(id);
+    let nativeError=null;
+    try{
+      const native=new C.Pokemon(gen,raw,options);
+      if(!protectedForm||normalizeId(native.name||raw)===id)return native;
+    }catch(err){nativeError=err;}
+    if(!protectedForm)throw nativeError||new Error('Unknown calculator species: '+raw);
+    const exact=await getBattleProfile(raw);
+    const rawStats=exact?.stats||{};
+    const baseStats={hp:Number(rawStats.hp),atk:Number(rawStats.attack),def:Number(rawStats.defense),
+      spa:Number(rawStats['special-attack']),spd:Number(rawStats['special-defense']),spe:Number(rawStats.speed)};
+    const complete=Object.values(baseStats).every(x=>Number.isFinite(x)&&x>0&&x<=255);
+    if(!exact||!complete||!Array.isArray(exact.types)||!exact.types.length||
+       !Array.isArray(exact.abilities)||!exact.abilities.length||
+       !Number.isFinite(exact.weightkg)||exact.weightkg<=0){
+      throw new Error(`No complete versioned battle profile for ${raw}; calculation unavailable.`);
+    }
+    const types=exact.types.map(type=>String(type).trim().replace(/^./,c=>c.toUpperCase()));
+    if(types.length>2||types.some(type=>!type))throw new Error('Invalid catalogue type data for '+raw);
+    const base=raw.replace(/[- ]mega(?:[- ]?[xyz])?$/i,'').replace(/[- ]primal$/i,'');
+    if(!base||normalizeId(base)===id)throw new Error('Cannot find a calculator base species for '+raw);
+    const customOptions={...options,name:raw,
+      ability:options.ability||exact.abilities[0],
+      overrides:{name:raw,baseStats,types,abilities:exact.abilities,weightkg:exact.weightkg}};
+    const result=new C.Pokemon(gen,base,customOptions);
+    if(!result?.species?.baseStats ||
+       Number(result.species.baseStats.def)!==baseStats.def ||
+       Number(result.species.baseStats.spd)!==baseStats.spd){
+      throw new Error('Calculator did not apply the exact-form stat overrides for '+raw);
+    }
+    return result;
+  }
+  function clearBattleCache(){battleCache.clear();}
+  // A shared, versioned learnset read for the Switch-In move chooser and
+  // Team Planner. Do NOT claim current-format legality from a cross-generation
+  // Showdown learnset; source rows are retained for future ruleset filtering.
+  async function getDamagingLearnset(pokemonName){
+    const id=normalizeId(pokemonName);
+    if(!id)return null;
+    return once('catalog:damaging:'+id,async()=>{
+      const profile=await getBattleProfile(pokemonName);
+      if(!profile)return null; // Exact form is absent from this version.
+      let rows=await getLearnset(id), inheritedFrom=null;
+      if(!rows.length){
+        // Mega and Primal forms inherit their species' moves. Explicitly
+        // forbid Z-Mega base inheritance: an unversioned custom ruleset
+        // could have different legality and we must not guess.
+        const key=SBL.domain?.pokemonKey?.(pokemonName)||String(pokemonName||'').toLowerCase();
+        const match=key.match(/^(.+)-(?:mega(?:-[xy])?|primal)$/);
+        if(match){
+          inheritedFrom=normalizeId(match[1]);
+          rows=await getLearnset(inheritedFrom);
+        }
+      }
+      if(!rows.length)return {moves:[],source:'global-catalogue',inheritedFrom};
+      const known=await getMoves(rows.map(row=>row.move_id));
+      const moves=known.filter(m=>Number(m.base_power)>0 && ['Physical','Special'].includes(String(m.category||'').replace(/^./,x=>x.toUpperCase())))
+        .map(m=>({name:String(m.name||m.move_id||''),type:String(m.type||''),category:String(m.category||'').toLowerCase(),power:Number(m.base_power),sources:rows.find(row=>row.move_id===m.move_id)?.sources||[]}))
+        .filter(m=>m.name).sort((a,b)=>a.name.localeCompare(b.name));
+      return {moves,source:'global-catalogue',inheritedFrom};
+    });
+  }
+
   SBL.pokemonCatalog = {
     normalizeId,
     getMeta,
@@ -115,6 +277,11 @@
     getMoves,
     getLearnset,
     getSpeciesWithLearnset,
+    getDamagingLearnset,
+    getBattleProfile,
+    createCalcPokemon,
+    preloadBattleProfiles,
+    toBattleProfile,
     clearCache,
   };
 })();
