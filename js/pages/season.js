@@ -166,7 +166,7 @@
   }
 
   function showAdminLogin(){
-    // Not logged in (or no assigned team) — bounce to the login page instead of
+    // Not logged in (or no assigned team) - bounce to the login page instead of
     // rendering an inline form here. Every page other than index.html requires
     // an authenticated session with a claimed team before it will show content.
     location.replace('index.html');
@@ -270,11 +270,11 @@
   function fixtureTeamText(team){ return seasonOwnerLabel(team) || String(team||''); }
   function fixtureTeam(team){
     const esc=SBL.pokemon.escapeHtml, owner=seasonOwnerLabel(team);
-    return `<span class="team-link" role="button" tabindex="0" data-team-popup="${esc(team)}" title="${esc(owner?('Franchise: '+team+' \u2014 click for roster'):'Click for roster')}">${esc(owner||team)}</span>`;
+    return `<span class="team-link" role="button" tabindex="0" data-team-popup="${esc(team)}" title="${esc(owner?('Franchise: '+team+'  -  click for roster'):'Click for roster')}">${esc(owner||team)}</span>`;
   }
   SBL.teamPopup.bind(document,()=>({settings:STATE.settings,teamMap:STATE.teamMap,rosters:STATE.settings.rosters||{}}));
   // groups values that only differ by case/whitespace under one canonical label
-  // (the first-seen casing) when "case-insensitive names" is on in Settings —
+  // (the first-seen casing) when "case-insensitive names" is on in Settings -
   // this is what keeps e.g. "Team Fire" and "team fire" from splitting into
   // two separate teams just because they were typed differently at different times.
   function groupKey(value){
@@ -341,7 +341,7 @@
       if(!id){ appendLog(logEl, `Could not read a replay id from: ${url}`, true); failed++; continue; }
       const previous=STATE.replays[id];
       if(previous && SBL.replays.isReplayCurrent(previous,activeParser)){
-        appendLog(logEl, `Already processed by ${activeParser.version}: ${id} — skipped`, false);skipped++;continue;
+        appendLog(logEl, `Already processed by ${activeParser.version}: ${id} - skipped`, false);skipped++;continue;
       }
       if(previous)appendLog(logEl,`Reprocessing ${id} with ${activeParser.version}: stored parser checksum differs.`,false);
       try{
@@ -356,7 +356,7 @@
         appendLog(logEl, `✓ ${id}  (${parsed.players.p1 || '?'} vs ${parsed.players.p2 || '?'})`, false, true);
         added++;
       }catch(e){
-        appendLog(logEl, `✗ ${id} — ${e.message}`, true);
+        appendLog(logEl, `✗ ${id} - ${e.message}`, true);
         failed++;
       }
     }
@@ -509,7 +509,7 @@
       STATE.teamMap[u.trim().toLowerCase()] = canonicalLabel;
     }
   }
-  // returns pairs of current team labels whose Pokémon rosters overlap heavily —
+  // returns pairs of current team labels whose Pokémon rosters overlap heavily -
   // in a draft league each team's roster is fixed, so two "different" team tags
   // sharing most of the same mons are almost certainly the same team typed two ways
   function findDuplicateTeamPairs(){
@@ -711,13 +711,13 @@
 
   // ---------- kill/death audit trail ----------
   // Encodes a mon's kill or death log onto a table cell so it can be clicked open
-  // to see exactly which replay/turn/cause each credited kill or death came from —
+  // to see exactly which replay/turn/cause each credited kill or death came from -
   // lets you trace a count against a hand-kept tally without me having to guess.
   function auditAttr(species, type, list, showLink){
     const payload = JSON.stringify({species, type, list: list || [], showLink: showLink !== false});
     return `class="num ${type==='kills'?'kills ':''}auditable" data-audit="${SBL.pokemon.escapeHtml(payload)}"`;
   }
-  // same payload as auditAttr but without the class="" — for elements (like the
+  // same payload as auditAttr but without the class="" - for elements (like the
   // Golden Fist row) that already carry their own class list
   function auditDataAttr(species, type, list, showLink){
     const payload = JSON.stringify({species, type, list: list || [], showLink: showLink !== false});
@@ -755,11 +755,11 @@
     document.getElementById('auditModal').innerHTML = `
       <div class="audit-overlay" id="auditOverlay">
         <div class="audit-box">
-          <h3>${pokemonLink(species, SBL.pokemon.escapeHtml(species))} — ${label} (${rows.length})</h3>
+          <h3>${pokemonLink(species, SBL.pokemon.escapeHtml(species))} - ${label} (${rows.length})</h3>
           <div class="audit-sub">Every ${type==='kills'?'knockout':'death'} credited to this Pokémon this scope, with the turn${showLink?', replay,':''} and why it was credited.</div>
           ${rows.length===0 ? `<div class="empty-state">No entries.</div>` : `<ul class="audit-list">
             ${rows.map(r=>`<li>
-              <span>Turn ${r.turn} — ${type==='kills' ? 'vs ' + (r.victim ? pokemonLink(r.victim, SBL.pokemon.escapeHtml(r.victim), '', false) : '?') : (r.killer ? 'by ' + pokemonLink(r.killer, SBL.pokemon.escapeHtml(r.killer), '', false) : 'unattributed')} <span class="audit-cause">(${SBL.pokemon.escapeHtml(r.cause||'—')})</span></span>
+              <span>Turn ${r.turn} - ${type==='kills' ? 'vs ' + (r.victim ? pokemonLink(r.victim, SBL.pokemon.escapeHtml(r.victim), '', false) : '?') : (r.killer ? 'by ' + pokemonLink(r.killer, SBL.pokemon.escapeHtml(r.killer), '', false) : 'unattributed')} <span class="audit-cause">(${SBL.pokemon.escapeHtml(r.cause||'N/A')})</span></span>
               ${showLink ? `<a href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(r.replayId)}" target="_blank" rel="noopener">${SBL.pokemon.escapeHtml(r.replayId)}</a>` : ''}
             </li>`).join('')}
           </ul>`}
@@ -824,7 +824,7 @@
     el.querySelectorAll('[data-team-card]').forEach(card=>card.addEventListener('click',()=>openTeamOverview(card.dataset.teamCard)));
   }
   // Every remaining (unplayed) fixture match involving this team, in
-  // schedule order — the literal games left on the "route to qualification".
+  // schedule order - the literal games left on the "route to qualification".
   function conferenceRemainingFixtures(team){
     const fixture = STATE.settings?.fixture;
     const rounds = SBL.fixtureWorkflow?.publishedRounds?.(STATE.settings) || (Array.isArray(fixture?.rounds) ? fixture.rounds : []);
@@ -1091,7 +1091,7 @@
     if(!a) return `<div class="route-status">No conference qualification picture is available.</div>`;
     if(a.error) return `<div class="route-status">${SBL.pokemon.escapeHtml(a.error)}</div>`;
     const confName=conferenceDisplayName(a.conf);
-    const status=a.exactClinched?`Finals Qualified — #${a.currentSeed} Clinched`:a.finalsClinched?`Finals Qualified — currently #${a.currentSeed}`:a.finalsSeeds.length?`Still in the hunt — currently #${a.currentSeed}`:`Eliminated from the finals`;
+    const status=a.exactClinched?`Finals Qualified - #${a.currentSeed} Clinched`:a.finalsClinched?`Finals Qualified - currently #${a.currentSeed}`:a.finalsSeeds.length?`Still in the hunt - currently #${a.currentSeed}`:`Eliminated from the finals`;
     const cls=a.finalsClinched?'qualified':(a.finalsSeeds.length?'alive':'eliminated');
     const explanation=a.exactClinched?'Your seed is locked.':a.finalsClinched?'Your finals place is locked, but your seed can still change.':a.finalsSeeds.length?'You are not qualified yet. You can still reach the finals, but you can also miss them.':'No remaining results can put you into the Finals qualification places.';
     let html=`<div class="route-status ${cls}"><strong>${status}</strong> in ${SBL.pokemon.escapeHtml(confName)}. ${explanation}</div>`;
@@ -1099,7 +1099,7 @@
     if(other.length){
       html+=`<div class="seed-change-panel"><h3 class="mini-heading" style="margin:0 0 4px;">How your seed can change</h3><p class="seed-change-intro">These are the possible finishing positions other than your current seed. Each one shows the results that would put you there.</p><div class="seed-change-list">`;
       for(const seed of other){
-        const label=seed<=6?`Could finish #${seed}`:`Could finish #${seed} — outside the finals`;
+        const label=seed<=6?`Could finish #${seed}`:`Could finish #${seed} - outside the finals`;
         const tag=seed<=6?'Finals position':'Outside finals';
         html+=`<div class="seed-change-card"><div class="seed-change-head"><strong class="seed-change-title">${label}</strong><span class="seed-change-tag">${tag}</span></div><div class="seed-change-body">`;
         const routes=a.routes[seed]||[];
@@ -1127,7 +1127,7 @@
   }
 
   // Most recent `n` played fixture results for a franchise, in chronological
-  // (oldest-first) order — used to render the W/L form pills on Standings.
+  // (oldest-first) order - used to render the W/L form pills on Standings.
   function teamRecentForm(team, n=4){
     const fixture = STATE.settings?.fixture;
     const rounds = Array.isArray(fixture?.rounds) ? fixture.rounds : [];
@@ -1162,7 +1162,7 @@
     const confIndex = confList.findIndex(x=>x.team===team);
     const ordinal = idx => { const n=idx+1; return `${n}${n===1?'st':n===2?'nd':n===3?'rd':'th'}`; };
 
-    const summaryTabHtml = `<div class="profile-grid"><div><span>Record</span><strong>${t.wins}-${t.losses}</strong></div><div><span>Win %</span><strong>${t.games?(100*t.wins/t.games).toFixed(1)+'%':'—'}</strong></div><div><span>Games</span><strong>${t.games}</strong></div><div><span>Differential</span><strong>${Number(t.diff||0)>0?'+':''}${Number(t.diff||0)}</strong></div></div><div class="section-divider"></div><h3 class="mini-heading">Top used Pokémon</h3>${mons.map(m=>`<div class="summary-mon">${pokemonLink(m.species,`${SBL.pokemon.spriteMarkup(m.species,'sprite')}<div class="summary-mon-main"><strong>${SBL.pokemon.escapeHtml(m.species)}</strong><div class="summary-mon-stats">${m.appearances} games · ${m.kills} K · ${m.deaths} D</div></div>`)}</div>`).join('')||'<div class="empty-state">No matches played yet this season.</div>'}`;
+    const summaryTabHtml = `<div class="profile-grid"><div><span>Record</span><strong>${t.wins}-${t.losses}</strong></div><div><span>Win %</span><strong>${t.games?(100*t.wins/t.games).toFixed(1)+'%':'N/A'}</strong></div><div><span>Games</span><strong>${t.games}</strong></div><div><span>Differential</span><strong>${Number(t.diff||0)>0?'+':''}${Number(t.diff||0)}</strong></div></div><div class="section-divider"></div><h3 class="mini-heading">Top used Pokémon</h3>${mons.map(m=>`<div class="summary-mon">${pokemonLink(m.species,`${SBL.pokemon.spriteMarkup(m.species,'sprite')}<div class="summary-mon-main"><strong>${SBL.pokemon.escapeHtml(m.species)}</strong><div class="summary-mon-stats">${m.appearances} games · ${m.kills} K · ${m.deaths} D</div></div>`)}</div>`).join('')||'<div class="empty-state">No matches played yet this season.</div>'}`;
 
     // The commissioner can toggle whether the Qualification tab shows at all
     // (typically switched on once the playoff picture matters, near the end
@@ -1174,7 +1174,7 @@
       </div>` : '';
     const qualificationPanelHtml = qualificationEnabled ? `<div class="modal-tab-panel" data-modal-panel="qualification" hidden>${qualificationPathHtml(team)}</div>` : '';
 
-    document.getElementById('auditModal').innerHTML=`<div class="audit-overlay" id="teamOverviewOverlay"><div class="audit-box overview-modal"><div class="summary-header"><div><div class="summary-kicker">${SBL.pokemon.escapeHtml(confName)} Position</div><h3>${ordinal(confIndex)} — ${SBL.pokemon.escapeHtml(team)}</h3><div class="summary-result" style="color:var(--text-dim);font-weight:600;">${ordinal(i)} overall in the league</div></div><button class="ghost small" id="teamOverviewClose">Close ✕</button></div>${tabsHtml}<div class="modal-tab-panel" data-modal-panel="summary">${summaryTabHtml}</div>${qualificationPanelHtml}</div></div>`;
+    document.getElementById('auditModal').innerHTML=`<div class="audit-overlay" id="teamOverviewOverlay"><div class="audit-box overview-modal"><div class="summary-header"><div><div class="summary-kicker">${SBL.pokemon.escapeHtml(confName)} Position</div><h3>${ordinal(confIndex)} - ${SBL.pokemon.escapeHtml(team)}</h3><div class="summary-result" style="color:var(--text-dim);font-weight:600;">${ordinal(i)} overall in the league</div></div><button class="ghost small" id="teamOverviewClose">Close ✕</button></div>${tabsHtml}<div class="modal-tab-panel" data-modal-panel="summary">${summaryTabHtml}</div>${qualificationPanelHtml}</div></div>`;
     updateModalPageLock();
     const closeBtn=document.getElementById('teamOverviewClose');
     if(closeBtn) closeBtn.onclick=(e)=>{e.preventDefault();e.stopPropagation();closeAudit();};
@@ -1207,7 +1207,7 @@
       </div>
       <div class="panel">
         <h2>Processed this season <span class="badge">${count} replays</span></h2>
-        ${count===0 ? `<div class="empty-state">Nothing processed yet — paste some replay links above.</div>` : `
+        ${count===0 ? `<div class="empty-state">Nothing processed yet - paste some replay links above.</div>` : `
           <div class="foot-actions" style="margin-top:0; margin-bottom:12px;">
             <button class="ghost" id="reprocessAll">Reprocess all replays (re-fetches &amp; re-parses everything)</button>
           </div>
@@ -1256,7 +1256,7 @@
         appendLog(logEl, `✓ reprocessed ${id}`, false, true);
         ok++;
       }catch(e){
-        appendLog(logEl, `✗ ${id} — ${e.message}`, true);
+        appendLog(logEl, `✗ ${id} - ${e.message}`, true);
         failed++;
       }
     }
@@ -1483,7 +1483,7 @@
       </div>
       <div class="section-divider"></div>
       <div class="profile-two-col">
-        <div><h3 class="mini-heading">Knockout record</h3>${s.killLog.length ? `<table><thead><tr><th>Turn</th><th>Victim</th><th>Cause</th><th>Replay</th></tr></thead><tbody>${s.killLog.slice().sort((a,b)=>(a.replayDate-b.replayDate) || (a.turn-b.turn)).map(x=>`<tr><td>${x.turn}</td><td>${x.victim ? pokemonLink(x.victim, SBL.pokemon.escapeHtml(x.victim), '', false) : '?'}</td><td>${SBL.pokemon.escapeHtml(x.cause||'—')}</td><td><a class="nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(x.replayId)}" target="_blank" rel="noopener">View</a></td></tr>`).join('')}</tbody></table>`:`<div class="empty-state">No knockouts.</div>`}</div>
+        <div><h3 class="mini-heading">Knockout record</h3>${s.killLog.length ? `<table><thead><tr><th>Turn</th><th>Victim</th><th>Cause</th><th>Replay</th></tr></thead><tbody>${s.killLog.slice().sort((a,b)=>(a.replayDate-b.replayDate) || (a.turn-b.turn)).map(x=>`<tr><td>${x.turn}</td><td>${x.victim ? pokemonLink(x.victim, SBL.pokemon.escapeHtml(x.victim), '', false) : '?'}</td><td>${SBL.pokemon.escapeHtml(x.cause||'N/A')}</td><td><a class="nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(x.replayId)}" target="_blank" rel="noopener">View</a></td></tr>`).join('')}</tbody></table>`:`<div class="empty-state">No knockouts.</div>`}</div>
         <div><h3 class="mini-heading">Death record</h3>${s.deathLog.length ? `<table><thead><tr><th>Turn</th><th>Killer</th><th>Replay</th></tr></thead><tbody>${s.deathLog.slice().sort((a,b)=>(a.replayDate-b.replayDate) || (a.turn-b.turn)).map(x=>`<tr><td>${x.turn}</td><td>${x.killer ? pokemonLink(x.killer, SBL.pokemon.escapeHtml(x.killer), '', false) : 'Unattributed'}</td><td><a class="nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(x.replayId)}" target="_blank" rel="noopener">View</a></td></tr>`).join('')}</tbody></table>`:`<div class="empty-state">No deaths.</div>`}</div>
       </div>
     </div>`;
@@ -1599,7 +1599,7 @@
       const view=viewSel.value;
       if(view==='game'){
         const rows=luckGameData(scopeSel.value);
-        document.getElementById('luckTable').innerHTML=!rows.length?`<div class="empty-state">No luck data for this scope yet. Reprocess the replays after updating the luck parser.</div>`:`<div class="franchise-table-wrap"><table class="franchise-table"><thead><tr><th>#</th><th>Game</th><th>Matchup</th><th>Winner</th><th class="num">Luck</th><th class="num">Crits</th><th class="num">Dodges</th><th class="num">Low-Acc Hits</th><th class="num">Status</th><th class="num">Sleep</th><th class="num">Freeze</th></tr></thead><tbody>${rows.map((r,i)=>`<tr><td>${i+1}</td><td><a class="nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(r.id)}" target="_blank" rel="noopener">${SBL.pokemon.escapeHtml(r.id||'Replay')}</a></td><td><strong>${SBL.pokemon.escapeHtml(r.team1)}</strong> vs <strong>${SBL.pokemon.escapeHtml(r.team2)}</strong></td><td>${SBL.pokemon.escapeHtml(r.winner||'—')}</td><td class="num"><strong>${r.score>=0?'+':''}${r.score.toFixed(2)}</strong></td><td class="num">${r.crits}</td><td class="num">${r.dodges}</td><td class="num">${r.lowAccuracyHits}</td><td class="num">${r.statusDodges.toFixed(2)}</td><td class="num">${r.sleep>=0?'+':''}${r.sleep.toFixed(2)}</td><td class="num">${r.freeze>=0?'+':''}${r.freeze.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`;
+        document.getElementById('luckTable').innerHTML=!rows.length?`<div class="empty-state">No luck data for this scope yet. Reprocess the replays after updating the luck parser.</div>`:`<div class="franchise-table-wrap"><table class="franchise-table"><thead><tr><th>#</th><th>Game</th><th>Matchup</th><th>Winner</th><th class="num">Luck</th><th class="num">Crits</th><th class="num">Dodges</th><th class="num">Low-Acc Hits</th><th class="num">Status</th><th class="num">Sleep</th><th class="num">Freeze</th></tr></thead><tbody>${rows.map((r,i)=>`<tr><td>${i+1}</td><td><a class="nav-link" href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(r.id)}" target="_blank" rel="noopener">${SBL.pokemon.escapeHtml(r.id||'Replay')}</a></td><td><strong>${SBL.pokemon.escapeHtml(r.team1)}</strong> vs <strong>${SBL.pokemon.escapeHtml(r.team2)}</strong></td><td>${SBL.pokemon.escapeHtml(r.winner||'N/A')}</td><td class="num"><strong>${r.score>=0?'+':''}${r.score.toFixed(2)}</strong></td><td class="num">${r.crits}</td><td class="num">${r.dodges}</td><td class="num">${r.lowAccuracyHits}</td><td class="num">${r.statusDodges.toFixed(2)}</td><td class="num">${r.sleep>=0?'+':''}${r.sleep.toFixed(2)}</td><td class="num">${r.freeze>=0?'+':''}${r.freeze.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`;
         return;
       }
       const pokemon=view==='pokemon';
@@ -1797,7 +1797,7 @@
       const homeScore = homeIsT1 ? resultScore.p1 : resultScore.p2;
       const awayScore = homeIsT1 ? resultScore.p2 : resultScore.p1;
       // Winner's score always presented first (6-x), regardless of which side
-      // is "home" in the fixture — so the scoreline never reads like the loser
+      // is "home" in the fixture - so the scoreline never reads like the loser
       // won just because they happened to be listed first.
       const homeWon = winnerTeam && groupKey(winnerTeam) === groupKey(home);
       const awayWon = winnerTeam && groupKey(winnerTeam) === groupKey(away);
@@ -1951,7 +1951,7 @@
           <div class="conference-count">${list.length} franchise${list.length===1?'':'s'}</div>
         </div>
         ${list.length ? `<div class="standings-ladder">${list.map((x,i)=>{
-          const pct=x.games ? (100*x.wins/x.games).toFixed(1)+'%' : '—';
+          const pct=x.games ? (100*x.wins/x.games).toFixed(1)+'%' : 'N/A';
           const ownerLabel=seasonOwnerLabel(x.team) || x.team;
           const teamStyle=teamTintForTeam(x.team);
           const diff=Number(x.diff||0);
@@ -2011,8 +2011,8 @@
         const roundLabel=isPlayin?`PI ${mi+1}`:r.key==='quarterfinals'?`QF ${mi+1}`:r.key==='semifinals'?`SF ${mi+1}`:'FINAL';
         return `<article class="finals-bracket-match ${winner?'is-complete':''} ${ready?'is-ready':'is-tbd'}" data-finals-match="${SBL.pokemon.escapeHtml(m.id)}" data-finals-round="${SBL.pokemon.escapeHtml(r.key)}" tabindex="0" role="button" title="Click to view matchup${adminIsCommissioner?' and enter score':''}">
           <div class="finals-match-top"><span class="finals-match-number">${roundLabel}</span><span class="finals-bracket-match-status">${winner?'FINAL':ready?'READY':'TBD'}</span></div>
-          <div class="finals-bracket-team ${winner===a?'is-winner':''}"><span class="finals-bracket-seed">${seedA?`#${seedA}`:'—'}</span><span class="finals-bracket-name ${a==='TBD'?'tbd':''}">${SBL.pokemon.escapeHtml(a)}</span><span class="finals-team-score">${m.scoreA!=null?m.scoreA:''}</span></div>
-          <div class="finals-bracket-team ${winner===b?'is-winner':''}"><span class="finals-bracket-seed">${seedB?`#${seedB}`:'—'}</span><span class="finals-bracket-name ${b==='TBD'?'tbd':''}">${SBL.pokemon.escapeHtml(b)}</span><span class="finals-team-score">${m.scoreB!=null?m.scoreB:''}</span></div>
+          <div class="finals-bracket-team ${winner===a?'is-winner':''}"><span class="finals-bracket-seed">${seedA?`#${seedA}`:'N/A'}</span><span class="finals-bracket-name ${a==='TBD'?'tbd':''}">${SBL.pokemon.escapeHtml(a)}</span><span class="finals-team-score">${m.scoreA!=null?m.scoreA:''}</span></div>
+          <div class="finals-bracket-team ${winner===b?'is-winner':''}"><span class="finals-bracket-seed">${seedB?`#${seedB}`:'N/A'}</span><span class="finals-bracket-name ${b==='TBD'?'tbd':''}">${SBL.pokemon.escapeHtml(b)}</span><span class="finals-team-score">${m.scoreB!=null?m.scoreB:''}</span></div>
           ${adminIsCommissioner && ready ? `<div class="finals-admin-inline" data-finals-inline-editor>
             <label>Winner</label>
             <select class="finals-winner-select" data-finals-winner aria-label="Winner for ${SBL.pokemon.escapeHtml(a)} vs ${SBL.pokemon.escapeHtml(b)}">
@@ -2035,7 +2035,7 @@
     const round=finals.rounds.find(r=>r.key===roundKey), match=round?.matches.find(m=>m.id===matchId); if(!match)return;
     const a=match.teamA||'TBD', b=match.teamB||'TBD', editable=adminIsCommissioner&&a!=='TBD'&&b!=='TBD';
     const modal=document.getElementById('auditModal'); if(!modal)return;
-    const scoreEditor=editable ? `<div class="finals-modal-score-grid"><div class="finals-score-team"><label class="finals-score-team-name" for="finalsModalScoreA">${SBL.pokemon.escapeHtml(a)}</label><input class="score-number" type="number" min="0" step="1" inputmode="numeric" id="finalsModalScoreA" value="${match.scoreA??''}" aria-label="${SBL.pokemon.escapeHtml(a)} score"></div><div class="finals-score-team"><label class="finals-score-team-name" for="finalsModalScoreB">${SBL.pokemon.escapeHtml(b)}</label><input class="score-number" type="number" min="0" step="1" inputmode="numeric" id="finalsModalScoreB" value="${match.scoreB??''}" aria-label="${SBL.pokemon.escapeHtml(b)} score"></div></div>` : `<div class="finals-modal-score-readonly"><div><span>${SBL.pokemon.escapeHtml(a)}</span><strong>${match.scoreA??'—'}</strong></div><div><span>${SBL.pokemon.escapeHtml(b)}</span><strong>${match.scoreB??'—'}</strong></div></div>`;
+    const scoreEditor=editable ? `<div class="finals-modal-score-grid"><div class="finals-score-team"><label class="finals-score-team-name" for="finalsModalScoreA">${SBL.pokemon.escapeHtml(a)}</label><input class="score-number" type="number" min="0" step="1" inputmode="numeric" id="finalsModalScoreA" value="${match.scoreA??''}" aria-label="${SBL.pokemon.escapeHtml(a)} score"></div><div class="finals-score-team"><label class="finals-score-team-name" for="finalsModalScoreB">${SBL.pokemon.escapeHtml(b)}</label><input class="score-number" type="number" min="0" step="1" inputmode="numeric" id="finalsModalScoreB" value="${match.scoreB??''}" aria-label="${SBL.pokemon.escapeHtml(b)} score"></div></div>` : `<div class="finals-modal-score-readonly"><div><span>${SBL.pokemon.escapeHtml(a)}</span><strong>${match.scoreA??'N/A'}</strong></div><div><span>${SBL.pokemon.escapeHtml(b)}</span><strong>${match.scoreB??'N/A'}</strong></div></div>`;
     modal.innerHTML=`<div class="audit-overlay" id="finalsScoreOverlay"><div class="audit-box finals-score-modal"><button class="modal-close" id="finalsScoreClose" aria-label="Close">×</button><div class="finals-kicker">${SBL.pokemon.escapeHtml(round.name)}</div><h3>${SBL.pokemon.escapeHtml(a)} <span class="finals-modal-vs">vs</span> ${SBL.pokemon.escapeHtml(b)}</h3>${scoreEditor}${match.winner?`<div class="finals-modal-winner">Winner: <strong>${SBL.pokemon.escapeHtml(match.winner)}</strong></div>`:''}${editable?'<div class="note">Commissioner score entry only. The higher score becomes the winner automatically.</div>':'<div class="note">Scores are read-only. Only authorised commissioners can enter or change Finals scores.</div>'}${editable?'<div class="foot-actions"><button class="primary" id="saveFinalsModalScore">Save score</button></div>':''}</div></div>`;
     updateModalPageLock();
     document.getElementById('finalsScoreClose')?.addEventListener('click',closeAudit); document.getElementById('finalsScoreOverlay')?.addEventListener('click',e=>{if(e.target.id==='finalsScoreOverlay')closeAudit();});
@@ -2182,7 +2182,7 @@
         <tr>
           <td class="rank">${i+1}</td>
           <td><div class="pname-cell">${pokemonName(s.species,true,'sprite-xl')}</div></td>
-          <td class="num">${s.points==null||s.points===''?'—':SBL.pokemon.escapeHtml(s.points)}</td>
+          <td class="num">${s.points==null||s.points===''?'N/A':SBL.pokemon.escapeHtml(s.points)}</td>
           <td class="num dealt">${s.dealt.toFixed(1)}</td>
           <td class="num taken">${s.taken.toFixed(1)}</td>
           <td class="num kills">${s.kills}</td>
@@ -2235,7 +2235,7 @@
       const mons=Object.values(r.mons||{});
       const pokemon=[...new Set(mons.map(m=>m.species).filter(Boolean))];
       const teams=[teamFor(p1),teamFor(p2)];
-      return {r,p1,p2,winner,result,pokemon,teams,week:r.week||'Unassigned',format:r.format||'—'};
+      return {r,p1,p2,winner,result,pokemon,teams,week:r.week||'Unassigned',format:r.format||'N/A'};
     }).sort((a,b)=> (String(b.week).localeCompare(String(a.week),undefined,{numeric:true})) || ((b.r.processedAt||0)-(a.r.processedAt||0)));
   }
 
@@ -2320,7 +2320,7 @@
       </div>
       <div class="panel">
         <h2>Possible duplicate teams (shared roster)</h2>
-        <div class="note">Since this is a draft league each team's roster is fixed — two team tags whose Pokémon overlap heavily are probably the same team under two different names. Merging groups everything under the tag with the most total appearances.</div>
+        <div class="note">Since this is a draft league each team's roster is fixed - two team tags whose Pokémon overlap heavily are probably the same team under two different names. Merging groups everything under the tag with the most total appearances.</div>
         <div id="dupTeams" style="margin-top:12px;"></div>
       </div>
       <div class="panel">

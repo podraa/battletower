@@ -19,7 +19,7 @@ if(note===null)return null;if(note.trim().length<5)throw Error('Deployment reaso
 async function refresh(){const {data,error}=await db().from('replay_parser_versions').select('id,version_label,sha256,status,staged_at').order('staged_at',{ascending:false}).limit(100);
 if(error){tell('Parser registry unavailable: '+error.message);return;}
 const active=data.find(x=>x.status==='deployed');
-table.innerHTML='<p><strong>Current parser:</strong> '+esc(active?.version_label||'None — replay processing blocked until a parser is activated')+'</p>'+
+table.innerHTML='<p><strong>Current parser:</strong> '+esc(active?.version_label||'None - replay processing blocked until a parser is activated')+'</p>'+
 '<table><thead><tr><th>Version</th><th>Status</th><th>Checksum</th><th>Actions</th></tr></thead><tbody>'+
 data.map(x=>`<tr><td>${esc(x.version_label)}</td><td>${esc(x.status)}</td><td><code>${esc(x.sha256.slice(0,16))}…</code></td><td><button type="button" class="site-admin-button" data-parser-test="${esc(x.id)}">Validate</button> ${x.status!=='deployed'?`<button type="button" class="site-admin-button primary" data-parser-activate="${esc(x.id)}">${x.status==='retired'?'Roll back to version':'Activate'}</button>`:'Active'}</td></tr>`).join('')+'</tbody></table>';
 for(const button of table.querySelectorAll('[data-parser-test]'))button.onclick=async()=>{button.disabled=true;try{tell('Validating staged parser in isolated sandbox…');let source=await getSource(button.dataset.parserTest);const result=await testSource(source.source_text);tell(source.version_label+' passed '+result.count+' sandbox fixtures. This is not a full regression test.');}catch(e){tell('Validation failed: '+e.message);}finally{button.disabled=false;}};

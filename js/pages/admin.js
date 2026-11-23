@@ -303,7 +303,7 @@
   // settings.seasonArchives[key], in the exact shape index.html / stats.html
   // / rosters.html / free-agency.html / match-prep.html already expect
   // when they resolve a `?season=` link (see installSeasonPicker on those
-  // pages) — so archived seasons are viewable there immediately.
+  // pages) - so archived seasons are viewable there immediately.
   //
   // Fields that carry forward into a new season untouched: teamMap,
   // caseInsensitiveNames, conferenceNames, seasonArchives itself. Everything
@@ -599,7 +599,7 @@ Choose Cancel to keep draft status unchanged.`);
   }
 
   function showAdminLogin(){
-    // Not logged in (or no assigned team) — bounce to the login page instead of
+    // Not logged in (or no assigned team) - bounce to the login page instead of
     // rendering an inline form here. Any page other than index.html requires an
     // authenticated session with a claimed team before it will show content.
     location.replace('index.html');
@@ -740,7 +740,7 @@ Choose Cancel to keep draft status unchanged.`);
     return SBL.domain.replayTeamLabel(STATE,username);
   }
   // groups values that only differ by case/whitespace under one canonical label
-  // (the first-seen casing) when "case-insensitive names" is on in Settings —
+  // (the first-seen casing) when "case-insensitive names" is on in Settings -
   // this is what keeps e.g. "Team Fire" and "team fire" from splitting into
   // two separate teams just because they were typed differently at different times.
   function groupKey(value){
@@ -850,7 +850,7 @@ Choose Cancel to keep draft status unchanged.`);
     try{
       try { await SBL.replays.ensureMoveAccuracyData?.(); } catch (_) { /* optional enrichment */ }
     }catch(e){
-      appendLog(logEl, `Move data unavailable — continuing without accuracy-sensitive luck: ${e.message}`, true);
+      appendLog(logEl, `Move data unavailable - continuing without accuracy-sensitive luck: ${e.message}`, true);
     }
     const rawLines = String(urlsRaw || '').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
     if(rawLines.length === 0){ appendLog(logEl, 'No links provided.', true); return; }
@@ -870,11 +870,11 @@ Choose Cancel to keep draft status unchanged.`);
       const id = SBL.replays.extractReplayId(url);
       if(!id){ appendLog(logEl, `Could not read a replay id from: ${url}`, true); invalid++; continue; }
       if(seen.has(id)){
-        appendLog(logEl, `Duplicate replay link: ${id} — skipped`, false);skipped++;continue;
+        appendLog(logEl, `Duplicate replay link: ${id} - skipped`, false);skipped++;continue;
       }
       if(STATE.replays[id]){
         if(SBL.replays.isReplayCurrent(STATE.replays[id],activeParser)){
-          appendLog(logEl, `Already processed by ${activeParser.version}: ${id} — skipped`, false);
+          appendLog(logEl, `Already processed by ${activeParser.version}: ${id} - skipped`, false);
           skipped++;continue;
         }
         // Numeric parserVersion tracks internal schema evolution, NOT the
@@ -906,7 +906,7 @@ Choose Cancel to keep draft status unchanged.`);
           appendLog(logEl, `Parsed ${id} with ${parsed.parserVersionLabel} (${parsed.players.p1 || '?'} vs ${parsed.players.p2 || '?'}); awaiting database save`, false);
           added++;
         }catch(e){
-          appendLog(logEl, `✗ ${id} — ${e.message}`, true);
+          appendLog(logEl, `✗ ${id} - ${e.message}`, true);
           failed++;
         }
       }
@@ -1088,7 +1088,7 @@ Choose Cancel to keep draft status unchanged.`);
       STATE.teamMap[u.trim().toLowerCase()] = canonicalLabel;
     }
   }
-  // returns pairs of current team labels whose Pokémon rosters overlap heavily —
+  // returns pairs of current team labels whose Pokémon rosters overlap heavily -
   // in a draft league each team's roster is fixed, so two "different" team tags
   // sharing most of the same mons are almost certainly the same team typed two ways
   function findDuplicateTeamPairs(){
@@ -1287,13 +1287,13 @@ Choose Cancel to keep draft status unchanged.`);
 
   // ---------- kill/death audit trail ----------
   // Encodes a mon's kill or death log onto a table cell so it can be clicked open
-  // to see exactly which replay/turn/cause each credited kill or death came from —
+  // to see exactly which replay/turn/cause each credited kill or death came from -
   // lets you trace a count against a hand-kept tally without me having to guess.
   function auditAttr(species, type, list, showLink){
     const payload = JSON.stringify({species, type, list: list || [], showLink: showLink !== false});
     return `class="num ${type==='kills'?'kills ':''}auditable" data-audit="${SBL.pokemon.escapeHtml(payload)}"`;
   }
-  // same payload as auditAttr but without the class="" — for elements (like the
+  // same payload as auditAttr but without the class="" - for elements (like the
   // Golden Fist row) that already carry their own class list
   function auditDataAttr(species, type, list, showLink){
     const payload = JSON.stringify({species, type, list: list || [], showLink: showLink !== false});
@@ -1320,11 +1320,11 @@ Choose Cancel to keep draft status unchanged.`);
     document.getElementById('auditModal').innerHTML = `
       <div class="audit-overlay" id="auditOverlay">
         <div class="audit-box">
-          <h3>${SBL.pokemon.escapeHtml(SBL.pokemon.displayName(species))} — ${label} (${rows.length})</h3>
+          <h3>${SBL.pokemon.escapeHtml(SBL.pokemon.displayName(species))} - ${label} (${rows.length})</h3>
           <div class="audit-sub">Every ${type==='kills'?'knockout':'death'} credited to this Pokémon this scope, with the turn${showLink?', replay,':''} and why it was credited.</div>
           ${rows.length===0 ? `<div class="empty-state">No entries.</div>` : `<ul class="audit-list">
             ${rows.map(r=>`<li>
-              <span>Turn ${r.turn} — ${type==='kills' ? 'vs ' + SBL.pokemon.escapeHtml(r.victim||'?') : (r.killer ? 'by ' + SBL.pokemon.escapeHtml(r.killer) : 'unattributed')} <span class="audit-cause">(${SBL.pokemon.escapeHtml(r.cause||'—')})</span></span>
+              <span>Turn ${r.turn} - ${type==='kills' ? 'vs ' + SBL.pokemon.escapeHtml(r.victim||'?') : (r.killer ? 'by ' + SBL.pokemon.escapeHtml(r.killer) : 'unattributed')} <span class="audit-cause">(${SBL.pokemon.escapeHtml(r.cause||'N/A')})</span></span>
               ${showLink ? `<a href="https://replay.pokemonshowdown.com/${SBL.pokemon.escapeHtml(r.replayId)}" target="_blank" rel="noopener">${SBL.pokemon.escapeHtml(r.replayId)}</a>` : ''}
             </li>`).join('')}
           </ul>`}
@@ -1602,7 +1602,7 @@ Choose Cancel to keep draft status unchanged.`);
       <div class="admin-section-title"><div><div class="admin-dashboard-kicker">Historical data</div><h2>Archived Seasons</h2><div class="note">Choose an existing archive or create a new one. Replay import, player assignments and alternate matching appear only after you select an archive.</div></div></div>
       <div class="archived-season-entry-grid">
         <div class="panel"><h3>Make a new archived season</h3><p class="sub">Create an empty historical archive first. You can add replays and assign players afterwards.</p><label for="legacyNewName">Season name</label><input id="legacyNewName" placeholder="Season 8"><label for="legacyNewLabel">Season label (optional)</label><input id="legacyNewLabel" placeholder="2023–24"><button class="primary" id="createLegacySeason">Create archived season</button><div class="log" id="legacyCreateLog"></div></div>
-        <div class="panel"><h3>Archived seasons</h3><p class="sub">Select an archive to manage its replay data and historical identities.</p><label for="legacyTargetSeason">Select archived season</label><select id="legacyTargetSeason"><option value="">Choose an archived season…</option>${seasons.map(x=>`<option value="${escape(x.id)}">${escape(x.name)}${x.season_label?' — '+escape(x.season_label):''}</option>`).join('')}</select>${seasons.length?'': '<div class="empty-state">No archived seasons yet. Create one to get started.</div>'}</div>
+        <div class="panel"><h3>Archived seasons</h3><p class="sub">Select an archive to manage its replay data and historical identities.</p><label for="legacyTargetSeason">Select archived season</label><select id="legacyTargetSeason"><option value="">Choose an archived season…</option>${seasons.map(x=>`<option value="${escape(x.id)}">${escape(x.name)}${x.season_label?' - '+escape(x.season_label):''}</option>`).join('')}</select>${seasons.length?'': '<div class="empty-state">No archived seasons yet. Create one to get started.</div>'}</div>
       </div>
       <div id="legacyArchiveDetail"></div>
     </div>`;
@@ -1637,7 +1637,7 @@ Choose Cancel to keep draft status unchanged.`);
       <div class="panel">
         <h2>Processed this season <span class="badge">${count} replays</span></h2>
         <div class="foot-actions" style="margin:10px 0 14px;"><button type="button" class="danger" id="removeAllSeasonReplays" ${count===0 ? "disabled" : ""}>Remove all replays from this season</button><span class="sub">Only replay rows in the currently selected season are removed. Season settings and rosters are kept.</span></div>
-        ${count===0 ? `<div class="empty-state">Nothing processed yet — paste some replay links above.</div>` : `
+        ${count===0 ? `<div class="empty-state">Nothing processed yet - paste some replay links above.</div>` : `
           <div class="foot-actions" style="margin-top:0; margin-bottom:12px;">
             <button type="button" class="ghost" id="reprocessAll">Reprocess all replays (re-fetches &amp; re-parses everything)</button>
           </div>
@@ -1725,7 +1725,7 @@ Choose Cancel to keep draft status unchanged.`);
     try{
       try { await SBL.replays.ensureMoveAccuracyData?.(); } catch (_) { /* optional enrichment */ }
     }catch(e){
-      appendLog(logEl, `Move data unavailable — continuing without accuracy-sensitive luck: ${e.message}`, true);
+      appendLog(logEl, `Move data unavailable - continuing without accuracy-sensitive luck: ${e.message}`, true);
       MOVE_DATA = {};
     }
     let activeParser;
@@ -1756,7 +1756,7 @@ Choose Cancel to keep draft status unchanged.`);
         appendLog(logEl, `Parsed ${id} with ${parsed.parserVersionLabel||activeParser.version}; awaiting database save`, false);
         ok++;
       }catch(e){
-        appendLog(logEl, `✗ ${id} — ${e.message} (existing replay preserved)`, true);
+        appendLog(logEl, `✗ ${id} - ${e.message} (existing replay preserved)`, true);
         failed++;
       }
     }
@@ -1815,7 +1815,7 @@ Choose Cancel to keep draft status unchanged.`);
         <td>
           <div style="display:flex;align-items:center;gap:8px;min-width:210px;flex-wrap:wrap;">
             <input type="text" class="week-override-input" data-week-id="${SBL.pokemon.escapeHtml(r.id)}" value="${SBL.pokemon.escapeHtml(r.week||'Unassigned')}" placeholder="Week 1">
-            ${r.weekOverride ? '<span class="badge" title="Manual week override — reprocessing will preserve this week">Manual</span>' : '<span class="badge" title="Automatically assigned from replay upload date">Auto</span>'}
+            ${r.weekOverride ? '<span class="badge" title="Manual week override - reprocessing will preserve this week">Manual</span>' : '<span class="badge" title="Automatically assigned from replay upload date">Auto</span>'}
           </div>
         </td>
         <td>
@@ -2818,7 +2818,7 @@ function renderDraft(){ return drawDraft(); }
         <div style="overflow:auto;margin-top:12px">
           <table style="width:100%;border-collapse:collapse">
             <thead><tr><th style="text-align:left;padding:9px">Pick #</th><th style="text-align:left;padding:9px">Picked</th><th style="text-align:left;padding:9px">By</th><th style="text-align:left;padding:9px">Points</th><th style="text-align:left;padding:9px">Made by</th></tr></thead>
-            <tbody>${(d.picks||[]).slice().sort((a,b)=>Number(a.pickNumber||0)-Number(b.pickNumber||0)).map(p=>`<tr><td style="padding:9px">${SBL.pokemon.escapeHtml(p.pickNumber ?? '—')}</td><td style="padding:9px">${SBL.pokemon.escapeHtml(p.name || '—')}</td><td style="padding:9px"><strong>${SBL.pokemon.escapeHtml(p.team || '—')}</strong></td><td style="padding:9px">${p.skipped ? '—' : SBL.pokemon.escapeHtml(p.points ?? 0)}</td><td style="padding:9px">${SBL.pokemon.escapeHtml(p.madeBy || 'Team owner')}</td></tr>`).join('')}</tbody>
+            <tbody>${(d.picks||[]).slice().sort((a,b)=>Number(a.pickNumber||0)-Number(b.pickNumber||0)).map(p=>`<tr><td style="padding:9px">${SBL.pokemon.escapeHtml(p.pickNumber ?? 'N/A')}</td><td style="padding:9px">${SBL.pokemon.escapeHtml(p.name || 'N/A')}</td><td style="padding:9px"><strong>${SBL.pokemon.escapeHtml(p.team || 'N/A')}</strong></td><td style="padding:9px">${p.skipped ? 'N/A' : SBL.pokemon.escapeHtml(p.points ?? 0)}</td><td style="padding:9px">${SBL.pokemon.escapeHtml(p.madeBy || 'Team owner')}</td></tr>`).join('')}</tbody>
           </table>
         </div>
       </div>
@@ -2850,7 +2850,7 @@ function renderDraft(){ return drawDraft(); }
           <div>
             <label>Franchise</label>
             <select id="adminDraftPickTeam" ${d.mode === 'ordered' ? 'disabled' : ''}>
-              ${franchises.map(t => `<option value="${SBL.pokemon.escapeHtml(t)}" ${t === draftOnClock(d) ? 'selected' : ''}>${SBL.pokemon.escapeHtml(t)} — ${draftRemaining(d,t)} / ${draftBudget(d,t)} pts remaining</option>`).join('')}
+              ${franchises.map(t => `<option value="${SBL.pokemon.escapeHtml(t)}" ${t === draftOnClock(d) ? 'selected' : ''}>${SBL.pokemon.escapeHtml(t)} - ${draftRemaining(d,t)} / ${draftBudget(d,t)} pts remaining</option>`).join('')}
             </select>
           </div>
           <div>
@@ -2868,7 +2868,7 @@ function renderDraft(){ return drawDraft(); }
 
       <div class="panel">
         <h2>Draft board</h2>
-        <div class="note">Import an Excel or CSV workbook using the same automatic Pokémon / points detection as Free Agency, or add Pokémon one at a time below.${editable ? '' : ' Locked while the draft is live or complete — reset the draft to make changes.'}</div>
+        <div class="note">Import an Excel or CSV workbook using the same automatic Pokémon / points detection as Free Agency, or add Pokémon one at a time below.${editable ? '' : ' Locked while the draft is live or complete - reset the draft to make changes.'}</div>
         <div class="row" style="align-items:center;margin-top:10px">
           <div class="note" id="draftStatsCoverage" style="flex:1;margin:0">Base stats: ${d.pool.filter(m=>draftStatsComplete(m.baseStats)).length}/${d.pool.length} Pokémon</div>
           <div style="flex:0"><button class="ghost" id="repairDraftStats" type="button">Repair missing base stats</button></div>
@@ -2903,7 +2903,7 @@ function renderDraft(){ return drawDraft(); }
           <div><label>League default budget</label><input type="text" id="draftDefaultBudget" value="${SBL.pokemon.escapeHtml(d.defaultBudget)}"></div>
           <div style="flex:0"><button class="ghost" id="saveDefaultBudgetBtn">Save default</button></div>
         </div>
-        <div class="note">Optional per-franchise overrides — leave blank to use the default.</div>
+        <div class="note">Optional per-franchise overrides - leave blank to use the default.</div>
         <div style="margin-top:10px">
           ${franchises.length ? franchises.map(t => {
             const total = draftBudget(d,t);
@@ -2914,7 +2914,7 @@ function renderDraft(){ return drawDraft(); }
               <div style="flex:2"><strong>${SBL.pokemon.escapeHtml(t)}</strong><div class="note" style="margin:3px 0 0">${used} spent · ${remaining} remaining / ${total} total</div></div>
               <input type="text" data-budget-override="${SBL.pokemon.escapeHtml(t)}" placeholder="${SBL.pokemon.escapeHtml(d.defaultBudget)}" value="${d.budgets[t] != null ? SBL.pokemon.escapeHtml(d.budgets[t]) : ''}" style="flex:1">
             </div>`;
-          }).join('') : '<div class="empty-state">No approved franchises yet — approve teams in the User Control tab first.</div>'}
+          }).join('') : '<div class="empty-state">No approved franchises yet - approve teams in the User Control tab first.</div>'}
         </div>
         ${franchises.length ? `<div class="foot-actions"><button class="ghost" id="saveBudgetOverridesBtn">Save overrides</button></div>` : ''}
         <div class="note danger" id="draftBudgetErr"></div>
@@ -3061,9 +3061,9 @@ function renderDraft(){ return drawDraft(); }
       const matches = d.pool.filter(m => (includeDrafted || !m.drafted) && m.name.toLowerCase().includes(q)).sort((a,b)=>a.name.localeCompare(b.name)).slice(0,60);
       if(!matches.length){ target.innerHTML='<div class="empty-state">No Pokémon match that search.</div>'; return; }
       if(target.tagName === 'SELECT'){
-        target.innerHTML='<option value="">Select a Pokémon</option>'+matches.map(m=>`<option value="${SBL.pokemon.escapeHtml(m.id)}">${SBL.pokemon.escapeHtml(m.name)} — ${m.points} pts</option>`).join('');
+        target.innerHTML='<option value="">Select a Pokémon</option>'+matches.map(m=>`<option value="${SBL.pokemon.escapeHtml(m.id)}">${SBL.pokemon.escapeHtml(m.name)} - ${m.points} pts</option>`).join('');
       }else{
-        target.innerHTML='<table><thead><tr><th>Pokémon</th><th>Types</th><th class="num">Points</th><th>Status</th>'+(editable ? '<th></th>' : '')+'<\/tr><\/thead><tbody>'+matches.map(m=>`<tr><td>${SBL.pokemon.escapeHtml(m.name)}</td><td>${(m.types||[]).map(SBL.pokemon.escapeHtml).join(' / ')||'<span class="note">—</span>'}</td><td class="num">${m.points}</td><td>${m.drafted?`<span class="badge">→ ${SBL.pokemon.escapeHtml(m.draftedBy||'')}</span>`:'<span class="note">Available</span>'}</td>${editable?`<td><button class="ghost small danger-btn" data-remove-mon="${SBL.pokemon.escapeHtml(m.id)}">Remove</button></td>`:''}</tr>`).join('')+'</tbody></table>'+(d.pool.length>matches.length?'<div class="note" style="margin-top:8px">Showing up to 60 matching Pokémon.</div>':'');
+        target.innerHTML='<table><thead><tr><th>Pokémon</th><th>Types</th><th class="num">Points</th><th>Status</th>'+(editable ? '<th></th>' : '')+'<\/tr><\/thead><tbody>'+matches.map(m=>`<tr><td>${SBL.pokemon.escapeHtml(m.name)}</td><td>${(m.types||[]).map(SBL.pokemon.escapeHtml).join(' / ')||'<span class="note">-</span>'}</td><td class="num">${m.points}</td><td>${m.drafted?`<span class="badge">→ ${SBL.pokemon.escapeHtml(m.draftedBy||'')}</span>`:'<span class="note">Available</span>'}</td>${editable?`<td><button class="ghost small danger-btn" data-remove-mon="${SBL.pokemon.escapeHtml(m.id)}">Remove</button></td>`:''}</tr>`).join('')+'</tbody></table>'+(d.pool.length>matches.length?'<div class="note" style="margin-top:8px">Showing up to 60 matching Pokémon.</div>':'');
         target.querySelectorAll('[data-remove-mon]').forEach(btn=>btn.addEventListener('click', async () => {
           const status = document.getElementById('draftBoardStatus');
           try{ const removed=d.pool.find(m=>m.id===btn.dataset.removeMon); d.pool=d.pool.filter(m=>m.id!==btn.dataset.removeMon); await saveDraft(); await logAdminAction('remove_draft_pokemon',`Removed ${removed?.name||btn.dataset.removeMon} from the draft board.`,{id:btn.dataset.removeMon,name:removed?.name||null}); drawDraft(); }catch(e){ if(status) status.innerHTML=`<div class="note danger">${SBL.pokemon.escapeHtml(e.message)}</div>`; }
@@ -3636,7 +3636,7 @@ function renderDraft(){ return drawDraft(); }
     const options=roleValues([...catalog,...assigned,'Annoying Cunt','Disruptor']).filter(r=>roleLabelAdmin(r)).sort((a,b)=>roleLabelAdmin(a).localeCompare(roleLabelAdmin(b)));
     const manual=!!(key&&roleManual()[key]);
     const autoFormat=key?roleAuto()[key]:'';
-    return `<section class="panel" id="pokemonRoleAssignmentPanel"><div class="section-head-row"><div><div class="admin-dashboard-kicker">FREE AGENCY ROLE MANAGEMENT</div><h2>Pokémon role assignments</h2><p class="note">Assignments are global across all franchises. A Pokémon can have multiple roles. Automatic assignment uses every role returned for each Pokémon in the selected format; manual edits are protected from future bulk refreshes.</p></div><span class="badge">ADMIN ONLY</span></div><div class="row" style="align-items:flex-end;margin:12px 0"><div><strong>Suggestion format:</strong> ${SBL.pokemon.escapeHtml(STATE.settings?.pokemonRoleFormat||'gen9ou')}</div><div style="flex:0"><button type="button" class="ghost" id="loadRoleCatalogueBtn">Load role catalogue</button></div><div style="flex:0"><button type="button" class="primary" id="autoAssignFreeAgencyRolesBtn">Auto-assign from Free Agency board</button></div></div><div class="note" id="freeAgencyRoleStatus" role="status">${SBL.pokemon.escapeHtml(ROLE_STATUS_MESSAGE)}</div><div class="row" style="align-items:flex-end;margin-top:14px"><div><label for="roleAssignmentPokemon">Pokémon</label><select id="roleAssignmentPokemon">${mons.map(m=>`<option value="${SBL.pokemon.escapeHtml(m.name)}" ${selected&&roleKey(m.name)===key?'selected':''}>${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(m.name)||m.name)}</option>`).join('')}</select></div><div style="flex:0"><button type="button" class="ghost" id="resetRoleAssignmentBtn" ${selected?'':'disabled'}>Admin: reset to automatic</button></div><div style="flex:0"><button type="button" class="primary" id="saveRoleAssignmentBtn" ${selected?'':'disabled'}>Save manual roles</button></div></div>${selected?`<div class="note">${manual?'Manual assignment · protected from automatic updates':autoFormat?`Automatically assigned from ${SBL.pokemon.escapeHtml(autoFormat)}`:'Not yet automatically assigned'}</div>`:''}<div class="role-admin-options" id="roleAssignmentOptions">${options.length?options.map(r=>{const label=roleLabelAdmin(r);return `<label class="role-admin-option"><input type="checkbox" value="${SBL.pokemon.escapeHtml(r)}" ${assigned.some(x=>(roleLabelAdmin(x)).toLowerCase()===(roleLabelAdmin(r)).toLowerCase())?'checked':''}>${SBL.pokemon.escapeHtml(label)}</label>`;}).join(''):'<div class="note">Load the role catalogue to see all classifications available in this format.</div>'}</div><div class="note" style="margin-top:14px"><strong>Free Agency board coverage:</strong> ${mons.filter(m=>rolesForAdmin(m.name).length).length} of ${mons.length} Pokémon currently have roles assigned · ${Object.keys(roleManual()).filter(k=>roleManual()[k]).length} manual overrides.</div><div style="max-height:420px;overflow:auto;margin-top:12px"><table><thead><tr><th>Pokémon</th><th>Points</th><th>Assigned roles</th><th>Assignment source</th><th></th></tr></thead><tbody>${mons.map(m=>{const k=roleKey(m.name),rs=rolesForAdmin(m.name),source=roleManual()[k]?'Manual':roleAuto()[k]?`Auto · ${roleAuto()[k]}`:'Unassigned';return `<tr><td>${SBL.pokemon.spriteMarkup(m.name,'sprite')} ${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(m.name)||m.name)}</td><td class="num">${Number(m.points)||0}</td><td>${rs.length?rs.map(r=>SBL.pokemon.escapeHtml(roleLabelAdmin(r))).join(' · '):'<span class="note">—</span>'}</td><td>${SBL.pokemon.escapeHtml(source)}</td><td><button type="button" class="ghost small" data-edit-pokemon-roles="${SBL.pokemon.escapeHtml(m.name)}">Edit</button></td></tr>`;}).join('')||'<tr><td colspan="5" class="note">Publish a Free Agency board first.</td></tr>'}</tbody></table></div></section>`;
+    return `<section class="panel" id="pokemonRoleAssignmentPanel"><div class="section-head-row"><div><div class="admin-dashboard-kicker">FREE AGENCY ROLE MANAGEMENT</div><h2>Pokémon role assignments</h2><p class="note">Assignments are global across all franchises. A Pokémon can have multiple roles. Automatic assignment uses every role returned for each Pokémon in the selected format; manual edits are protected from future bulk refreshes.</p></div><span class="badge">ADMIN ONLY</span></div><div class="row" style="align-items:flex-end;margin:12px 0"><div><strong>Suggestion format:</strong> ${SBL.pokemon.escapeHtml(STATE.settings?.pokemonRoleFormat||'gen9ou')}</div><div style="flex:0"><button type="button" class="ghost" id="loadRoleCatalogueBtn">Load role catalogue</button></div><div style="flex:0"><button type="button" class="primary" id="autoAssignFreeAgencyRolesBtn">Auto-assign from Free Agency board</button></div></div><div class="note" id="freeAgencyRoleStatus" role="status">${SBL.pokemon.escapeHtml(ROLE_STATUS_MESSAGE)}</div><div class="row" style="align-items:flex-end;margin-top:14px"><div><label for="roleAssignmentPokemon">Pokémon</label><select id="roleAssignmentPokemon">${mons.map(m=>`<option value="${SBL.pokemon.escapeHtml(m.name)}" ${selected&&roleKey(m.name)===key?'selected':''}>${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(m.name)||m.name)}</option>`).join('')}</select></div><div style="flex:0"><button type="button" class="ghost" id="resetRoleAssignmentBtn" ${selected?'':'disabled'}>Admin: reset to automatic</button></div><div style="flex:0"><button type="button" class="primary" id="saveRoleAssignmentBtn" ${selected?'':'disabled'}>Save manual roles</button></div></div>${selected?`<div class="note">${manual?'Manual assignment · protected from automatic updates':autoFormat?`Automatically assigned from ${SBL.pokemon.escapeHtml(autoFormat)}`:'Not yet automatically assigned'}</div>`:''}<div class="role-admin-options" id="roleAssignmentOptions">${options.length?options.map(r=>{const label=roleLabelAdmin(r);return `<label class="role-admin-option"><input type="checkbox" value="${SBL.pokemon.escapeHtml(r)}" ${assigned.some(x=>(roleLabelAdmin(x)).toLowerCase()===(roleLabelAdmin(r)).toLowerCase())?'checked':''}>${SBL.pokemon.escapeHtml(label)}</label>`;}).join(''):'<div class="note">Load the role catalogue to see all classifications available in this format.</div>'}</div><div class="note" style="margin-top:14px"><strong>Free Agency board coverage:</strong> ${mons.filter(m=>rolesForAdmin(m.name).length).length} of ${mons.length} Pokémon currently have roles assigned · ${Object.keys(roleManual()).filter(k=>roleManual()[k]).length} manual overrides.</div><div style="max-height:420px;overflow:auto;margin-top:12px"><table><thead><tr><th>Pokémon</th><th>Points</th><th>Assigned roles</th><th>Assignment source</th><th></th></tr></thead><tbody>${mons.map(m=>{const k=roleKey(m.name),rs=rolesForAdmin(m.name),source=roleManual()[k]?'Manual':roleAuto()[k]?`Auto · ${roleAuto()[k]}`:'Unassigned';return `<tr><td>${SBL.pokemon.spriteMarkup(m.name,'sprite')} ${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(m.name)||m.name)}</td><td class="num">${Number(m.points)||0}</td><td>${rs.length?rs.map(r=>SBL.pokemon.escapeHtml(roleLabelAdmin(r))).join(' · '):'<span class="note">-</span>'}</td><td>${SBL.pokemon.escapeHtml(source)}</td><td><button type="button" class="ghost small" data-edit-pokemon-roles="${SBL.pokemon.escapeHtml(m.name)}">Edit</button></td></tr>`;}).join('')||'<tr><td colspan="5" class="note">Publish a Free Agency board first.</td></tr>'}</tbody></table></div></section>`;
   }
   async function wireRoleAssignmentPanel(current){
     const status=document.getElementById('freeAgencyRoleStatus');
@@ -3977,8 +3977,8 @@ function renderDraft(){ return drawDraft(); }
     const isFA = (t.target_team == null || String(t.target_team).trim() === '');
     const canCredit = t.status === 'pending';
     const canRejectFA = isFA && t.status === 'pending';
-    const offered = (t.mons_offered||[]).map(SBL.pokemon.escapeHtml).join(', ') || '—';
-    const requested = (t.mons_requested||[]).map(SBL.pokemon.escapeHtml).join(', ') || '—';
+    const offered = (t.mons_offered||[]).map(SBL.pokemon.escapeHtml).join(', ') || 'N/A';
+    const requested = (t.mons_requested||[]).map(SBL.pokemon.escapeHtml).join(', ') || 'N/A';
 
     return `<div class="trade-card">
       <div class="trade-head">
@@ -4055,7 +4055,7 @@ function renderDraft(){ return drawDraft(); }
         <div id="manualTradeCreditStatus" class="note"></div>
         <div style="margin-top:16px;">
           ${profiles.length ? `<table><thead><tr><th>Player</th><th>Team</th><th class="num">Manual credits</th></tr></thead><tbody>
-            ${profiles.map(p=>`<tr><td>${SBL.pokemon.escapeHtml(displayNameForUser(p.id))}</td><td>${SBL.pokemon.escapeHtml(activeFranchiseNameForUser(p.id) || '—')}</td><td class="num">${manualTradeCreditsFor(p.id)}</td></tr>`).join('')}
+            ${profiles.map(p=>`<tr><td>${SBL.pokemon.escapeHtml(displayNameForUser(p.id))}</td><td>${SBL.pokemon.escapeHtml(activeFranchiseNameForUser(p.id) || 'N/A')}</td><td class="num">${manualTradeCreditsFor(p.id)}</td></tr>`).join('')}
           </tbody></table>` : '<div class="empty-state">No approved players found.</div>'}
         </div>
       </div>`;
@@ -4133,13 +4133,13 @@ function renderDraft(){ return drawDraft(); }
       const allowance=COMM_MULLIGAN_ALLOWANCES.find(x=>String(x.user_id)===String(p.id)&&String(x.franchise_id)===franchiseId);
       const total=Number(allowance?.allowance_total)||1;
       const used=COMM_MULLIGAN_EVENTS.filter(x=>String(x.franchise_id)===franchiseId).length;
-      return `<tr><td><strong>${SBL.pokemon.escapeHtml(displayNameForUser(p.id))}</strong></td><td>${SBL.pokemon.escapeHtml(team||'—')}</td><td>${used} used</td><td><select id="mulliganAllowance-${SBL.pokemon.escapeHtml(p.id)}"><option value="1" ${total===1?'selected':''}>1 total</option><option value="3" ${total===3?'selected':''}>3 total</option></select></td><td><button type="button" class="primary small" data-save-mulligan-user="${SBL.pokemon.escapeHtml(p.id)}" ${team?'':'disabled'}>Save allowance</button></td></tr>`;
+      return `<tr><td><strong>${SBL.pokemon.escapeHtml(displayNameForUser(p.id))}</strong></td><td>${SBL.pokemon.escapeHtml(team||'N/A')}</td><td>${used} used</td><td><select id="mulliganAllowance-${SBL.pokemon.escapeHtml(p.id)}"><option value="1" ${total===1?'selected':''}>1 total</option><option value="3" ${total===3?'selected':''}>3 total</option></select></td><td><button type="button" class="primary small" data-save-mulligan-user="${SBL.pokemon.escapeHtml(p.id)}" ${team?'':'disabled'}>Save allowance</button></td></tr>`;
     }).join('');
     return `<div class="panel"><h2>Post-draft Mulligans</h2><p class="note">A mulligan is one atomic 1-for-1 swap: one Pokémon from the franchise roster for one currently available Free Agency Pokémon. Default allowance is one per franchise. Set selected players to three total if they did not draft themselves. This window is season-scoped and only works after the draft is complete.</p>
       <div class="row" style="align-items:end;margin-top:14px"><div style="max-width:180px"><label for="mulliganEnabled">Mulligans enabled</label><select id="mulliganEnabled"><option value="false" ${cfg.enabled?'':'selected'}>Off</option><option value="true" ${cfg.enabled?'selected':''}>On</option></select></div><div><label for="mulliganClosesAt">Window closes (local time)</label><input id="mulliganClosesAt" type="datetime-local" value="${localClose}" style="width:100%"></div><div style="flex:0 0 auto"><button type="button" class="primary" id="saveMulliganWindow" ${leagueId&&seasonId?'':'disabled'}>Save window</button></div></div><div id="mulliganWindowStatus" class="note"></div>
       <h3 style="margin:18px 0 8px">Player allowances</h3><div class="note">Changing a player to 3 means three mulligans total, not three additional mulligans. Allowance changes do not erase the audit history.</div>
       <div style="overflow:auto;margin-top:10px"><table><thead><tr><th>Player</th><th>Franchise</th><th>Used</th><th>Allowance</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="5">No active player accounts found.</td></tr>'}</tbody></table></div><div id="mulliganAllowanceStatus" class="note"></div>
-      <div style="margin-top:14px"><h3>Recent mulligan audit</h3>${COMM_MULLIGAN_EVENTS.length?`<table><thead><tr><th>Player</th><th>Outgoing</th><th>Incoming</th><th>When</th></tr></thead><tbody>${COMM_MULLIGAN_EVENTS.slice(0,20).map(ev=>`<tr><td>${SBL.pokemon.escapeHtml(displayNameForUser(ev.user_id))}</td><td>${SBL.pokemon.escapeHtml(ev.outgoing_name||'—')}</td><td>${SBL.pokemon.escapeHtml(ev.incoming_name||'—')}</td><td>${ev.created_at?new Date(ev.created_at).toLocaleString():'—'}</td></tr>`).join('')}</tbody></table>`:'<div class="note">No mulligans have been used in this season.</div>'}</div></div>`;
+      <div style="margin-top:14px"><h3>Recent mulligan audit</h3>${COMM_MULLIGAN_EVENTS.length?`<table><thead><tr><th>Player</th><th>Outgoing</th><th>Incoming</th><th>When</th></tr></thead><tbody>${COMM_MULLIGAN_EVENTS.slice(0,20).map(ev=>`<tr><td>${SBL.pokemon.escapeHtml(displayNameForUser(ev.user_id))}</td><td>${SBL.pokemon.escapeHtml(ev.outgoing_name||'N/A')}</td><td>${SBL.pokemon.escapeHtml(ev.incoming_name||'N/A')}</td><td>${ev.created_at?new Date(ev.created_at).toLocaleString():'N/A'}</td></tr>`).join('')}</tbody></table>`:'<div class="note">No mulligans have been used in this season.</div>'}</div></div>`;
   }
 
   function adminRosterMonName(mon){
@@ -4186,7 +4186,7 @@ function renderDraft(){ return drawDraft(); }
       <div id="adminRosterTransactionStatus" class="note" aria-live="polite"></div>
     </div>
     <div class="panel" style="margin-top:14px"><h3>Recent administrator roster transactions</h3>
-      ${COMM_ADMIN_ROSTER_TRANSACTIONS.length ? `<div style="overflow:auto"><table><thead><tr><th>When</th><th>Type</th><th>Administrator</th><th>Changes</th><th>Reason</th></tr></thead><tbody>${COMM_ADMIN_ROSTER_TRANSACTIONS.map(tx=>{const changes=Array.isArray(tx.operations)?tx.operations.map(op=>`${op.franchise}: ${[...(op.remove||[]).map(name=>`− ${name}`),...(op.add||[]).map(name=>`+ ${name}`)].join(', ')}`).join(' · '):'—';return `<tr><td>${tx.created_at?new Date(tx.created_at).toLocaleString():'—'}</td><td>${tx.transaction_type==='manual_trade'?'Manual trade':'Roster edit'}</td><td>${SBL.pokemon.escapeHtml(tx.actor_username||displayNameForUser(tx.actor_id))}</td><td>${SBL.pokemon.escapeHtml(changes)}</td><td>${SBL.pokemon.escapeHtml(tx.reason||'—')}</td></tr>`;}).join('')}</tbody></table></div>` : '<div class="note">No administrator roster transactions have been recorded for this season yet.</div>'}
+      ${COMM_ADMIN_ROSTER_TRANSACTIONS.length ? `<div style="overflow:auto"><table><thead><tr><th>When</th><th>Type</th><th>Administrator</th><th>Changes</th><th>Reason</th></tr></thead><tbody>${COMM_ADMIN_ROSTER_TRANSACTIONS.map(tx=>{const changes=Array.isArray(tx.operations)?tx.operations.map(op=>`${op.franchise}: ${[...(op.remove||[]).map(name=>`− ${name}`),...(op.add||[]).map(name=>`+ ${name}`)].join(', ')}`).join(' · '):'N/A';return `<tr><td>${tx.created_at?new Date(tx.created_at).toLocaleString():'N/A'}</td><td>${tx.transaction_type==='manual_trade'?'Manual trade':'Roster edit'}</td><td>${SBL.pokemon.escapeHtml(tx.actor_username||displayNameForUser(tx.actor_id))}</td><td>${SBL.pokemon.escapeHtml(changes)}</td><td>${SBL.pokemon.escapeHtml(tx.reason||'N/A')}</td></tr>`;}).join('')}</tbody></table></div>` : '<div class="note">No administrator roster transactions have been recorded for this season yet.</div>'}
     </div>`;
   }
 
@@ -4493,7 +4493,7 @@ function renderDraft(){ return drawDraft(); }
         const action = btn.dataset.tradeAction;
         const errEl = document.getElementById(`tradeCommErr-${id}`);
         if(errEl){ errEl.className='note'; errEl.textContent=''; }
-        if(action === 'revert' && !confirm('This undoes the roster swap from this accepted trade and ends it — it will NOT go back to pending. Continue?')) return;
+        if(action === 'revert' && !confirm('This undoes the roster swap from this accepted trade and ends it - it will NOT go back to pending. Continue?')) return;
         if(action === 'credit' && !confirm('Credit this trade to the players now? This will apply the roster swap on their behalf.')) return;
         btn.disabled = true;
         try{
@@ -4799,7 +4799,7 @@ function renderDraft(){ return drawDraft(); }
       const canPick=m.teamA&&m.teamB;
       const a=SBL.pokemon.escapeHtml(m.teamA||'TBD'), b=SBL.pokemon.escapeHtml(m.teamB||'TBD');
       const ready=m.teamA&&m.teamB;
-      return `<div class="finals-admin-match-row" data-finals-admin-match="${m.id}"><button type="button" class="finals-admin-match-main" data-open-finals-score="${r.key}" data-open-finals-match="${m.id}"><span class="finals-admin-match-label">${r.key==='playin'?`PI ${mi+1}`:r.key==='quarterfinals'?`QF ${mi+1}`:r.key==='semifinals'?`SF ${mi+1}`:'FINAL'}</span><span class="finals-admin-teams"><strong>${a}</strong><span>vs</span><strong>${b}</strong></span><span class="finals-admin-score">${m.scoreA!=null&&m.scoreB!=null?`${m.scoreA} – ${m.scoreB}`:'—'}</span><span class="note">${m.winner?`Winner: ${SBL.pokemon.escapeHtml(m.winner)}`:ready?'Click to enter score':'Waiting'}</span></button>${canPick&&ready?`<select class="finals-winner-select" data-finals-round="${r.key}" data-finals-match="${m.id}"><option value="">Set winner…</option><option value="${a}" ${m.winner===m.teamA?'selected':''}>${a}</option><option value="${b}" ${m.winner===m.teamB?'selected':''}>${b}</option></select>`:'<span class="badge">Waiting</span>'}</div>`;
+      return `<div class="finals-admin-match-row" data-finals-admin-match="${m.id}"><button type="button" class="finals-admin-match-main" data-open-finals-score="${r.key}" data-open-finals-match="${m.id}"><span class="finals-admin-match-label">${r.key==='playin'?`PI ${mi+1}`:r.key==='quarterfinals'?`QF ${mi+1}`:r.key==='semifinals'?`SF ${mi+1}`:'FINAL'}</span><span class="finals-admin-teams"><strong>${a}</strong><span>vs</span><strong>${b}</strong></span><span class="finals-admin-score">${m.scoreA!=null&&m.scoreB!=null?`${m.scoreA} – ${m.scoreB}`:'N/A'}</span><span class="note">${m.winner?`Winner: ${SBL.pokemon.escapeHtml(m.winner)}`:ready?'Click to enter score':'Waiting'}</span></button>${canPick&&ready?`<select class="finals-winner-select" data-finals-round="${r.key}" data-finals-match="${m.id}"><option value="">Set winner…</option><option value="${a}" ${m.winner===m.teamA?'selected':''}>${a}</option><option value="${b}" ${m.winner===m.teamB?'selected':''}>${b}</option></select>`:'<span class="badge">Waiting</span>'}</div>`;
     }).join('')}</div>`).join('');
 
     const currentSeedCount=[...selected.values()].filter(Boolean).length;
@@ -5139,7 +5139,7 @@ function renderDraft(){ return drawDraft(); }
     const simple = parseSimpleFixtureRows(objRows);
     if(simple) return reconcileParsedFixture(simple);
 
-    // Layout 2: the league's own "FIXTURE" tab layout — several weeks placed
+    // Layout 2: the league's own "FIXTURE" tab layout - several weeks placed
     // side by side, each a 4-column group (Home / VS / Away / blank) with a
     // "Week N" + date-range header row above its matches, repeating down and
     // across the sheet.
@@ -5151,7 +5151,7 @@ function renderDraft(){ return drawDraft(); }
   }
   // Runs every parsed Home/Away name through reconcileFranchiseName() against
   // the current Player -> Team mapping, so an uploaded fixture's spelling
-  // gets corrected to the established franchise name on the spot — same
+  // gets corrected to the established franchise name on the spot - same
   // place regardless of which of the two sheet layouts it came from.
   function reconcileParsedFixture(parsed){
     const knownNames = activeMemberConfiguredFranchises().map(f => f.name);
@@ -5328,7 +5328,7 @@ function renderDraft(){ return drawDraft(); }
     contentEl.innerHTML = `
       <div class="panel">
         <h2>Publish an Update</h2>
-        <div class="note">Posted updates appear here immediately for anyone with access to this shared league data. There's no draft/preview step — Publish posts it right away.</div>
+        <div class="note">Posted updates appear here immediately for anyone with access to this shared league data. There's no draft/preview step - Publish posts it right away.</div>
         <div class="row" style="margin-top:12px;">
           <div style="flex:2; min-width:220px;">
             <label>Title</label>
@@ -5441,19 +5441,19 @@ function renderDraft(){ return drawDraft(); }
     contentEl.innerHTML = `
       <div class="panel" id="seasonOverviewPanel">
         <h2>Season</h2>
-        <div class="note">Current season: <strong>${SBL.pokemon.escapeHtml(STATE.settings.activeSeason || DEFAULT_SEASON)}</strong> — ${Object.keys(STATE.replays||{}).length} replay${Object.keys(STATE.replays||{}).length===1?'':'s'} processed.</div>
+        <div class="note">Current season: <strong>${SBL.pokemon.escapeHtml(STATE.settings.activeSeason || DEFAULT_SEASON)}</strong> - ${Object.keys(STATE.replays||{}).length} replay${Object.keys(STATE.replays||{}).length===1?'':'s'} processed.</div>
         <div class="row" style="align-items:end;gap:10px;flex-wrap:wrap;margin-top:12px;"><div style="min-width:220px;flex:1;"><label for="renameSeasonInput">Season display name</label><input id="renameSeasonInput" value="${SBL.pokemon.escapeHtml(STATE.settings.activeSeason || DEFAULT_SEASON)}" maxlength="80"></div><button class="ghost" id="renameSeasonBtn">Save season name</button></div>
         <div class="foot-actions">
           <button class="primary" id="newSeasonBtn">Start new season…</button>
           <button class="ghost danger-btn" id="clearRostersBtn">Clear current rosters</button>
         </div>
-        <div class="note" style="margin-top:10px;">Starting a new season archives every replay, roster, draft, and free-agency pool exactly as it stands right now, then clears the board so you can start drafting fresh. Nothing is deleted — archived seasons stay viewable and any one of them can be set back as current below.</div>
+        <div class="note" style="margin-top:10px;">Starting a new season archives every replay, roster, draft, and free-agency pool exactly as it stands right now, then clears the board so you can start drafting fresh. Nothing is deleted - archived seasons stay viewable and any one of them can be set back as current below.</div>
         <div id="seasonArchiveRows" style="margin-top:16px;">
           ${archiveEntries.length ? archiveEntries.map(([key,a])=>`
             <div class="map-row" style="align-items:center;">
               <div style="flex:1;">
                 <div style="font-weight:600;">${SBL.pokemon.escapeHtml(a.name||key)}</div>
-                <div class="note" style="margin:2px 0 0;">${Object.keys(a.replays||{}).length} replay${Object.keys(a.replays||{}).length===1?'':'s'} · archived ${a.archivedAt ? new Date(a.archivedAt).toLocaleDateString() : '—'}</div>
+                <div class="note" style="margin:2px 0 0;">${Object.keys(a.replays||{}).length} replay${Object.keys(a.replays||{}).length===1?'':'s'} · archived ${a.archivedAt ? new Date(a.archivedAt).toLocaleDateString() : 'N/A'}</div>
               </div>
               <button class="ghost small" data-restore-season="${SBL.pokemon.escapeHtml(key)}">Set as current</button>
               <button class="ghost small danger-btn" data-delete-season="${SBL.pokemon.escapeHtml(key)}">Delete</button>
@@ -5527,7 +5527,7 @@ function renderDraft(){ return drawDraft(); }
       </div>
       <div class="panel" id="qualificationPanel">
         <h2>Playoffs / Qualification</h2>
-        <div class="note">Controls the "Qualification" tab in each franchise's summary popup on the Season page — current standing, the path to the top 6 (who needs to win or lose), and remaining fixtures. Leave this off during the regular season and switch it on once the playoff picture is worth showing, typically toward the end of the season.</div>
+        <div class="note">Controls the "Qualification" tab in each franchise's summary popup on the Season page - current standing, the path to the top 6 (who needs to win or lose), and remaining fixtures. Leave this off during the regular season and switch it on once the playoff picture is worth showing, typically toward the end of the season.</div>
         <div class="row" style="margin-top:12px; align-items:center;">
           <label style="display:flex; align-items:center; gap:8px; margin:0; cursor:pointer;">
             <input type="checkbox" id="qualificationToggle" ${STATE.settings.qualificationEnabled ? 'checked' : ''}>
@@ -5548,7 +5548,7 @@ function renderDraft(){ return drawDraft(); }
       })()}      <div class="panel" id="fixtureSchedulePanel">
         <h2>Fixture / Schedule</h2>
         <div class="note">Generate or upload a round-robin schedule as a private draft first. It only appears on the public Season page after you explicitly publish it.</div>
-        <div class="note" style="margin-top:6px;">Assign every franchise to a conference above first — the generator will then schedule each team against the other teams in its own conference, plus at most one inter-conference match per week (the league's actual rule). Uploads are checked against the same rule and flagged if a week ends up with more than one cross-conference game.</div>
+        <div class="note" style="margin-top:6px;">Assign every franchise to a conference above first - the generator will then schedule each team against the other teams in its own conference, plus at most one inter-conference match per week (the league's actual rule). Uploads are checked against the same rule and flagged if a week ends up with more than one cross-conference game.</div>
         <div id="fixtureTargetStatus" class="note" style="margin-top:10px;">Checking selected league and season…</div>
         <div id="fixtureSummary" style="margin-top:14px;"></div>
         <div class="row" style="margin-top:14px; gap:12px; align-items:end; flex-wrap:wrap;">
@@ -5582,7 +5582,7 @@ function renderDraft(){ return drawDraft(); }
         </div>
         <div class="note" style="margin-top:8px;">Accepts either a simple table with <code>Week</code> / <code>Home</code> / <code>Away</code> columns (any order), or the league's own "FIXTURE" tab layout (multiple "Week N" blocks with Home / VS / Away rows underneath, side by side). If the workbook has a sheet named "FIXTURE" or "Schedule", that sheet is used automatically.</div>
         <div id="fixtureStatus" style="margin-top:8px"></div>
-        <div class="note" style="margin-top:14px;">Once a fixture is saved, this looks at each replay's two franchises, finds which scheduled fixture match they belong to, and sets that replay's week to match — so the Season page picks it up automatically instead of you setting each replay's week by hand. If a pair of teams played each other more than once (e.g. a return leg), games are matched to scheduled meetings in the order they were played.</div>
+        <div class="note" style="margin-top:14px;">Once a fixture is saved, this looks at each replay's two franchises, finds which scheduled fixture match they belong to, and sets that replay's week to match - so the Season page picks it up automatically instead of you setting each replay's week by hand. If a pair of teams played each other more than once (e.g. a return leg), games are matched to scheduled meetings in the order they were played.</div>
         <div id="matchReplaysStatus" style="margin-top:8px;"></div>
         <div class="foot-actions" style="margin-top:14px;">
           <button class="ghost" id="matchReplaysBtn">Match replays to fixture weeks</button>
@@ -6022,7 +6022,7 @@ function renderDraft(){ return drawDraft(); }
         // before this reconciliation existed (or one with a stray typo) gets
         // fixed in place rather than requiring a fresh re-upload. Persist any
         // corrections back to the saved fixture so the Season page's schedule
-        // and results — which read the same STATE.settings.fixture — benefit
+        // and results - which read the same STATE.settings.fixture - benefit
         // from the fix immediately too.
         const knownNames = activeMemberConfiguredFranchises().map(f => f.name);
         const fixtureCorrections = [];
@@ -6100,7 +6100,7 @@ function renderDraft(){ return drawDraft(); }
           const onlyInFixture = [...fixtureTeamNames.keys()].filter(k=>!replayTeamNames.has(k)).map(k=>fixtureTeamNames.get(k));
           const preview = (list) => list.slice(0,6).map(n=>`"${SBL.pokemon.escapeHtml(n)}"`).join(', ') + (list.length>6?`, +${list.length-6} more`:'');
           if(onlyInReplays.length || onlyInFixture.length){
-            mismatchNote = `<div class="note danger" style="margin-top:6px;">Name mismatch — these don't line up character-for-character (case/spacing counts unless "case-insensitive names" is on in Settings):
+            mismatchNote = `<div class="note danger" style="margin-top:6px;">Name mismatch - these don't line up character-for-character (case/spacing counts unless "case-insensitive names" is on in Settings):
               ${onlyInReplays.length ? `<div style="margin-top:4px;">In replays (via Player → Team mapping) but not in the fixture: ${preview(onlyInReplays)}</div>` : ''}
               ${onlyInFixture.length ? `<div style="margin-top:4px;">In the fixture but not in any replay's mapped team: ${preview(onlyInFixture)}</div>` : ''}
             </div>`;
@@ -6112,13 +6112,13 @@ function renderDraft(){ return drawDraft(); }
         renderTicker();
         render();
         // render() just rebuilt the whole settings panel (including this status
-        // box) from scratch, so the old `status` node is gone — re-query it
+        // box) from scratch, so the old `status` node is gone - re-query it
         // after the rebuild instead of writing into the stale reference.
         const freshStatus = document.getElementById('matchReplaysStatus');
         const correctionNote = fixtureNamesFixed
           ? `<div class="note" style="margin-top:6px;">Auto-corrected ${fixtureCorrections.length} fixture name${fixtureCorrections.length===1?'':'s'} to match the established franchise spelling:<br>${fixtureCorrections.map(c=>`"${SBL.pokemon.escapeHtml(c.from)}" → "${SBL.pokemon.escapeHtml(c.to)}"`).join('<br>')}</div>`
           : '';
-        if(freshStatus) freshStatus.innerHTML = `<div class="note${unmatched?' danger':''}">${changed} replay${changed===1?'':'s'} updated${alreadyRight?`, ${alreadyRight} already correct`:''}.${unmatched?` ${unmatched} replay${unmatched===1?'':'s'} didn't match any scheduled fixture matchup — check the two franchises' names line up with the Player → Team name mapping.` : ' ✓'}</div>${correctionNote}${mismatchNote}`;
+        if(freshStatus) freshStatus.innerHTML = `<div class="note${unmatched?' danger':''}">${changed} replay${changed===1?'':'s'} updated${alreadyRight?`, ${alreadyRight} already correct`:''}.${unmatched?` ${unmatched} replay${unmatched===1?'':'s'} didn't match any scheduled fixture matchup - check the two franchises' names line up with the Player → Team name mapping.` : ' ✓'}</div>${correctionNote}${mismatchNote}`;
       }catch(err){
         status.innerHTML = `<div class="note danger">Could not match replays: ${SBL.pokemon.escapeHtml(err.message)}</div>`;
       }finally{
@@ -6593,7 +6593,7 @@ function renderDraft(){ return drawDraft(); }
           }catch(e){franchiseStatus.textContent='Could not reopen franchise: '+(e?.message||e);el.disabled=false;}
         }));
       }catch(e){
-        if(franchiseCount) franchiseCount.textContent='—';
+        if(franchiseCount) franchiseCount.textContent='N/A';
         if(franchiseListEl) franchiseListEl.innerHTML=`<div class="empty-state">Could not load normalized franchises: ${SBL.pokemon.escapeHtml(e.message||e)}</div>`;
       }
     };
@@ -7203,7 +7203,7 @@ function renderDraft(){ return drawDraft(); }
       }
     })();
 
-    // CP4.166 — persisted account-linked Showdown aliases. This editor does
+    // CP4.166 - persisted account-linked Showdown aliases. This editor does
     // not write season-owned teamMap strings; the replay load overlay derives
     // current franchise names from the authoritative franchise assignment.
     const altHost=document.getElementById('showdownAltRows');
@@ -7255,7 +7255,7 @@ function renderDraft(){ return drawDraft(); }
         if(owners.error)throw owners.error;
         altAccounts=(users.data||[]).filter(a=>String(a.membership_status||'').toLowerCase()==='active' && String(a.member_type||'player')==='player');
         altRows=aliases;altOwners=owners.data||[];altFranchises=franchises||[];
-        altSelect.innerHTML='<option value="">Select league account…</option>'+altAccounts.map(a=>`<option value="${altEscape(a.id)}">${altEscape(a.username||'Unnamed account')} — ${altEscape(altFranchiseName(a.id))}</option>`).join('');
+        altSelect.innerHTML='<option value="">Select league account…</option>'+altAccounts.map(a=>`<option value="${altEscape(a.id)}">${altEscape(a.username||'Unnamed account')} - ${altEscape(altFranchiseName(a.id))}</option>`).join('');
         altStatus.textContent=`${altRows.length} saved account-linked Showdown name${altRows.length===1?'':'s'} in this league.`;
         drawAliases();
       }catch(error){

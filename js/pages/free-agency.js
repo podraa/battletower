@@ -157,7 +157,7 @@ function toggleQueue(mon){
 }
 
 // ---- Static Pokémon type table ----
-// Every mon's type is fixed game data — it never changes — so instead of
+// Every mon's type is fixed game data - it never changes - so instead of
 // calling an external API for it on every page load (which is what made
 // this page laggy: a live network round-trip per Pokémon, repeated on every
 // background refresh), the full type table is embedded right here and the
@@ -276,7 +276,7 @@ function openSelection(mon){
     const value=Number(resolvedStats[key]);
     const valid=Number.isFinite(value)&&value>0;
     const pct=valid?Math.max(0,Math.min(100,value/255*100)):0;
-    return `<div class="fa-stat-row"><span>${label}</span><div class="fa-stat-track"><i style="width:${pct}%"></i></div><strong>${valid?value:'—'}</strong></div>`;
+    return `<div class="fa-stat-row"><span>${label}</span><div class="fa-stat-track"><i style="width:${pct}%"></i></div><strong>${valid?value:'N/A'}</strong></div>`;
   }).join('');
   const modal=document.createElement('div');
   modal.className='modal';
@@ -284,7 +284,7 @@ function openSelection(mon){
     <div class="fa-modal-heading"><div class="fa-modal-sprite">${sprite(mon.name)}</div><div class="fa-modal-title"><h2 id="faModalTitle">${esc((SBL.pokemon.displayNameWithForm ? SBL.pokemon.displayNameWithForm(mon.name) : SBL.pokemon.displayName(mon.name)))}</h2>
     <div class="note">${mon.points} points · ${owner(mon.name)?'Drafted':'Available'}</div><div class="modal-types">${types.map(typeBadge).join('')||''}</div></div></div>
     <section class="fa-base-stats" aria-label="Base stats"><div class="fa-stats-heading"><h3>Base stats</h3><strong>${statTotal===null?'Stats unavailable':`Total ${statTotal}`}</strong></div>${statRows}${statTotal===null?'<p class="note fa-stat-warning">Some or all base stats could not be resolved for this form.</p>':''}</section>
-    <p class="note">${owner(mon.name)?`Drafted by <strong>${esc(owner(mon.name))}</strong>.`:'This Pokémon is available — it does not appear on any currently published roster.'}</p>
+    <p class="note">${owner(mon.name)?`Drafted by <strong>${esc(owner(mon.name))}</strong>.`:'This Pokémon is available - it does not appear on any currently published roster.'}</p>
     <div class="actions"><button class="btn" id="modalClose" type="button">Close</button></div>
   </div>`;
   document.body.appendChild(modal);
@@ -550,9 +550,9 @@ function renderResults(){
         const card=cached.node;card.className=`mon ${o?'taken':''}`;card.dataset.index=String(originalIndex);card.dataset.name=m.name;
         card.innerHTML=`${sprite(m.name)}
           <div class="mon-name">${esc((SBL.pokemon.displayNameWithForm ? SBL.pokemon.displayNameWithForm(m.name) : SBL.pokemon.displayName(m.name)))}</div>
-          <div class="mon-points">${m.points??'—'} pts</div>
+          <div class="mon-points">${m.points??'N/A'} pts</div>
           <div class="mon-types">${types.map(typeBadge).join('')}</div>
-          ${filterStat?`<div class="note mon-stat-value">${STAT_LABELS[filterStat]||filterStat} ${esc(String(statValue??'—'))}</div>`:''}
+          ${filterStat?`<div class="note mon-stat-value">${STAT_LABELS[filterStat]||filterStat} ${esc(String(statValue??'N/A'))}</div>`:''}
           ${isDraftOpen?`<button class="queue-toggle ${queued?'queued':''}" type="button" data-queue-index="${originalIndex}" aria-pressed="${queued}">${queued?'★ In draft queue':'☆ Add to draft queue'}</button>`:''}
           <div class="mon-status ${o?'taken-status':'available'}">${o?'Drafted by '+esc(o):'Available'}</div>`;
         cached.signature=signature;

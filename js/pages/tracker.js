@@ -7,7 +7,7 @@ const league=params.get('league')||'',season=params.get('season_id')||'';
 let replay=null,index=0;
 const db=()=>SBL.getSupabase();
 function error(message){$('trackerError').hidden=!message;$('trackerError').textContent=message||'';}
-function pokemon(id){return replay?.names?.get(String(id||''))||String(id||'—');}
+function pokemon(id){return replay?.names?.get(String(id||''))||String(id||'N/A');}
 function art(id){
  if(!id)return '';
  const name=pokemon(id);

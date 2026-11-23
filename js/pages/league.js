@@ -454,7 +454,7 @@
       btn.disabled = false;
       if(error){ setMsg(error.message, true); return; }
       if(data.session){ session = data.session; await boot(); }
-      else{ setMsg('Account created — check your email to confirm, then log in.', false); }
+      else{ setMsg('Account created - check your email to confirm, then log in.', false); }
     };
   }
 
@@ -564,7 +564,7 @@
       fieldsEl.innerHTML = available.length ? `
         <label style="margin-top:12px;">Franchise</label>
         <select id="teamPick">
-          <option value="">— Select a franchise —</option>
+          <option value="">- Select a franchise -</option>
           ${available.map(f=>`<option value="${SBL.pokemon.escapeHtml(f.id)}" ${f.id===currentFranchise?.franchiseId?'selected':''}>${SBL.pokemon.escapeHtml(f.name)}</option>`).join('')}
         </select>` : `
         <div class="note">No active franchises are currently available to claim.</div>`;
@@ -714,7 +714,7 @@
         status:'new',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()
       });
       await SBL.replays.saveSharedState({teamMap:DASH.teamMap,settings:DASH.settings}, supabase);
-      if(msg){msg.className='note ok';msg.textContent='Submitted. Thanks — league admins can review it in Admin → Bug Reports.';}
+      if(msg){msg.className='note ok';msg.textContent='Submitted. Thanks - league admins can review it in Admin → Bug Reports.';}
       document.getElementById('feedbackTitle').value=''; document.getElementById('feedbackDescription').value='';
       renderFeedback();
     }catch(e){ if(msg){msg.className='note danger';msg.textContent='Could not submit: '+e.message;} }
@@ -779,7 +779,7 @@
   function recentBattleRowHtml(x){
     const resultClass=x.result==='W'?'win':x.result==='L'?'loss':'unknown';
     const resultText=x.result==='W'?'Win':x.result==='L'?'Loss':'Unknown';
-    const date=x.date?new Date(x.date).toLocaleDateString():'—';
+    const date=x.date?new Date(x.date).toLocaleDateString():'N/A';
     return `<div class="recent-battle-row"><div class="recent-battle-week">${SBL.pokemon.escapeHtml(x.week)}</div><div><div class="recent-battle-match">${SBL.pokemon.escapeHtml(myLeagueTeam())}<span class="vs">vs</span>${SBL.pokemon.escapeHtml(x.opponent)}</div><div class="recent-battle-meta">${SBL.pokemon.escapeHtml(x.format)} · ${SBL.pokemon.escapeHtml(date)}</div></div><div class="recent-result ${resultClass}">${resultText}</div><button class="ghost small" type="button" data-myteam-match="${SBL.pokemon.escapeHtml(x.id)}">Summary</button></div>`;
   }
   function openMyTeamReplaySummary(replayId){
@@ -1285,7 +1285,7 @@
       plannerDownload(filename+'.json',JSON.stringify(data,null,2),'application/json;charset=utf-8');return;
     }
     const esc=value=>SBL.pokemon.escapeHtml(String(value??''));
-    const rows=data.picks.map(p=>'<tr><td>'+p.priority+'</td><td><strong>'+esc(p.name)+'</strong></td><td>'+esc(p.points)+'</td><td>'+esc(p.types.join(' / ')||'—')+'</td><td>'+esc(p.roles.join(', ')||'—')+'</td></tr>').join('');
+    const rows=data.picks.map(p=>'<tr><td>'+p.priority+'</td><td><strong>'+esc(p.name)+'</strong></td><td>'+esc(p.points)+'</td><td>'+esc(p.types.join(' / ')||'N/A')+'</td><td>'+esc(p.roles.join(', ')||'N/A')+'</td></tr>').join('');
     const html='<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SBL Draft Plan</title><style>body{font:15px system-ui,Arial,sans-serif;max-width:1100px;margin:40px auto;padding:0 20px;color:#172034}h1{margin-bottom:4px}p{color:#52617a}table{width:100%;border-collapse:collapse;margin-top:22px}th,td{padding:11px;text-align:left;border-bottom:1px solid #dce2eb;vertical-align:top}th{background:#f0f3f9}td:first-child{font-weight:700}footer{margin-top:24px;color:#52617a;font-size:12px}@media print{body{margin:0;padding:0}tr{break-inside:avoid}}</style></head><body><h1>SBL Draft Plan</h1><p>Season: '+esc(data.seasonId)+' · Exported: '+esc(data.exportedAt.slice(0,10))+' · '+data.picks.length+' priorities · '+data.totalPoints+' planned points</p><table><thead><tr><th>Priority</th><th>Pokémon</th><th>Points</th><th>Types</th><th>Assigned roles</th></tr></thead><tbody>'+rows+'</tbody></table><footer>This is a snapshot, not a live draft queue. Availability and point values may change. Open in a browser and use Print → Save as PDF to share a PDF.</footer></body></html>';
     plannerDownload(filename+'.html',html,'text/html;charset=utf-8');
   }
@@ -1524,9 +1524,9 @@
           return `<div class="myteam-mon">
             <button type="button" class="myteam-mon-profile" data-myteam-profile="${SBL.pokemon.escapeHtml(mon.name)}" aria-label="Open ${SBL.pokemon.escapeHtml(mon.name)} Pokémon Profile"><div class="myteam-mon-top">${SBL.pokemon.spriteMarkup(mon.name,'sprite')}<div><div class="myteam-mon-name">${SBL.pokemon.escapeHtml(SBL.pokemon.displayName(mon.name))}</div><div class="myteam-mon-points">${mon.points!=null?SBL.pokemon.escapeHtml(mon.points)+' pts':'Unranked'}</div></div></div></button>
             <div class="myteam-mon-stats">
-              <div class="myteam-mon-stat"><div class="v">${has?st.games:'—'}</div><div class="l">Games</div></div>
-              <div class="myteam-mon-stat"><div class="v" style="color:var(--teal)">${has?st.kills:'—'}</div><div class="l">Kills</div></div>
-              <div class="myteam-mon-stat"><div class="v" style="color:var(--red)">${has?st.deaths:'—'}</div><div class="l">Deaths</div></div>
+              <div class="myteam-mon-stat"><div class="v">${has?st.games:'N/A'}</div><div class="l">Games</div></div>
+              <div class="myteam-mon-stat"><div class="v" style="color:var(--teal)">${has?st.kills:'N/A'}</div><div class="l">Kills</div></div>
+              <div class="myteam-mon-stat"><div class="v" style="color:var(--red)">${has?st.deaths:'N/A'}</div><div class="l">Deaths</div></div>
             </div>
           </div>`;
         }).join('')}</div>`:'<div class="empty-state">No roster published for your team yet.</div>'}
@@ -1543,10 +1543,10 @@
         <section class="panel">
           <div class="myteam-section-head"><div><h2>Basic Stats</h2><div class="note">Quick season leaders from your roster.</div></div></div>
           <div class="myteam-stat-grid">
-            <div class="myteam-stat-card"><div class="eyebrow">Top Kills</div><div class="big stat-mon">${topKills?SBL.pokemon.spriteMarkup(topKills.m.name,'sprite'):''}<span>${topKills?SBL.pokemon.escapeHtml(SBL.pokemon.displayName(topKills.m.name)):'—'}</span></div><div class="small">${topKills?`${topKills.s.kills} KOs`: 'No games recorded'}</div></div>
-            <div class="myteam-stat-card"><div class="eyebrow">Top Deaths</div><div class="big stat-mon">${topDeaths?SBL.pokemon.spriteMarkup(topDeaths.m.name,'sprite'):''}<span>${topDeaths?SBL.pokemon.escapeHtml(SBL.pokemon.displayName(topDeaths.m.name)):'—'}</span></div><div class="small">${topDeaths?`${topDeaths.s.deaths} deaths`: 'No games recorded'}</div></div>
-            <div class="myteam-stat-card"><div class="eyebrow">Most Brought</div><div class="big stat-mon">${mostBrought?SBL.pokemon.spriteMarkup(mostBrought.m.name,'sprite'):''}<span>${mostBrought?SBL.pokemon.escapeHtml(SBL.pokemon.displayName(mostBrought.m.name)):'—'}</span></div><div class="small">${mostBrought?`${mostBrought.s.games} games`: 'No games recorded'}</div></div>
-            <div class="myteam-stat-card"><div class="eyebrow">Top Assists</div><div class="big stat-mon">${topAssists?SBL.pokemon.spriteMarkup(topAssists.m.name,'sprite'):''}<span>${topAssists?SBL.pokemon.escapeHtml(SBL.pokemon.displayName(topAssists.m.name)):'—'}</span></div><div class="small">${topAssists?`${topAssists.s.assists} assists`: 'No games recorded'}</div></div>
+            <div class="myteam-stat-card"><div class="eyebrow">Top Kills</div><div class="big stat-mon">${topKills?SBL.pokemon.spriteMarkup(topKills.m.name,'sprite'):''}<span>${topKills?SBL.pokemon.escapeHtml(SBL.pokemon.displayName(topKills.m.name)):'N/A'}</span></div><div class="small">${topKills?`${topKills.s.kills} KOs`: 'No games recorded'}</div></div>
+            <div class="myteam-stat-card"><div class="eyebrow">Top Deaths</div><div class="big stat-mon">${topDeaths?SBL.pokemon.spriteMarkup(topDeaths.m.name,'sprite'):''}<span>${topDeaths?SBL.pokemon.escapeHtml(SBL.pokemon.displayName(topDeaths.m.name)):'N/A'}</span></div><div class="small">${topDeaths?`${topDeaths.s.deaths} deaths`: 'No games recorded'}</div></div>
+            <div class="myteam-stat-card"><div class="eyebrow">Most Brought</div><div class="big stat-mon">${mostBrought?SBL.pokemon.spriteMarkup(mostBrought.m.name,'sprite'):''}<span>${mostBrought?SBL.pokemon.escapeHtml(SBL.pokemon.displayName(mostBrought.m.name)):'N/A'}</span></div><div class="small">${mostBrought?`${mostBrought.s.games} games`: 'No games recorded'}</div></div>
+            <div class="myteam-stat-card"><div class="eyebrow">Top Assists</div><div class="big stat-mon">${topAssists?SBL.pokemon.spriteMarkup(topAssists.m.name,'sprite'):''}<span>${topAssists?SBL.pokemon.escapeHtml(SBL.pokemon.displayName(topAssists.m.name)):'N/A'}</span></div><div class="small">${topAssists?`${topAssists.s.assists} assists`: 'No games recorded'}</div></div>
             <div class="myteam-stat-card"><div class="eyebrow">Team Kills</div><div class="big">${totalKills}</div><div class="small">Across ${rec.games} team games</div></div>
             <div class="myteam-stat-card"><div class="eyebrow">Team Deaths</div><div class="big">${totalDeaths}</div><div class="small">${totalAssists} assists recorded</div></div>
           </div>
@@ -1618,7 +1618,7 @@
         <div>
           <label>Trade with</label>
           <select id="targetSelect">
-            <option value="" ${targetIsFA?'selected':''}>— Free Agency —</option>
+            <option value="" ${targetIsFA?'selected':''}>- Free Agency -</option>
             ${otherTeams.map(t=>`<option value="${SBL.pokemon.escapeHtml(t)}" ${t===draft.target?'selected':''}>${SBL.pokemon.escapeHtml(t)}</option>`).join('')}
           </select>
         </div>
@@ -1676,7 +1676,7 @@
       const proposerAfter = roster.length - draft.offered.size + draft.requested.size;
       const targetAfter = targetIsFA ? null : ((targetRoster||[]).length - draft.requested.size + draft.offered.size);
       const pointDelta = reqPts - offPts;
-      const bits = [`Give ${offPts} pts / Get ${reqPts} pts${pointDelta===0 ? ' — balanced' : pointDelta>0 ? ` — you gain ${pointDelta} pts` : ` — you lose ${Math.abs(pointDelta)} pts`}`];
+      const bits = [`Give ${offPts} pts / Get ${reqPts} pts${pointDelta===0 ? ' - balanced' : pointDelta>0 ? ` - you gain ${pointDelta} pts` : ` - you lose ${Math.abs(pointDelta)} pts`}`];
       const minMons=SBL.tradeRules?.current?.()?.min_roster_size;
       bits.push(`Your roster after: ${proposerAfter}${minMons!=null&&proposerAfter<minMons?` (below ${minMons} minimum)`:''}`);
       bits.push(`${tradeLimitMessage(myLeagueTeam(), targetIsFA ? 'freeagency' : 'team')}`);
@@ -2179,7 +2179,7 @@
         <section class="panel account-card">
           <div class="account-card-head"><div><div class="account-card-kicker">Profile</div><h3>Your account</h3></div><span class="account-status ${SBL.pokemon.escapeHtml(status)}">${SBL.pokemon.escapeHtml(statusLabel)}</span></div>
           <div class="account-profile-list">
-            <div class="account-profile-row"><span>Username</span><strong>${SBL.pokemon.escapeHtml(profile?.username || '—')}</strong></div>
+            <div class="account-profile-row"><span>Username</span><strong>${SBL.pokemon.escapeHtml(profile?.username || 'N/A')}</strong></div>
             <div class="account-username-editor"><label for="accountUsernameInput">Change username</label><input id="accountUsernameInput" maxlength="24" value="${SBL.pokemon.escapeHtml(profile?.username||'')}" autocomplete="nickname"><div class="note">2–24 characters; letters, numbers, underscores and hyphens. Regular changes are limited to once every 90 days. Site admins can override the limit.</div><button type="button" class="ghost small" id="accountSaveUsername">Save username</button><div class="note" id="accountUsernameMessage"></div></div>
             <div class="account-profile-row"><span>Franchise</span><strong>${leagueLanding ? 'Managed per league' : SBL.pokemon.escapeHtml(currentFranchise?.franchise?.name || 'Not assigned')}</strong></div>
             <div class="account-profile-row"><span>Trade credits</span><strong>${Number(profile?.trade_credits || 0)}</strong></div>

@@ -21,7 +21,7 @@
   }
 
   function formatTime(value){
-    if(!value) return '—';
+    if(!value) return 'N/A';
     const d=new Date(value);
     return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString([], {dateStyle:'medium',timeStyle:'short'});
   }
@@ -45,7 +45,7 @@
       ['Database',db.status,'Core database reachable',statusClass(db.status)],
       ['Authentication',healthData.authentication?.status,'Session and auth layer reachable',statusClass(healthData.authentication?.status)],
       ['Active leagues',db.active_leagues ?? healthData.active_leagues ?? 0,'Currently active platform leagues','is-neutral'],
-      ['Registered users',db.users ?? '—','Use Users below for the full directory','is-neutral'],
+      ['Registered users',db.users ?? 'N/A','Use Users below for the full directory','is-neutral'],
       ['League members',db.league_members ?? 0,'Active and historical memberships','is-neutral'],
       ['League replays',db.league_replays ?? 0,'Normalized replay records','is-neutral'],
       ['Legacy state',db.legacy_dashboard_rows ?? 0,'Legacy dashboard source rows still retained','is-neutral'],
@@ -116,7 +116,7 @@
   function renderRegisteredAccounts(){
     const wrap=$('#registeredAccountTable');if(!wrap)return;
     if(!users.length){wrap.innerHTML='<div class="site-admin-empty">No registered accounts found.</div>';return;}
-    wrap.innerHTML=`<table><thead><tr><th>Account</th><th>Email</th><th>Site role</th><th>Username action</th><th>Account recovery</th></tr></thead><tbody>${users.map(u=>`<tr><td><strong>${esc(String(u.username||'').trim()||'Unknown user')}</strong><span class="cell-sub"><code>${esc(u.id)}</code></span></td><td>${esc(u.email||'—')}</td><td>${esc(u.site_role||'User')}</td><td><button class="table-action" data-account-username="${esc(u.id)}">Change username</button></td><td><button class="table-action" data-account-reset="${esc(u.id)}" ${u.email?'':'disabled title="No account email available"'}>Send reset email</button></td></tr>`).join('')}</tbody></table>`;
+    wrap.innerHTML=`<table><thead><tr><th>Account</th><th>Email</th><th>Site role</th><th>Username action</th><th>Account recovery</th></tr></thead><tbody>${users.map(u=>`<tr><td><strong>${esc(String(u.username||'').trim()||'Unknown user')}</strong><span class="cell-sub"><code>${esc(u.id)}</code></span></td><td>${esc(u.email||'N/A')}</td><td>${esc(u.site_role||'User')}</td><td><button class="table-action" data-account-username="${esc(u.id)}">Change username</button></td><td><button class="table-action" data-account-reset="${esc(u.id)}" ${u.email?'':'disabled title="No account email available"'}>Send reset email</button></td></tr>`).join('')}</tbody></table>`;
     wrap.querySelectorAll('[data-account-reset]').forEach(btn=>btn.addEventListener('click',async()=>{
       const target=users.find(u=>String(u.id)===String(btn.dataset.accountReset));
       if(!target?.email){setError('No email is available for this account.');return;}
@@ -159,7 +159,7 @@
       table.innerHTML='<div class="site-admin-empty">No league-scoped test accounts are currently marked.</div>';
       return;
     }
-    table.innerHTML=`<table><thead><tr><th>Account</th><th>League</th><th>Membership</th><th>League role</th><th>Marked</th><th>Action</th></tr></thead><tbody>${testAccounts.map(row=>`<tr><td><strong>${esc(row.username||'Unknown user')}</strong><span class="cell-sub">${esc(row.email||row.user_id)}</span></td><td><strong>${esc(row.league_name||'Unknown league')}</strong><span class="cell-sub"><code>${esc(row.league_id)}</code></span></td><td>${esc(row.membership_status||'—')}</td><td>${esc(row.role||'player')}</td><td>${esc(formatTime(row.created_at))}</td><td><button type="button" class="table-action" data-test-account-player data-league="${esc(row.league_id)}" data-user="${esc(row.user_id)}">Convert to player</button></td></tr>`).join('')}</tbody></table>`;
+    table.innerHTML=`<table><thead><tr><th>Account</th><th>League</th><th>Membership</th><th>League role</th><th>Marked</th><th>Action</th></tr></thead><tbody>${testAccounts.map(row=>`<tr><td><strong>${esc(row.username||'Unknown user')}</strong><span class="cell-sub">${esc(row.email||row.user_id)}</span></td><td><strong>${esc(row.league_name||'Unknown league')}</strong><span class="cell-sub"><code>${esc(row.league_id)}</code></span></td><td>${esc(row.membership_status||'N/A')}</td><td>${esc(row.role||'player')}</td><td>${esc(formatTime(row.created_at))}</td><td><button type="button" class="table-action" data-test-account-player data-league="${esc(row.league_id)}" data-user="${esc(row.user_id)}">Convert to player</button></td></tr>`).join('')}</tbody></table>`;
   }
 
   function wireTestAccounts(){
