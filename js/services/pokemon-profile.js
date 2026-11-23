@@ -46,10 +46,10 @@
         set('prepScoutTypeEffectiveness','<div class="muted">Exact-form type data unavailable.</div>');return;
       }
       const stats=data.stats||{};
-      set('prepScoutBaseStats',statNames.map(([key,label])=>{const val=Number(stats[key])||0;return `<div class="scout-base-stat"><div class="scout-base-stat-head"><span>${label}</span><strong>${val||'—'}</strong></div><div class="scout-stat-bar"><i style="width:${Math.min(100,val/180*100)}%"></i></div></div>`;}).join(''));
+      set('prepScoutBaseStats',statNames.map(([key,label])=>{const val=Number(stats[key])||0;return `<div class="scout-base-stat"><div class="scout-base-stat-head"><span>${label}</span><strong>${val||'N/A'}</strong></div><div class="scout-stat-bar"><i style="width:${Math.min(100,val/180*100)}%"></i></div></div>`;}).join(''));
       set('prepScoutBaseTotal',`<div class="scout-stat-total"><span>Total base stats</span><strong>${statNames.reduce((sum,[key])=>sum+(Number(stats[key])||0),0)}</strong></div>`);
       const calc=(base,hp,boost)=>{base=Number(base)||0;if(!base)return 0;return hp?(2*base+31+63+110):Math.floor(((2*base+31+63)+5)*(boost?1.1:1));};
-      const nature=boost=>statNames.map(([key,label])=>{const v=calc(stats[key],key==='hp',boost);return `<div class="scout-nature-row"><span>${label}</span><div class="bar"><i style="width:${Math.min(100,v/500*100)}%"></i></div><strong>${v||'—'}</strong></div>`;}).join('');
+      const nature=boost=>statNames.map(([key,label])=>{const v=calc(stats[key],key==='hp',boost);return `<div class="scout-nature-row"><span>${label}</span><div class="bar"><i style="width:${Math.min(100,v/500*100)}%"></i></div><strong>${v||'N/A'}</strong></div>`;}).join('');
       set('prepScoutNatureStats',`<div class="scout-nature-stats"><div class="scout-nature-card"><h4>Neutral nature · Lv. 100 · 31 IV / 252 EV</h4>${nature(false)}</div><div class="scout-nature-card"><h4>Boosting nature · Lv. 100 · 31 IV / 252 EV</h4>${nature(true)}</div></div>`);
       set('prepScoutAbilities',(data.abilities||[]).length?(data.abilities||[]).map(a=>`<span class="scout-ability">${esc(pretty(a))}</span>`).join(''):'<div class="muted">No abilities listed.</div>');
       const types=SBL.matchups?.normalizedTypes?.(data.types||[])||[];

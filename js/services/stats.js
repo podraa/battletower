@@ -1,4 +1,4 @@
-/* SBL STATS SERVICE — Phase 2
+/* SBL STATS SERVICE - Phase 2
  *
  * Canonical Pokémon statistics layer. Replay records are normalized once here
  * and every Stats view consumes the same Pokémon-stat object.
@@ -313,7 +313,7 @@
 
   function formatKD(kills,deaths) {
     const k=Number(kills)||0,d=Number(deaths)||0;
-    return d>0?(k/d).toFixed(2):(k===0?'0.00':'—');
+    return d>0?(k/d).toFixed(2):(k===0?'0.00':'N/A');
   }
   // Canonical per-franchise roster stats. This layer joins actual replay forms
   // to drafted base forms, so a rostered Greninja is not displayed as unused

@@ -1,4 +1,4 @@
-/* SBL Global Pokémon Catalogue — CP4.153
+/* SBL Global Pokémon Catalogue - CP4.153
  * Read-only client access to the versioned Showdown catalogue.
  * Existing synchronous name/sprite helpers remain available as compatibility
  * fallbacks; pages can migrate to this async data service incrementally.
@@ -151,7 +151,8 @@
     };
     const abilities=Array.isArray(row.abilities)?row.abilities:Object.values(row.abilities||{});
     return Object.freeze({
-      id:String(row.pokemon_id),name:String(row.name||''),stats,
+      id:String(row.pokemon_id),name:String(row.name||''),
+      baseSpecies:String(row.base_species||''),stats,
       types:(Array.isArray(row.types)?row.types:[]).map(String),
       abilities:abilities.map(String).filter(Boolean),
       weightkg:row.weight_kg==null?null:Number(row.weight_kg),
@@ -175,7 +176,7 @@
           for(let i=0;i<requested.length;i+=75){
             const chunk=requested.slice(i,i+75);
             const {data,error}=await client().from('pokemon_catalog_active')
-              .select('pokemon_id,name,types,base_stats,abilities,weight_kg,source_version')
+              .select('pokemon_id,name,base_species,types,base_stats,abilities,weight_kg,source_version')
               .in('pokemon_id',chunk);
             if(error)throw error;
             const byId=new Map((data||[]).map(row=>[String(row.pokemon_id),toBattleProfile(row)]));
@@ -236,16 +237,32 @@
     }
     const types=exact.types.map(type=>String(type).trim().replace(/^./,c=>c.toUpperCase()));
     if(types.length>2||types.some(type=>!type))throw new Error('Invalid catalogue type data for '+raw);
-    const base=raw.replace(/[- ]mega(?:[- ]?[xyz])?$/i,'').replace(/[- ]primal$/i,'');
-    if(!base||normalizeId(base)===id)throw new Error('Cannot find a calculator base species for '+raw);
+    // Prefer the catalogue's authoritative base_species when supplied. The
+    // same Mega may arrive as "Mega Raichu X", "Raichu-Mega-X" or
+    // "Raichu-MegaX"; stripping a suffix from the *display* name fails for
+    // every prefix-style form. Canonical keys are for identity, never for
+    // deriving alternate-form stats.
+    const canonical=SBL.domain?.pokemonKey?.(raw)||'';
+    const match=canonical.match(/^(.+)-(?:mega(?:-[xyz])?|primal)$/);
+    const bareKey=match?.[1]||'';
+    const fromKey=bareKey?bareKey.split('-').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join('-'):'';
+    const catalogueBase=String(exact.baseSpecies||'').trim();
+    const base=catalogueBase&&normalizeId(catalogueBase)!==id?catalogueBase:fromKey;
+    if(!base||normalizeId(base)===id)
+      throw new Error('Cannot resolve a calculator base species for '+raw+' ('+canonical+')');
     const customOptions={...options,name:raw,
       ability:options.ability||exact.abilities[0],
       overrides:{name:raw,baseStats,types,abilities:exact.abilities,weightkg:exact.weightkg}};
-    const result=new C.Pokemon(gen,base,customOptions);
+    let result;
+    try{result=new C.Pokemon(gen,base,customOptions);}
+    catch(err){throw new Error('Calculator could not construct base species '+base+' for '+raw+': '+(err?.message||err));}
+    // The calculator computes battle stats from its own species table. Prove
+    // that every override took effect before returning a custom Mega.
     if(!result?.species?.baseStats ||
-       Number(result.species.baseStats.def)!==baseStats.def ||
-       Number(result.species.baseStats.spd)!==baseStats.spd){
-      throw new Error('Calculator did not apply the exact-form stat overrides for '+raw);
+       Object.entries(baseStats).some(([stat,value])=>Number(result.species.baseStats[stat])!==value) ||
+       (Array.isArray(result.types) && (result.types.length!==types.length ||
+         result.types.some((type,i)=>normalizeId(type)!==normalizeId(types[i]))))){
+      throw new Error('Calculator did not apply the exact-form overrides for '+raw);
     }
     return result;
   }

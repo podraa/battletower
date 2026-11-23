@@ -81,7 +81,7 @@
 
   function formatEffectiveDate(trade, locale = undefined) {
     const d = effectiveAt(trade);
-    return d ? d.toLocaleDateString(locale, { weekday: 'short', month: 'short', day: 'numeric' }) : '—';
+    return d ? d.toLocaleDateString(locale, { weekday: 'short', month: 'short', day: 'numeric' }) : 'N/A';
   }
 
   function key(name) {
