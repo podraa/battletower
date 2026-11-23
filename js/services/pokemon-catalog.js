@@ -207,10 +207,22 @@
     const id=normalizeId(raw);
     const protectedForm=/(?:mega(?:x|y|z)?|primal)$/.test(id);
     let nativeError=null;
-    try{
-      const native=new C.Pokemon(gen,raw,options);
-      if(!protectedForm||normalizeId(native.name||raw)===id)return native;
-    }catch(err){nativeError=err;}
+    // User-facing rosters may say "Mega Greninja", but @smogon/calc expects
+    // Showdown's "Greninja-Mega". Try both without ever accepting base-form
+    // stats as a substitute for a permanent form.
+    const formKey=SBL.domain?.pokemonKey?.(raw)||'';
+    const nativeCandidates=[raw];
+    const pretty=s=>String(s||'').split('-').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join('-');
+    if(/-mega(?:-[xyz])?$/.test(formKey) || /-primal$/.test(formKey)){
+      const m=formKey.match(/^(.+)-(mega(?:-[xyz])?|primal)$/);
+      if(m)nativeCandidates.push(pretty(m[1])+'-'+pretty(m[2]));
+    }
+    for(const candidate of [...new Set(nativeCandidates)]){
+      try{
+        const native=new C.Pokemon(gen,candidate,options);
+        if(!protectedForm||normalizeId(native.name||candidate)===id)return native;
+      }catch(err){nativeError=err;}
+    }
     if(!protectedForm)throw nativeError||new Error('Unknown calculator species: '+raw);
     const exact=await getBattleProfile(raw);
     const rawStats=exact?.stats||{};
@@ -246,14 +258,18 @@
     if(!id)return null;
     return once('catalog:damaging:'+id,async()=>{
       const profile=await getBattleProfile(pokemonName);
-      if(!profile)return null; // Exact form is absent from this version.
-      let rows=await getLearnset(id), inheritedFrom=null;
+      const key=SBL.domain?.pokemonKey?.(pokemonName)||String(pokemonName||'').toLowerCase();
+      const standardMega=key.match(/^(.+)-(?:mega(?:-[xy])?|primal)$/);
+      // A missing exact Mega profile must still permit browsing its *base*
+      // damaging learnset. Damage itself remains unavailable until the exact
+      // battle profile is verified. Custom Z-Mega never inherits by guess.
+      if(!profile && !standardMega)return null;
+      let rows=profile?await getLearnset(id):[], inheritedFrom=null;
       if(!rows.length){
         // Mega and Primal forms inherit their species' moves. Explicitly
         // forbid Z-Mega base inheritance: an unversioned custom ruleset
         // could have different legality and we must not guess.
-        const key=SBL.domain?.pokemonKey?.(pokemonName)||String(pokemonName||'').toLowerCase();
-        const match=key.match(/^(.+)-(?:mega(?:-[xy])?|primal)$/);
+        const match=standardMega;
         if(match){
           inheritedFrom=normalizeId(match[1]);
           rows=await getLearnset(inheritedFrom);
@@ -264,7 +280,7 @@
       const moves=known.filter(m=>Number(m.base_power)>0 && ['Physical','Special'].includes(String(m.category||'').replace(/^./,x=>x.toUpperCase())))
         .map(m=>({name:String(m.name||m.move_id||''),type:String(m.type||''),category:String(m.category||'').toLowerCase(),power:Number(m.base_power),sources:rows.find(row=>row.move_id===m.move_id)?.sources||[]}))
         .filter(m=>m.name).sort((a,b)=>a.name.localeCompare(b.name));
-      return {moves,source:'global-catalogue',inheritedFrom};
+      return {moves,source:profile?'global-catalogue':'inherited-base-learnset',inheritedFrom};
     });
   }
 
