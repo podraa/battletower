@@ -17,7 +17,7 @@
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link href="css/sbl-site.css?v=cp4125-hover-only-nav" rel="stylesheet"/>
-<link href="css/sbl-components.css?v=cp4173" rel="stylesheet"/>
+<link href="css/sbl-components.css?v=cp4184" rel="stylesheet"/>
 <link href="css/sbl-sprites-layout.css?v=cp454-contained-sprites" rel="stylesheet"/>
 <link href="css/sbl-ui.css?v=cp463-gutters" rel="stylesheet"/>
 <link href="css/pages/admin.css?v=cp4152-dropdown-collapse-snipe-link" rel="stylesheet"/>
@@ -87,6 +87,7 @@
       <button class="admin-nav-item" data-tab="settings-data">Data Management</button>
       <button class="admin-nav-item" data-tab="admin-log">Admin Log</button>
       <button class="admin-nav-item" data-tab="settings-system">System Settings</button>
+      <button class="admin-nav-item" data-tab="exports">Exports &amp; Downloads</button>
       <a class="admin-nav-direct-link" id="adminSnipeReplayLink" href="tracker.html" aria-label="Open post-draft Snipe Replay">Snipe Replay <span>Post-draft replay</span></a>
     </div>
   </div>
@@ -105,8 +106,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
 <script src="js/pokemon-dex-ids.js" defer></script>
 <script src="js/services/domain.js?v=cp4167" defer></script>
-<script src="js/services/pokemon.js?v=cp476-verified-mega-filenames" defer></script>
-<script src="js/services/pokemon-catalog.js?v=cp4174" defer></script><script src="js/services/team-colors.js?v=cp463" defer></script><script src="js/services/pokemon-types.js?v=cp4170" defer></script>
+<script src="js/services/pokemon.js?v=cp4184-central-pokemon" defer></script>
+<script src="js/services/pokemon-catalog.js?v=cp4184-central-catalog" defer></script><script src="js/services/team-colors.js?v=cp463" defer></script><script src="js/services/pokemon-types.js?v=cp4170" defer></script>
 <script src="js/services/replays.js?v=cp4172" defer></script>
 <script src="js/services/active-parser.js?v=cp4164" defer></script>
 <script src="js/services/legacy-archive.js" defer></script>
@@ -125,11 +126,13 @@
 <script src="js/services/trades.js?v=cp4174" defer></script>
 <script src="js/performance.js?v=cp451" defer></script>
 
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js" defer></script>
+<script src="js/services/spreadsheet-export.js?v=cp4184" defer></script>
+<script src="js/services/league-exports.js?v=cp4184" defer></script>
 <script src="js/services/data.js" defer></script>
 <script src="js/services/finals.js" defer></script>
 <script src="js/services/fixture-workflow.js?v=cp4172" defer></script>
-<script src="js/pages/admin.js?v=cp4174" defer></script>
+<script src="js/pages/admin.js?v=cp4184-exports-pool-add" defer></script>
 <script src="js/services/replay-review.js?v=cp4148" defer></script>
 <script src="js/pages/replay-review.js?v=cp4174" defer></script>
 

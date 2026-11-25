@@ -19,10 +19,10 @@
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link href="css/sbl-site.css?v=cp4125-hover-only-nav" rel="stylesheet"/>
-<link href="css/sbl-components.css?v=cp4173" rel="stylesheet"/>
+<link href="css/sbl-components.css?v=cp4184" rel="stylesheet"/>
 <link href="css/sbl-sprites-layout.css?v=cp454-contained-sprites" rel="stylesheet"/>
 <link href="css/sbl-ui.css?v=cp463-gutters" rel="stylesheet"/>
-<link href="css/pages/free-agency.css?v=cp4114-type-highlights-performance" rel="stylesheet"/>
+<link href="css/pages/free-agency.css?v=cp4184-admin-exports" rel="stylesheet"/>
 <link href="css/sbl-standard-ui.css?v=cp4144-empty-states" rel="stylesheet">
   <link rel="stylesheet" href="css/sbl-mobile-scroll.css?v=cp493">
 <link rel="stylesheet" href="css/sbl-ux-sweep.css?v=cp4125-planner-controls">
@@ -30,9 +30,8 @@
 <body>
 <nav aria-label="Site navigation" class="page-nav" id="pageNav"></nav>
 <div id="app" style="display:none">
-<header>
-<h1>Free Agency</h1>
-<div class="sub">Draft board grouped by point tier. Search by name, filter by type or points. Taken = on a published roster.</div>
+<header class="fa-page-header">
+  <div><h1>Free Agency</h1><div class="sub">Draft board grouped by point tier. Search by name, filter by type or points. Taken = on a published roster.</div></div>
 </header>
 <div id="main"><div class="empty">Loading Free Agency…</div></div>
 </div>
@@ -40,8 +39,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
 <script src="js/pokemon-dex-ids.js" defer></script>
 <script src="js/services/domain.js?v=cp4167" defer></script>
-<script src="js/services/pokemon.js?v=cp476-verified-mega-filenames" defer></script>
-<script src="js/services/pokemon-catalog.js?v=cp4174" defer></script><script src="js/services/pokemon-types.js?v=cp4170" defer></script>
+<script src="js/services/pokemon.js?v=cp4184-central-pokemon" defer></script>
+<script src="js/services/pokemon-catalog.js?v=cp4184-central-catalog" defer></script><script src="js/services/pokemon-types.js?v=cp4170" defer></script>
 <script src="js/services/seasons.js?v=cp447-season-roster-authority" defer></script>
 <script src="js/services/league.js?v=cp4167" defer></script>
 <script src="js/services/profiles.js?v=cp422-active-members" defer></script>
@@ -56,10 +55,11 @@
 <script src="js/services/franchise-ownership.js?v=cp461-request-approval" defer></script>
 <script src="js/auth.js" defer></script>
 <script src="js/services/rosters.js?v=cp4171" defer></script>
+<script src="js/services/roster-mutations.js?v=cp4171" defer></script>
 
 
 
 <script src="js/app.js" defer></script>
 <script src="js/services/data.js" defer></script>
-<script src="js/pages/free-agency.js?v=cp4174" defer></script>
+<script src="js/pages/free-agency.js?v=cp4183" defer></script>
 </body></html>
