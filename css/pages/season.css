@@ -1115,3 +1115,8 @@ body.modal-page-locked {
 .fixture-match .fixture-team[style*="--team-color"]{background:linear-gradient(135deg,color-mix(in srgb,var(--team-color) 13%,transparent),color-mix(in srgb,var(--team-color) 6%,transparent));}
 .fixture-match.fixture-inter .fixture-team[style*="--team-color"]{background:linear-gradient(135deg,color-mix(in srgb,var(--team-color) 16%,transparent),color-mix(in srgb,var(--amber) 7%,transparent));}
 .fixture-match .fixture-team[style*="--team-color"].fixture-winner{background:linear-gradient(135deg,color-mix(in srgb,var(--team-color) 17%,transparent),color-mix(in srgb,var(--amber) 8%,transparent));}
+
+/* CP4.183 fixture spreadsheet export */
+.fixture-export-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.fixture-export-actions .fixture-week-select{min-width:130px}
+@media(max-width:600px){.fixture-export-actions{width:100%}.fixture-export-actions .fixture-week-select{flex:1 1 120px}.fixture-export-actions button{flex:1 1 auto}}

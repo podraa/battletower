@@ -1487,3 +1487,19 @@ body[data-admin="true"] .admin-nav-direct-link span {
   font-size: 10px;
   font-weight: 500;
 }
+
+/* CP4.184 admin exports and incremental post-draft Free Agency additions. */
+.admin-export-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr));gap:14px;margin-top:16px}
+.admin-export-card{display:flex;flex-direction:column;align-items:flex-start;gap:10px;min-width:0;padding:18px;border:1px solid var(--border);border-radius:14px;background:var(--panel)}
+.admin-export-card-kicker{color:var(--text-dim);font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+.admin-export-card h3{margin:0;font-size:17px}
+.admin-export-card p{margin:0;color:var(--text-dim);font-size:12px;line-height:1.55;flex:1}
+.admin-export-meta{color:var(--text-dim);font-size:11px}
+.admin-export-card button{margin-top:4px}
+.admin-export-card [data-admin-export-status]{min-height:1.2em;margin:0}
+.fa-admin-add-pool-panel{margin-bottom:16px}
+.fa-admin-add-pool-controls{display:grid;grid-template-columns:minmax(240px,1.5fr) minmax(130px,.6fr) auto;gap:12px;align-items:end;margin-top:14px}
+.fa-admin-add-pool-controls>div{display:grid;gap:6px;min-width:0}
+.fa-admin-add-pool-controls label{font-size:11px;color:var(--text-dim);font-weight:750}
+.fa-admin-add-pool-controls select,.fa-admin-add-pool-controls input{width:100%;min-width:0;min-height:42px;padding:9px 11px;border:1px solid var(--border);border-radius:9px;background:var(--panel-alt);color:var(--text);font:inherit}
+@media(max-width:760px){.fa-admin-add-pool-controls{grid-template-columns:minmax(0,1fr)}.fa-admin-add-pool-controls button{width:100%}}

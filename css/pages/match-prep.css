@@ -1547,3 +1547,11 @@ body{
 .prep-intel-suggestion span{font-size:9px;color:var(--text-dim)}
 .prep-new-planner-insights{grid-template-columns:repeat(2,minmax(0,1fr))}
 @media(max-width:700px){.prep-intel-score-pair{grid-template-columns:1fr}.prep-intel-match-row strong{flex-basis:100%}.prep-intel-matrix thead th:first-child,.prep-intel-matrix tbody th{min-width:100px}}
+
+/* CP4.181: type coverage reflects assessed damage, not an unsupported "safe" label. */
+.tc2-opp-card.tc2-opp-pressure{border-color:var(--red);box-shadow:0 0 0 1px rgba(227,154,182,.18) inset}
+.tc2-opp-card.tc2-opp-chip{border-color:var(--amber)}
+.tc2-opp-card.tc2-opp-unknown{border-style:dashed;opacity:.83}
+.tc2-opp-card.tc2-opp-limited{opacity:.88}
+.tc2-opp-explanation{font-size:11px;color:var(--text-dim);line-height:1.4;max-width:100%;overflow-wrap:anywhere}
+.tc2-source-hint{font-size:12px;line-height:1.6;color:var(--text-dim);margin:10px 0 14px}

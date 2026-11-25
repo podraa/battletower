@@ -771,3 +771,17 @@ body{padding-top:52px }
 #main #faResultsSummary>.stat b{font-size:17px;margin-top:1px}
 @media(max-width:1050px){#main>.toolbar{grid-template-columns:repeat(2,minmax(0,1fr))!important}#main>.toolbar>div:first-child{grid-column:1/-1!important}}
 @media(max-width:600px){#main>.toolbar{padding:11px!important;gap:9px!important}#main>.toolbar>div:first-child,#main>.toolbar>div:has(.avail-toggle){grid-column:1/-1!important}#main>.toolbar .points-range-fields input{width:50px!important}#main>.toolbar .free-agency-advanced>summary small{display:none}}
+
+/* CP4.183 exports and commissioner post-draft additions */
+.fa-page-header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+.fa-export-board-button{flex:0 0 auto;white-space:nowrap}
+.fa-postdraft-add-panel{margin:0 0 16px;padding:18px;border:1px solid var(--border);border-radius:14px;background:var(--panel);color:var(--text)}
+.fa-postdraft-add-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.fa-postdraft-add-head h2{margin:2px 0 6px;font-size:18px}
+.fa-postdraft-kicker{font-size:10px;font-weight:800;letter-spacing:.12em;color:var(--accent)}
+.fa-postdraft-count{flex:0 0 auto;padding:6px 10px;border:1px solid var(--border);border-radius:999px;color:var(--dim);font-size:11px;font-weight:700}
+.fa-postdraft-add-controls{display:grid;grid-template-columns:minmax(180px,1fr) minmax(220px,1.4fr) auto;align-items:end;gap:12px;margin-top:12px}
+.fa-postdraft-add-controls select{width:100%;min-width:0;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;font-size:13px}
+.fa-postdraft-add-controls button{white-space:nowrap}
+.fa-postdraft-add-panel #postDraftAddStatus{margin:12px 0 0}
+@media(max-width:760px){.fa-page-header{align-items:flex-start;flex-direction:column}.fa-export-board-button{width:100%}.fa-postdraft-add-controls{grid-template-columns:1fr}.fa-postdraft-add-controls button{width:100%}}
