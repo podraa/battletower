@@ -50,7 +50,11 @@ let STATE={profileUserId:'',replays:{},teamMap:{},settings:{caseInsensitiveNames
 // CP4.170: page-scoped, bounded read models. Repeated team switches never
 // rescan every replay and requery the same species; invalidated on reload.
 const TEAM_AGGREGATE_CACHE=new Map(), TEAM_MON_CACHE=new Map();
-function clearMatchPrepReadModels(){TEAM_AGGREGATE_CACHE.clear();TEAM_MON_CACHE.clear();}
+// Remain stable across rerenders; the shared catalogue has its own versioned
+// TTL. This page cache is cleared when the league/season is reloaded.
+const PREP_COVERAGE_MOVE_CACHE=new Map();
+STATE.franchiseNames=[];
+function clearMatchPrepReadModels(){TEAM_AGGREGATE_CACHE.clear();TEAM_MON_CACHE.clear();PREP_COVERAGE_MOVE_CACHE.clear();}
 const $=id=>document.getElementById(id);
 function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 function roleDisplayLabel(value){const spaced=String(value??'').trim().replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[._-]+/g,' ').replace(/\s+/g,' ').trim();if(/^(?:cleric|celric)$/i.test(spaced))return 'Recovery';if(/^speed control$/i.test(spaced)||/^sticky web(?: setter|s)?$/i.test(spaced))return 'Sticky Webs';if(/^hazard setter$/i.test(spaced))return '';if(/^stealth rock setter$/i.test(spaced))return 'Stealth Rock';if(/^spikes setter$/i.test(spaced))return 'Spikes';if(/^toxic spikes setter$/i.test(spaced))return 'Toxic Spikes';return spaced.replace(/\b\w/g,c=>c.toUpperCase());}
@@ -220,6 +224,53 @@ function speciesKey(name){
   return SBL.domain?.pokemonKey?.(canonicalSpecies(name))||norm(canonicalSpecies(name)).replace(/\s+/g,'-');
 }
 function hasCurrentRoster(team){return rosterForTeam(team).length>0}
+function cloneReplayEvidence(record){
+  return {...record,
+    replays:new Set(record?.replays instanceof Set?record.replays:[]),
+    weeks:new Set(record?.weeks instanceof Set?record.weeks:[]),
+    gameSets:Array.isArray(record?.gameSets)?record.gameSets.slice():[],
+    items:{...(record?.items||{})},confirmedItems:{...(record?.confirmedItems||{})},
+    inferredItems:{...(record?.inferredItems||{})},
+    itemEvidence:Object.fromEntries(Object.entries(record?.itemEvidence||{}).map(([key,values])=>[key,[...(values||[])]])),
+    moveDamage:JSON.parse(JSON.stringify(record?.moveDamage||{}))
+  };
+}
+function mergeReplayEvidence(target,source){
+  if(source?.replays instanceof Set)source.replays.forEach(id=>target.replays.add(id));
+  if(source?.weeks instanceof Set)source.weeks.forEach(week=>target.weeks.add(week));
+  const gameSetByReplay=new Map(target.gameSets.map((row,index)=>[row.replayId?String(row.replayId):`${row.week||''}|${JSON.stringify(row.moves||{})}`,index]));
+  for(const row of (source?.gameSets||[])){
+    const key=row.replayId?String(row.replayId):`${row.week||''}|${JSON.stringify(row.moves||{})}`;
+    const index=gameSetByReplay.get(key);
+    if(index===undefined){target.gameSets.push({...row,moves:{...(row.moves||{})},items:{...(row.items||{})}});gameSetByReplay.set(key,target.gameSets.length-1);continue;}
+    const current=target.gameSets[index];
+    current.moves=current.moves||{};for(const [move,count] of Object.entries(row.moves||{}))current.moves[move]=(Number(current.moves[move])||0)+(Number(count)||0);
+    current.items=current.items||{};for(const [item,count] of Object.entries(row.items||{}))current.items[item]=(Number(current.items[item])||0)+(Number(count)||0);
+    current.confirmedItems=current.confirmedItems||{};for(const [item,count] of Object.entries(row.confirmedItems||{}))current.confirmedItems[item]=Math.max(Number(current.confirmedItems[item]||0),Number(count)||0);
+    current.inferredItems=current.inferredItems||{};for(const [item,count] of Object.entries(row.inferredItems||{}))current.inferredItems[item]=Math.max(Number(current.inferredItems[item]||0),Number(count)||0);
+    current.sentOut=(Number(current.sentOut)||0)+(Number(row.sentOut)||0);
+    current.led=(Number(current.led)||0)+(Number(row.led)||0);
+  }
+  for(const [key,value] of Object.entries(source?.items||{}))target.items[key]=(Number(target.items[key])||0)+(Number(value)||0);
+  for(const [key,value] of Object.entries(source?.confirmedItems||{}))target.confirmedItems[key]=Math.max(Number(target.confirmedItems[key]||0),Number(value)||0);
+  for(const [key,value] of Object.entries(source?.inferredItems||{}))target.inferredItems[key]=Math.max(Number(target.inferredItems[key]||0),Number(value)||0);
+  for(const [key,values] of Object.entries(source?.itemEvidence||{})){
+    const dest=target.itemEvidence[key]||(target.itemEvidence[key]=[]);
+    for(const value of (values||[]))if(!dest.includes(value))dest.push(value);
+  }
+  for(const [move,entry] of Object.entries(source?.moveDamage||{})){
+    const dest=target.moveDamage[move]||(target.moveDamage[move]={hits:0,uses:0,damage:0,percentSum:0,percentHits:0,percentSamples:[],maxPercent:null,critHits:0,observedGames:0,targets:{}});
+    for(const field of ['hits','uses','damage','percentSum','percentHits','critHits','observedGames'])dest[field]=(Number(dest[field])||0)+(Number(entry?.[field])||0);
+    const remaining=Math.max(0,120-(dest.percentSamples||[]).length);
+    dest.percentSamples=[...(dest.percentSamples||[]),...(entry?.percentSamples||[]).slice(0,remaining)];
+    if(entry?.maxPercent!=null)dest.maxPercent=Math.max(dest.maxPercent??0,Number(entry.maxPercent)||0);
+    for(const [targetKey,record] of Object.entries(entry?.targets||{})){
+      const targetRow=dest.targets[targetKey]||(dest.targets[targetKey]={hits:0,percentSum:0,percentHits:0});
+      for(const field of ['hits','percentSum','percentHits'])targetRow[field]=(Number(targetRow[field])||0)+(Number(record?.[field])||0);
+    }
+  }
+  return target;
+}
 function aggregateUncached(team){
   const games=rowsForTeam(team);const mons={};let wins=0;const pairCounts={};
   const currentRoster=rosterForTeam(team);
@@ -247,13 +298,28 @@ function aggregateUncached(team){
       a.appearances+=Number(m.appearances||0)||1;a.kills+=Number(m.kills||0);a.deaths+=Number(m.deaths||0);
       a.leads=(Number(a.leads)||0)+Number(m.leads||0);
       a.sentOut=(Number(a.sentOut)||0)+Number(m.sentOut||0);
-      a.dealt+=Number(m.damageDealt||0);a.taken+=Number(m.damageTaken||0);a.replays.add(r.id);const replayWeek=String(r.week??r.round??r.roundNumber??'').trim();if(replayWeek && Number(m.appearances||0)>0)a.weeks.add(replayWeek);
+      a.dealt+=Number(m.damageDealt||0);a.taken+=Number(m.damageTaken||0);a.replays.add(r.id);
+      a.moveDamage ||= {};
+      for(const [move,entry] of Object.entries(m.moveDamage||{})){
+        const out=a.moveDamage[move] ||= {hits:0,uses:0,damage:0,percentSum:0,percentHits:0,percentSamples:[],maxPercent:null,critHits:0,observedGames:0,targets:{}};
+        out.observedGames++;
+        for(const field of ['hits','damage','percentSum','percentHits','critHits'])out[field]+=Number(entry[field]||0);
+        // The parser has move attempts, including misses, on the same replay's move map.
+        out.uses+=Number(m.moves?.[move]||0);
+        out.percentSamples.push(...(entry.percentSamples||[]).slice(0,Math.max(0,120-out.percentSamples.length)));
+        if(entry.maxPercent!=null)out.maxPercent=Math.max(out.maxPercent??0,Number(entry.maxPercent)||0);
+        for(const [target,record] of Object.entries(entry.targets||{})){
+          const dest=out.targets[target] ||= {hits:0,percentSum:0,percentHits:0};
+          for(const field of ['hits','percentSum','percentHits'])dest[field]+=Number(record[field]||0);
+        }
+      }
+      const replayWeek=String(r.week??r.round??r.roundNumber??'').trim();if(replayWeek && Number(m.appearances||0)>0)a.weeks.add(replayWeek);
       for(const [item,count] of Object.entries(m.items||{})) a.items[item]=(a.items[item]||0)+Number(count||0);
       for(const [item,count] of Object.entries(m.confirmedItems||{})) a.confirmedItems[item]=Math.max(Number(a.confirmedItems[item]||0),Number(count||0));
       for(const [item,count] of Object.entries(m.inferredItems||{})) a.inferredItems[item]=Math.max(Number(a.inferredItems[item]||0),Number(count||0));
       for(const [item,evidence] of Object.entries(m.itemEvidence||{})){a.itemEvidence[item] ||= [];for(const ev of (evidence||[]))if(!a.itemEvidence[item].includes(ev))a.itemEvidence[item].push(ev);}
       const moves={...(m.moves||{})};
-      a.gameSets.push({week: replayWeek, moves, items:{...(m.items||{})}, confirmedItems:{...(m.confirmedItems||{})}, inferredItems:{...(m.inferredItems||{})}, sentOut:Number(m.sentOut||0), led:Number(m.leads||0)>0 ? 1 : 0});
+      a.gameSets.push({replayId:String(r.id||r.replay_id||''),week: replayWeek, moves, items:{...(m.items||{})}, confirmedItems:{...(m.confirmedItems||{})}, inferredItems:{...(m.inferredItems||{})}, sentOut:Number(m.sentOut||0), led:Number(m.leads||0)>0 ? 1 : 0});
       seen.push(k)
     }
     seen.sort();for(let i=0;i<seen.length;i++)for(let j=i+1;j<seen.length;j++){const key=seen[i]+'|'+seen[j];pairCounts[key]=(pairCounts[key]||0)+1}
@@ -263,12 +329,25 @@ function aggregateUncached(team){
   // The model keeps permanent forms (Mega, Z-Mega, Primal) separate.
   const shared=SBL.stats?.franchiseRosterData({[team]:currentRoster},games,teamFor)?.[team];
   if(shared){
+    // Use the Stats module's form-aware identity for BOTH metrics and replay
+    // evidence. Otherwise a display alias can leave a nonzero bring count
+    // without the associated clicked moves, weeks and replay links.
     const allowed=new Set(shared.roster.map(x=>SBL.stats.identity(x.species)));
-    for(const k of Object.keys(mons))if(!allowed.has(SBL.stats.identity(mons[k].species)))delete mons[k];
+    const evidenceByIdentity=new Map();
+    for(const evidence of Object.values(mons)){
+      const identity=SBL.stats.identity(evidence.species);
+      if(!allowed.has(identity))continue;
+      const existing=evidenceByIdentity.get(identity);
+      if(existing)mergeReplayEvidence(existing,evidence);
+      else evidenceByIdentity.set(identity,cloneReplayEvidence(evidence));
+    }
+    for(const k of Object.keys(mons))delete mons[k];
     for(const row of shared.roster){
       const k=speciesKey(row.species);
-      if(!mons[k])mons[k]={species:row.species,appearances:0,kills:0,deaths:0,dealt:0,taken:0,replays:new Set(),gameSets:[],weeks:new Set(),items:{},confirmedItems:{},inferredItems:{},itemEvidence:{}};
-      Object.assign(mons[k],{species:row.species,appearances:row.appearances,kills:row.kills,deaths:row.deaths,dealt:row.dealt,taken:row.taken});
+      const retained=evidenceByIdentity.get(SBL.stats.identity(row.species));
+      mons[k]=retained ? {...retained,species:row.species} :
+        {species:row.species,appearances:0,kills:0,deaths:0,dealt:0,taken:0,replays:new Set(),gameSets:[],weeks:new Set(),items:{},confirmedItems:{},inferredItems:{},itemEvidence:{}};
+      Object.assign(mons[k],{appearances:row.appearances,kills:row.kills,deaths:row.deaths,dealt:row.dealt,taken:row.taken});
     }
     Object.keys(pairCounts).forEach(k=>{const [x,y]=k.split('|');if(!mons[x]||!mons[y])delete pairCounts[k];});
   } else if(hasCurrentRoster(team)){
@@ -599,7 +678,9 @@ function scarfSpeedFromMax(max){ return Math.floor(max*1.5); }
 function teamNames(){
   const replayTeams=allRows().flatMap(r=>[teamFor(r.players?.p1),teamFor(r.players?.p2)]).filter(Boolean);
   const rosterTeams=Object.keys(STATE.settings?.rosters||{});
-  return [...new Map([...replayTeams,...rosterTeams].map(t=>[teamKey(t),t])).values()].sort((a,b)=>a.localeCompare(b));
+  // Franchise definitions remain authoritative even on a brand-new season
+  // that has no published rosters or indexed replays yet.
+  return [...new Map([...replayTeams,...rosterTeams,...STATE.franchiseNames].filter(Boolean).map(t=>[teamKey(t),t])).values()].sort((a,b)=>a.localeCompare(b));
 }
 
 function statSignatureForMon(m){
@@ -706,18 +787,32 @@ function pokemonDexCandidates(species){
   return out;
 }
 const POKEMON_DATA_PENDING=new Map();
-let CATALOG_READ_FAILED=false;
+const MATCHUP_BUNDLE_CACHE=new Map();
 function isProtectedBattleForm(species){
   const slug=String(window.SBL?.domain?.pokemonKey?.(species)||spriteId(species)||'').toLowerCase();
   return /(?:-mega(?:-[xyz])?|-primal|-hisui|-galar|-alola|-therian|-origin|-crowned|-terastal|-stellar|-battle-bond|-blaze|-combat|-aqua)$/.test(slug)
     || /^(?:mega-|primal-)/.test(slug);
 }
+async function exactCatalogueBundle(species){
+  const key=speciesKey(species);
+  if(MATCHUP_BUNDLE_CACHE.has(key))return MATCHUP_BUNDLE_CACHE.get(key);
+  if(!window.SBL.pokemonCatalog?.getMatchupBundle)return null;
+  try{
+    const bundle=await window.SBL.pokemonCatalog.getMatchupBundle(species);
+    MATCHUP_BUNDLE_CACHE.set(key,bundle||null);
+    return bundle||null;
+  }catch(error){
+    console.warn('Central matchup catalogue unavailable for',species,error);
+    return null;
+  }
+}
 async function exactCatalogueProfile(species){
-  if(CATALOG_READ_FAILED || !window.SBL.pokemonCatalog?.getBattleProfile)return null;
+  const bundle=await exactCatalogueBundle(species);
+  if(bundle?.profile)return bundle.profile;
+  if(!window.SBL.pokemonCatalog?.getBattleProfile)return null;
   try{return await window.SBL.pokemonCatalog.getBattleProfile(species);}
   catch(error){
-    CATALOG_READ_FAILED=true;
-    console.warn('Global Pokémon catalogue unavailable; using verified exact-form fallbacks.',error);
+    console.warn('Exact-form catalogue profile unavailable for',species,error);
     return null;
   }
 }
@@ -737,8 +832,11 @@ function apiProfileCandidates(species){
   return isProtectedBattleForm(species)?list.filter(x=>String(x).replace(/[^a-z0-9]/g,'')===window.SBL.domain.pokemonCatalogId(species)):list;
 }
 async function loadPokemonData(species){
-  const canonical=await exactCatalogueProfile(species);
-  if(canonical)return {stats:canonical.stats,types:canonical.types,abilities:canonical.abilities,source:canonical.source,version:canonical.version};
+  const bundle=await exactCatalogueBundle(species);
+  const canonical=bundle?.profile || await exactCatalogueProfile(species);
+  if(canonical)return {stats:canonical.stats,types:canonical.types,abilities:canonical.abilities,
+    source:canonical.source,version:canonical.version,identity:bundle?.identity||SBL.domain?.pokemonKey?.(species)||species,
+    profileSource:bundle?.profileSource||canonical.source,moveSource:bundle?.moveSource||'unavailable',moveVersion:bundle?.moveVersion||''};
   const dex=await loadShowdownDex();
   if(dex){
     for(const slug of showdownProfileCandidates(species)){
@@ -924,7 +1022,7 @@ function notesWeekLabel(week){
   return /^\d+$/.test(raw)?`Week ${raw}`:raw;
 }
 
-async function renderMatchPrep(yourTeam, selectedOpponent){
+async function renderMatchPrep(yourTeam, selectedOpponent, intelBridge){
   const names=teamNames();
   const opponent=selectedOpponent && !sameTeam(selectedOpponent,yourTeam)
     ? selectedOpponent
@@ -934,11 +1032,11 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
   }
   // One catalogue request for both rosters, before any per-Pokémon helpers run.
   // An unpopulated/offline catalogue still permits existing verified sources.
-  if(!CATALOG_READ_FAILED && window.SBL.pokemonCatalog?.preloadBattleProfiles){
+  if(window.SBL.pokemonCatalog?.preloadBattleProfiles){
     try{
       const species=[...Object.values(aggregate(yourTeam).mons),...Object.values(aggregate(opponent).mons)].map(m=>m.species);
       await window.SBL.pokemonCatalog.preloadBattleProfiles(species);
-    }catch(error){CATALOG_READ_FAILED=true;console.warn('Catalogue preload unavailable; using exact-form sources.',error);}
+    }catch(error){console.warn('Central catalogue preload unavailable; exact-form fallbacks remain guarded.',error);}
   }
   const [your,opp]=await Promise.all([franchiseMons(yourTeam),franchiseMons(opponent)]);
   const all=[...your,...opp];
@@ -963,17 +1061,11 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
   const rolesFor=m=>inferRoles(m);
   const opponentAggregate=aggregate(opponent);
   const usageFor=m=>{
-    const exact=opponentAggregate.mons[norm(m.species)]||opponentAggregate.mons[m.species];
-    if(exact&&exact.appearances)return exact;
-    // Drafted base forms can appear as a Mega/Primal; prefer the actual
-    // battle form, never a roster placeholder with zero appearances.
-    const base=SBL.stats?.identity(m.species);
-    const forms=Object.values(opponentAggregate.mons).filter(x=>
-      (SBL.stats?.identity(x.species)||'')!==base &&
-      (SBL.stats?.identity(x.species)||'').startsWith(base+'-mega') ||
-      (SBL.stats?.identity(x.species)||'')===base+'-primal'
-    ).sort((a,b)=>Number(b.appearances||0)-Number(a.appearances||0));
-    return forms[0]||exact||{appearances:0,kills:0,deaths:0,dealt:0,taken:0,replays:new Set(),gameSets:[],weeks:new Set(),items:{},confirmedItems:{},inferredItems:{},itemEvidence:{}};
+    // The displayed Pokémon has already been resolved by the central
+    // form-aware franchiseRosterData projection. Do not try a different Mega
+    // or Primal form when a particular species has zero appearances.
+    const exact=opponentAggregate.mons[speciesKey(m.species)];
+    return exact||m||{appearances:0,kills:0,deaths:0,dealt:0,taken:0,replays:new Set(),gameSets:[],weeks:new Set(),items:{},confirmedItems:{},inferredItems:{},itemEvidence:{}};
   };
 
   // -------- Opponent Team Overview --------
@@ -1051,7 +1143,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
     const totalItemUses=Object.values(seasonItems).reduce((a,b)=>a+Number(b||0),0);
     const pct=(count,total)=>total?`${Math.round((Number(count)||0)/total*100)}%`:'0%';
     const usageRows=(entries,label,totalOverride=null)=>entries.length?entries.map(([name,count])=>{const total=totalOverride!=null?Number(totalOverride)||0:(label==='moves'?totalMoveUses:totalItemUses);const evidence=label==='items'&&seasonItemEvidence[name]==='inferred'?'<small class="prep-analysis-inferred">Inferred</small>':'';return `<div class="prep-analysis-row"><span>${esc(name)}${evidence}</span><div class="prep-analysis-row-value"><strong>${Number(count)||0}</strong><small>${pct(count,total)}</small></div></div>`;}).join(''):`<div class="small">No recorded ${label.toLowerCase()}.</div>`;
-    const weekSections=broughtInWeeks.length?broughtInWeeks.map((w,i)=>{const st=weekStats.get(String(w))||{moves:{},items:{},led:0,sentOut:0};const ms=Object.entries(st.moves).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));const its=Object.entries(st.items).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));const led=Number(st.led||0)>0&&Number(st.sentOut||0)>0;const sent=Number(st.sentOut||0)>0;const status=led?'Led · Sent out':sent?'Sent out':'Brought only';const moveUses=ms.reduce((a,x)=>a+Number(x[1]||0),0);const itemUses=its.reduce((a,x)=>a+Number(x[1]||0),0);return `<article class="prep-analysis-week" data-week-pane="${esc(w)}" ${i?'hidden':''}><div class="prep-analysis-week-head"><div><strong>${esc(weekLabel(w))}</strong><small>${status}</small></div><span class="prep-week-status-dot ${led?'is-led':sent?'is-sent':'is-brought'}"></span></div><div class="prep-analysis-week-stats"><span><b>${moveUses}</b> move uses</span><span><b>${itemUses}</b> item records</span></div><div class="prep-analysis-columns"><div><div class="prep-analysis-subhead">Moves clicked</div>${usageRows(ms,'moves',moveUses)}</div><div><div class="prep-analysis-subhead">Items held</div>${usageRows(its,'items',itemUses)}</div></div></article>`;}).join(''):'<div class="small">No recorded battle weeks for this Pokémon.</div>';
+    const weekSections=broughtInWeeks.length?broughtInWeeks.map((w,i)=>{const st=weekStats.get(String(w))||{moves:{},items:{},led:0,sentOut:0};const ms=Object.entries(st.moves).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));const its=Object.entries(st.items).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));const led=Number(st.led||0)>0&&Number(st.sentOut||0)>0;const sent=Number(st.sentOut||0)>0;const status=led?'Led · Sent out':sent?'Sent out':'Brought only';const moveUses=ms.reduce((a,x)=>a+Number(x[1]||0),0);const itemUses=its.reduce((a,x)=>a+Number(x[1]||0),0);return `<article class="prep-analysis-week" data-week-pane="${esc(w)}" ${i?'hidden':''}><div class="prep-analysis-week-head"><div><strong>${esc(weekLabel(w))}</strong><small>${status}</small></div><span class="prep-week-status-dot ${led?'is-led':sent?'is-sent':'is-brought'}"></span></div><div class="prep-analysis-week-stats"><span><b>${moveUses}</b> move uses</span><span><b>${itemUses}</b> item records</span></div><div class="prep-analysis-columns"><div><div class="prep-analysis-subhead">Moves clicked</div>${usageRows(ms,'moves',moveUses)}</div><div><div class="prep-analysis-subhead">Items held</div>${usageRows(its,'items',itemUses)}</div></div></article>`;}).join(''):'<div class="small">No round-by-round move evidence available. A confirmed bring can exist without an observed move.</div>';
     const weekButtons=broughtInWeeks.map((w,i)=>`<button type="button" class="prep-analysis-week-btn${i?'':' active'}" data-prep-week-btn="${esc(w)}" aria-pressed="${i?'false':'true'}">${esc(weekLabel(w))}</button>`).join('');
     const matchupItems=goodInto.length?goodInto.map(x=>`<span class="prep-chip">${esc(displaySpecies(x))}</span>`).join(''):'<span class="small">No clear type advantage</span>';
     const analysisHtml=`<div class="matchprep-analysis-overview">
@@ -1059,7 +1151,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
         <div class="prep-analysis-section-head"><div><span class="prep-analysis-eyebrow">Season overview</span><h3>How ${esc(displaySpecies(m))} has been used</h3><p>All recorded battles for this season. <strong>Brought</strong> means included in the submitted team; <strong>Sent Out</strong> means it actually entered battle.</p></div></div>
         <div class="prep-analysis-summary-grid"><div class="prep-analysis-stat"><span>Brought</span><strong>${broughtTotal}</strong><small>submitted teams</small></div><div class="prep-analysis-stat"><span>Led</span><strong>${ledTotal}</strong><small>battle starts</small></div><div class="prep-analysis-stat"><span>Sent out</span><strong>${sentOutTotal}</strong><small>field appearances</small></div></div>
         <div class="prep-analysis-overview-grid">
-          <section class="prep-analysis-table-card"><div class="prep-analysis-card-head"><div><h4>Moves brought</h4><small>Number of battle sets where each move was observed. Replay logs do not expose unclicked moves.</small></div><strong>${Object.values(seasonMovesBrought).reduce((a,b)=>a+Number(b||0),0)}</strong></div><div class="prep-analysis-list">${usageRows(sortedMoveBroughtEntries,'moves',broughtInWeeks.length||1)}</div></section>
+          <section class="prep-analysis-table-card"><div class="prep-analysis-card-head"><div><h4>Moves actually observed</h4><small>Each count is a replay where the move was used. Unclicked moves cannot be inferred from a battle replay.</small></div><strong>${Object.values(seasonMovesBrought).reduce((a,b)=>a+Number(b||0),0)}</strong></div><div class="prep-analysis-list">${usageRows(sortedMoveBroughtEntries,'moves',broughtInWeeks.length||1)}</div></section>
           <section class="prep-analysis-table-card"><div class="prep-analysis-card-head"><div><h4>Items held</h4><small>Items actually recorded on this Pokémon</small></div><strong>${totalItemUses===1&&Object.keys(usage.items||{}).length===0?0:totalItemUses}</strong></div><div class="prep-analysis-list">${usageRows(sortedItemEntries,'items')}</div></section>
         </div>
         <div class="prep-analysis-extra-grid"><div class="prep-analysis-mini-card"><span>Strong into ${opponent}</span><div class="prep-chip-row">${matchupItems}</div></div><div class="prep-analysis-mini-card"><span>Likely roles</span><div class="prep-chip-row">${roleDisplayList(roles).length?roleDisplayList(roles).map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">Unclear</span>'}</div></div></div>
@@ -1068,7 +1160,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
     </div>`;
     const threat=goodInto.length?`Strong into ${goodInto.length} Pokémon`:'No clear type advantage';
     const tc=goodInto.length?'matchup-bad':'matchup-neutral';
-    return `<article class="prep-opponent-card prep-opponent-popout" data-prep-popout="${esc(m.species)}" data-prep-team="opponent"><button type="button" class="prep-popout-trigger legacy-mon-card"><span class="mon-head">${sprite(m.species,'prep-sprite')}<span><span class="mon-name prep-legacy-name"><strong>${esc(displaySpecies(m))}</strong><span class="prep-inline-types">${effTypes.map(t=>typePill(t)).join('')}</span></span><span class="muted">${usage.replays?.size||0} replay${(usage.replays?.size||0)===1?'':'s'} · ${usage.appearances||0} appearances</span></span></span><span class="chips prep-legacy-chips"><span class="chip"><b>${usage.kills||0}</b> K</span><span class="chip"><b>${usage.deaths||0}</b> D</span><span class="chip"><b>${Number(usage.dealt||0).toFixed(0)}</b> dmg</span></span><span class="small prep-legacy-threat">${esc(threat)}</span></button><div class="prep-popout-data" hidden data-usage="${esc(usageHtml)}" data-scouting="${esc(scoutingHtml)}" data-analysis="${esc(analysisHtml)}" data-appearances="${usage.appearances||0}" data-kills="${usage.kills||0}" data-deaths="${usage.deaths||0}" data-dealt="${Number(usage.dealt||0).toFixed(0)}" data-taken="${Number(usage.taken||0).toFixed(0)}"></div></article>`;
+    return `<article class="prep-opponent-card prep-opponent-popout" data-prep-popout="${esc(m.species)}" data-prep-team="opponent"><button type="button" class="prep-popout-trigger legacy-mon-card"><span class="mon-head">${sprite(m.species,'prep-sprite')}<span><span class="mon-name prep-legacy-name"><strong>${esc(displaySpecies(m))}</strong><span class="prep-inline-types">${effTypes.map(t=>typePill(t)).join('')}</span></span><span class="muted">Brought ${usage.appearances||0} time${Number(usage.appearances||0)===1?'':'s'} · ${usage.replays?.size||0} replay link${(usage.replays?.size||0)===1?'':'s'}</span></span></span><span class="chips prep-legacy-chips"><span class="chip"><b>${usage.kills||0}</b> K</span><span class="chip"><b>${usage.deaths||0}</b> D</span><span class="chip"><b>${Number(usage.dealt||0).toFixed(0)}</b> dmg</span></span><span class="small prep-legacy-threat">${esc(threat)}</span></button><div class="prep-popout-data" hidden data-usage="${esc(usageHtml)}" data-scouting="${esc(scoutingHtml)}" data-analysis="${esc(analysisHtml)}" data-appearances="${usage.appearances||0}" data-kills="${usage.kills||0}" data-deaths="${usage.deaths||0}" data-dealt="${Number(usage.dealt||0).toFixed(0)}" data-taken="${Number(usage.taken||0).toFixed(0)}"></div></article>`;
   }))).join('');
 
   // -------- Your Team Overview --------
@@ -1144,7 +1236,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
     const totalItemUses=Object.values(seasonItems).reduce((a,b)=>a+Number(b||0),0);
     const pct=(count,total)=>total?`${Math.round((Number(count)||0)/total*100)}%`:'0%';
     const usageRows=(entries,label,totalOverride=null)=>entries.length?entries.map(([name,count])=>{const total=totalOverride!=null?Number(totalOverride)||0:(label==='moves'?totalMoveUses:totalItemUses);const evidence=label==='items'&&seasonItemEvidence[name]==='inferred'?'<small class="prep-analysis-inferred">Inferred</small>':'';return `<div class="prep-analysis-row"><span>${esc(name)}${evidence}</span><div class="prep-analysis-row-value"><strong>${Number(count)||0}</strong><small>${pct(count,total)}</small></div></div>`;}).join(''):`<div class="small">No recorded ${label.toLowerCase()}.</div>`;
-    const weekSections=broughtInWeeks.length?broughtInWeeks.map((w,i)=>{const st=weekStats.get(String(w))||{moves:{},items:{},led:0,sentOut:0};const ms=Object.entries(st.moves).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));const its=Object.entries(st.items).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));const led=Number(st.led||0)>0&&Number(st.sentOut||0)>0;const sent=Number(st.sentOut||0)>0;const status=led?'Led · Sent out':sent?'Sent out':'Brought only';const moveUses=ms.reduce((a,x)=>a+Number(x[1]||0),0);const itemUses=its.reduce((a,x)=>a+Number(x[1]||0),0);return `<article class="prep-analysis-week" data-week-pane="${esc(w)}" ${i?'hidden':''}><div class="prep-analysis-week-head"><div><strong>${esc(weekLabel(w))}</strong><small>${status}</small></div><span class="prep-week-status-dot ${led?'is-led':sent?'is-sent':'is-brought'}"></span></div><div class="prep-analysis-week-stats"><span><b>${moveUses}</b> move uses</span><span><b>${itemUses}</b> item records</span></div><div class="prep-analysis-columns"><div><div class="prep-analysis-subhead">Moves clicked</div>${usageRows(ms,'moves',moveUses)}</div><div><div class="prep-analysis-subhead">Items held</div>${usageRows(its,'items',itemUses)}</div></div></article>`;}).join(''):'<div class="small">No recorded battle weeks for this Pokémon.</div>';
+    const weekSections=broughtInWeeks.length?broughtInWeeks.map((w,i)=>{const st=weekStats.get(String(w))||{moves:{},items:{},led:0,sentOut:0};const ms=Object.entries(st.moves).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));const its=Object.entries(st.items).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));const led=Number(st.led||0)>0&&Number(st.sentOut||0)>0;const sent=Number(st.sentOut||0)>0;const status=led?'Led · Sent out':sent?'Sent out':'Brought only';const moveUses=ms.reduce((a,x)=>a+Number(x[1]||0),0);const itemUses=its.reduce((a,x)=>a+Number(x[1]||0),0);return `<article class="prep-analysis-week" data-week-pane="${esc(w)}" ${i?'hidden':''}><div class="prep-analysis-week-head"><div><strong>${esc(weekLabel(w))}</strong><small>${status}</small></div><span class="prep-week-status-dot ${led?'is-led':sent?'is-sent':'is-brought'}"></span></div><div class="prep-analysis-week-stats"><span><b>${moveUses}</b> move uses</span><span><b>${itemUses}</b> item records</span></div><div class="prep-analysis-columns"><div><div class="prep-analysis-subhead">Moves clicked</div>${usageRows(ms,'moves',moveUses)}</div><div><div class="prep-analysis-subhead">Items held</div>${usageRows(its,'items',itemUses)}</div></div></article>`;}).join(''):'<div class="small">No round-by-round move evidence available. A confirmed bring can exist without an observed move.</div>';
     const weekButtons=broughtInWeeks.map((w,i)=>`<button type="button" class="prep-analysis-week-btn${i?'':' active'}" data-prep-week-btn="${esc(w)}" aria-pressed="${i?'false':'true'}">${esc(weekLabel(w))}</button>`).join('');
     const matchupItems=strongInto.length?strongInto.map(x=>`<span class="prep-chip">${esc(displaySpecies(x))}</span>`).join(''):'<span class="small">No clear type advantage</span>';
     const analysisHtml=`<div class="matchprep-analysis-overview">
@@ -1152,7 +1244,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
         <div class="prep-analysis-section-head"><div><span class="prep-analysis-eyebrow">Season overview</span><h3>How ${esc(displaySpecies(m))} has been used</h3><p>All recorded battles for this season. <strong>Brought</strong> means included in the submitted team; <strong>Sent Out</strong> means it actually entered battle.</p></div></div>
         <div class="prep-analysis-summary-grid"><div class="prep-analysis-stat"><span>Brought</span><strong>${broughtTotal}</strong><small>submitted teams</small></div><div class="prep-analysis-stat"><span>Led</span><strong>${ledTotal}</strong><small>battle starts</small></div><div class="prep-analysis-stat"><span>Sent out</span><strong>${sentOutTotal}</strong><small>field appearances</small></div></div>
         <div class="prep-analysis-overview-grid">
-          <section class="prep-analysis-table-card"><div class="prep-analysis-card-head"><div><h4>Moves brought</h4><small>Number of battle sets where each move was observed. Replay logs do not expose unclicked moves.</small></div><strong>${Object.values(seasonMovesBrought).reduce((a,b)=>a+Number(b||0),0)}</strong></div><div class="prep-analysis-list">${usageRows(sortedMoveBroughtEntries,'moves',broughtInWeeks.length||1)}</div></section>
+          <section class="prep-analysis-table-card"><div class="prep-analysis-card-head"><div><h4>Moves actually observed</h4><small>Each count is a replay where the move was used. Unclicked moves cannot be inferred from a battle replay.</small></div><strong>${Object.values(seasonMovesBrought).reduce((a,b)=>a+Number(b||0),0)}</strong></div><div class="prep-analysis-list">${usageRows(sortedMoveBroughtEntries,'moves',broughtInWeeks.length||1)}</div></section>
           <section class="prep-analysis-table-card"><div class="prep-analysis-card-head"><div><h4>Items held</h4><small>Items actually recorded on this Pokémon</small></div><strong>${totalItemUses===1&&Object.keys(usage.items||{}).length===0?0:totalItemUses}</strong></div><div class="prep-analysis-list">${usageRows(sortedItemEntries,'items')}</div></section>
         </div>
         <div class="prep-analysis-extra-grid"><div class="prep-analysis-mini-card"><span>Strong into ${opponent}</span><div class="prep-chip-row">${matchupItems}</div></div><div class="prep-analysis-mini-card"><span>Likely roles</span><div class="prep-chip-row">${roleDisplayList(roles).length?roleDisplayList(roles).map(x=>`<span class="prep-chip">${esc(x)}</span>`).join(''):'<span class="small">Unclear</span>'}</div></div></div>
@@ -1161,7 +1253,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
     </div>`;
     const threat=strongInto.length?`Strong into ${strongInto.length} Pokémon`:'No clear type advantage';
     const tc=strongInto.length?'matchup-good':'matchup-neutral';
-    return `<article class="prep-opponent-card prep-opponent-popout" data-prep-popout="${esc(m.species)}" data-prep-team="your"><button type="button" class="prep-popout-trigger legacy-mon-card"><span class="mon-head">${sprite(m.species,'prep-sprite')}<span><span class="mon-name prep-legacy-name"><strong>${esc(displaySpecies(m))}</strong><span class="prep-inline-types">${effTypes.map(t=>typePill(t)).join('')}</span></span><span class="muted">${usage.replays?.size||0} replay${(usage.replays?.size||0)===1?'':'s'} · ${usage.appearances||0} appearances</span></span></span><span class="chips prep-legacy-chips"><span class="chip"><b>${usage.kills||0}</b> K</span><span class="chip"><b>${usage.deaths||0}</b> D</span><span class="chip"><b>${Number(usage.dealt||0).toFixed(0)}</b> dmg</span></span><span class="small prep-legacy-threat">${esc(threat)}</span></button><div class="prep-popout-data" hidden data-usage="${esc(usageHtml)}" data-scouting="${esc(scoutingHtml)}" data-analysis="${esc(analysisHtml)}" data-appearances="${usage.appearances||0}" data-kills="${usage.kills||0}" data-deaths="${usage.deaths||0}" data-dealt="${Number(usage.dealt||0).toFixed(0)}" data-taken="${Number(usage.taken||0).toFixed(0)}"></div></article>`;
+    return `<article class="prep-opponent-card prep-opponent-popout" data-prep-popout="${esc(m.species)}" data-prep-team="your"><button type="button" class="prep-popout-trigger legacy-mon-card"><span class="mon-head">${sprite(m.species,'prep-sprite')}<span><span class="mon-name prep-legacy-name"><strong>${esc(displaySpecies(m))}</strong><span class="prep-inline-types">${effTypes.map(t=>typePill(t)).join('')}</span></span><span class="muted">Brought ${usage.appearances||0} time${Number(usage.appearances||0)===1?'':'s'} · ${usage.replays?.size||0} replay link${(usage.replays?.size||0)===1?'':'s'}</span></span></span><span class="chips prep-legacy-chips"><span class="chip"><b>${usage.kills||0}</b> K</span><span class="chip"><b>${usage.deaths||0}</b> D</span><span class="chip"><b>${Number(usage.dealt||0).toFixed(0)}</b> dmg</span></span><span class="small prep-legacy-threat">${esc(threat)}</span></button><div class="prep-popout-data" hidden data-usage="${esc(usageHtml)}" data-scouting="${esc(scoutingHtml)}" data-analysis="${esc(analysisHtml)}" data-appearances="${usage.appearances||0}" data-kills="${usage.kills||0}" data-deaths="${usage.deaths||0}" data-dealt="${Number(usage.dealt||0).toFixed(0)}" data-taken="${Number(usage.taken||0).toFixed(0)}"></div></article>`;
   }))).join('');
 
   // -------- Defensive / Offensive Type Chart & Team Coverage Chart --------
@@ -1214,9 +1306,9 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
   // -------- Interactive Type Coverage --------
   // Select one of YOUR Pokémon and show the actual damaging move types it can
   // use physically and specially, plus the opposing Pokémon each type hits for
-  // super-effective damage. This is based on the Pokémon's current legal
-  // damaging learnset rather than assuming its typing equals its movepool.
-  const coverageMoveCache=new Map();
+  // super-effective damage. This uses central catalogue move candidates rather than assuming a Pokémon's
+  // typing equals its movepool. Candidates are not format-legality proof.
+  const coverageMoveCache=PREP_COVERAGE_MOVE_CACHE;
   const coverageDexSlug=(species)=>{
     const original=String(species||'').trim().toLowerCase()
       .replace(/[’']/g,'').replace(/[♀]/g,'-f').replace(/[♂]/g,'-m')
@@ -1232,23 +1324,32 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
     return out;
   };
   const loadCoverageMoves=async(species)=>{
-    const key=norm(species);
+    const key=speciesKey(species);
     if(coverageMoveCache.has(key))return coverageMoveCache.get(key);
     // Shared, versioned move catalogue is the preferred source for both
     // coverage and Switch-In. Avoid hundreds of individual PokeAPI requests.
-    if(window.SBL.pokemonCatalog?.getDamagingLearnset && !CATALOG_READ_FAILED){
+    if(window.SBL.pokemonCatalog?.getMatchupBundle){
+      try{
+        const bundle=await exactCatalogueBundle(species);
+        if(bundle?.moves?.length){
+          const moves=bundle.moves.map(m=>({...m,type:String(m.type||'').replace(/\b\w/g,c=>c.toUpperCase()),
+            evidence:'catalogued',rulesetVerified:false,source:m.source||bundle.moveSource||'global-catalogue'}));
+          coverageMoveCache.set(key,moves);return moves;
+        }
+      }catch(error){console.warn('Central move catalogue unavailable; trying a labelled fallback.',error);}
+    }else if(window.SBL.pokemonCatalog?.getDamagingLearnset){
       try{
         const result=await window.SBL.pokemonCatalog.getDamagingLearnset(species);
         if(result?.moves?.length){
-          const moves=result.moves.map(m=>({...m,type:String(m.type||'').replace(/\b\w/g,c=>c.toUpperCase())}));
+          const moves=result.moves.map(m=>({...m,type:String(m.type||'').replace(/\b\w/g,c=>c.toUpperCase()),evidence:'catalogued',rulesetVerified:false}));
           coverageMoveCache.set(key,moves);return moves;
         }
-      }catch(error){CATALOG_READ_FAILED=true;console.warn('Move catalogue unavailable; using legacy data.',error);}
+      }catch(error){console.warn('Move catalogue unavailable; trying a labelled fallback.',error);}
     }
     let raw=[];
     const megaId=exactMegaApiId(species);
     // Unversioned custom Z-Mega rulesets are not interchangeable with the
-    // base species. Never show a guessed legal movepool when data is missing.
+    // base species. Never show a guessed candidate movepool when exact-form data is missing.
     if(/-mega-z$/.test(SBL.domain?.pokemonKey?.(species)||'')){
       coverageMoveCache.set(key,[]);return [];
     }
@@ -1280,7 +1381,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
           const type=String(d.type?.name||'').replace(/\b\w/g,c=>c.toUpperCase());
           if(power>0&&(category==='physical'||category==='special')&&type) return {
             name:String(d.name||entry.name).split('-').map(x=>x?x[0].toUpperCase()+x.slice(1):x).join(' '),
-            type,category,power
+            type,category,power,source:'pokeapi-fallback',evidence:'catalogued',rulesetVerified:false
           };
         }catch(e){}
         return null;
@@ -1296,77 +1397,114 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
   STATE.prepCoverageMon=coverageSelected;
   const coverageMoves=coverageSelected?await loadCoverageMoves(coverageSelected):[];
   const coverageOpp=opp;
-  const offensiveCoverageMoves=coverageMoves.filter(m=>m.type!=='Normal');
+  const tentativeForm=window.SBL?.matchupIntelligence?.unverifiedCustomForm?.({species:coverageSelected});
+  const observedCoverageKeys=new Set(observedMoves(your.find(m=>speciesKey(m.species)===speciesKey(coverageSelected))||{}).map(moveKey));
+  const offensiveCoverageMoves=coverageMoves.filter(m=>!window.SBL?.matchupIntelligence?.isConditionalMove?.(m))
+    .filter(m=>!tentativeForm||observedCoverageKeys.has(moveKey(m.name)));
   const selectedCoverageObj=your.find(m=>norm(m.species)===norm(coverageSelected));
-  const superEffectiveTargets=(()=>{
-    const byMon=new Map();
-    offensiveCoverageMoves.forEach(move=>{
-      coverageOpp.forEach(mon=>{
-        const defs=normalizedTypes(typeMap[mon.species]||[]);
-        if(!defs.length)return;
-        const mult=defs.reduce((v,d)=>v*typeChartMultiplier(move.type,d),1);
-        if(mult>=2){
-          const key=norm(mon.species);
-          const prev=byMon.get(key);
-          if(!prev||mult>prev.mult)byMon.set(key,{mon,mult,types:prev?.types||[]});
-          const entry=byMon.get(key);
-          if(!entry.types.includes(move.type))entry.types.push(move.type);
-        }
-      });
-    });
-    return [...byMon.values()].sort((a,b)=>b.mult-a.mult||displaySpecies(a.mon).localeCompare(displaySpecies(b.mon)));
-  })();
-  // Merge physical + special into one row per attacking TYPE (previously two
-  // parallel panels duplicated the same target lists under each category).
-  // Category is now a small tag on each move chip instead of a whole column.
+  const coverageIntel=window.SBL?.matchupIntelligence;
+  const coverageObservedMoves=selectedCoverageObj?observedMoves(selectedCoverageObj):[];
+  const coverageObservedKeys=new Set(coverageObservedMoves.map(move=>norm(move)));
+  const coverageUnverifiedCustom=!!(selectedCoverageObj&&coverageIntel?.unverifiedCustomForm?.({species:selectedCoverageObj.species}));
+  // Custom Mega-Z catalogue entries are not treated as usable attacks until
+  // they are confirmed in a replay or the league-specific ruleset is verified.
+  const assessableCoverageMoves=coverageUnverifiedCustom
+    ?offensiveCoverageMoves.filter(move=>coverageObservedKeys.has(norm(move.name))):offensiveCoverageMoves;
+  const coverageAttacker=selectedCoverageObj?{
+    species:selectedCoverageObj.species,types:typeMap[selectedCoverageObj.species]||[],
+    stats:POKEMON_DATA_CACHE.get(speciesKey(selectedCoverageObj.species))?.stats||{},
+    candidateMoves:assessableCoverageMoves,observedMoves:coverageObservedMoves
+  }:null;
+  // One pair evaluation per opposing Pokémon supplies the same physical/special,
+  // STAB, type and exact-form baseline used by Team Planner and Threat Board.
+  const coverageOutcome=new Map(coverageAttacker&&coverageIntel?coverageOpp.map(mon=>{
+    const defender={species:mon.species,types:typeMap[mon.species]||[],
+      stats:POKEMON_DATA_CACHE.get(speciesKey(mon.species))?.stats||{}};
+    return [speciesKey(mon.species),coverageIntel.pair(coverageAttacker,defender)];
+  }):[]);
   const coverageRows=(()=>{
     const byType=new Map();
-    offensiveCoverageMoves.forEach(m=>{
-      if(!byType.has(m.type))byType.set(m.type,[]);
-      byType.get(m.type).push(m);
+    assessableCoverageMoves.forEach(move=>{
+      const type=SBL.matchups?.normalizeTypeName?.(move.type)||String(move.type||'');
+      if(!type)return;
+      if(!byType.has(type))byType.set(type,[]);
+      byType.get(type).push(move);
     });
     return [...byType.entries()].map(([type,moves])=>{
-      const targets=coverageOpp.map(mon=>{
-        const defs=normalizedTypes(typeMap[mon.species]||[]);
-        const mult=defs.length?defs.reduce((v,d)=>v*typeChartMultiplier(type,d),1):null;
-        return {mon,mult};
-      }).filter(t=>t.mult!==null&&t.mult>=2);
-      moves.sort((a,b)=>b.power-a.power||a.name.localeCompare(b.name));
-      return {type,moves,targets};
-    }).sort((a,b)=>b.targets.length-a.targets.length||TYPE_NAMES.indexOf(a.type)-TYPE_NAMES.indexOf(b.type));
+      const typeTargets=[],targets=[],unassessedTargets=[];
+      coverageOpp.forEach(mon=>{
+        const pair=coverageOutcome.get(speciesKey(mon.species));
+        const attacks=(pair?.attacks||[]).filter(attack=>
+          SBL.matchups?.normalizeTypeName?.(attack.type)===type &&
+          !['conditional','ruleset-unverified','observed-untyped','typing-only'].includes(attack.evidence) &&
+          Number(attack.multiplier)>=2
+        ).sort((a,b)=>(b.estimatedPercent??-1)-(a.estimatedPercent??-1)||
+          (b.multiplier??-1)-(a.multiplier??-1));
+        if(!attacks.length)return;
+        const best=attacks[0];
+        const row={mon,move:best.name,multiplier:best.multiplier,estimatedPercent:best.estimatedPercent,
+          category:best.category,evidence:best.evidence};
+        typeTargets.push(row);
+        if(best.estimatedPercent!==null && best.estimatedPercent>=20)targets.push(row);
+        else if(best.estimatedPercent===null)unassessedTargets.push(row);
+      });
+      moves.sort((a,b)=>Number(b.power||0)-Number(a.power||0)||a.name.localeCompare(b.name));
+      return {type,moves,typeTargets,targets,unassessedTargets};
+    }).sort((a,b)=>b.targets.length-a.targets.length||b.typeTargets.length-a.typeTargets.length||TYPE_NAMES.indexOf(a.type)-TYPE_NAMES.indexOf(b.type));
   })();
-  // Coverage map: two panels that read at a glance -
-  // (1) which attacking types the selected Pokémon actually threatens with,
-  //     lit up in that type's own colour when it lands 2×+ on the scouted
-  //     team, dim when the type is on its movepool but whiffs, and grayed
-  //     out entirely when it has no damaging move of that type at all;
-  // (2) the full opposing roster, each Pokémon lit up when exploitable and
-  //     faded to grayscale when it's safe from this attacker.
-  // No move names are shown anywhere - just the shape of the matchup.
-  const hitByMon=new Map(superEffectiveTargets.map(e=>[norm(e.mon.species),e]));
+  const coverageByMon=(()=>{
+    const byMon=new Map();
+    coverageRows.forEach(row=>row.typeTargets.forEach(target=>{
+      const key=speciesKey(target.mon.species);
+      const current=byMon.get(key)||{mon:target.mon,types:[],meaningfulTypes:[],unassessedTypes:[]};
+      if(!current.types.includes(row.type))current.types.push(row.type);
+      if(target.estimatedPercent!==null && target.estimatedPercent>=20 && !current.meaningfulTypes.includes(row.type))current.meaningfulTypes.push(row.type);
+      if(target.estimatedPercent===null && !current.unassessedTypes.includes(row.type))current.unassessedTypes.push(row.type);
+      byMon.set(key,current);
+    }));
+    return byMon;
+  })();
+  const superEffectiveTargets=[...coverageByMon.values()].filter(row=>row.meaningfulTypes.length)
+    .sort((a,b)=>b.meaningfulTypes.length-a.meaningfulTypes.length||displaySpecies(a.mon).localeCompare(displaySpecies(b.mon)));
+  const coverageEvidenceReady=assessableCoverageMoves.length>0;
+  const coverageEvidenceHint=coverageUnverifiedCustom
+    ?(coverageEvidenceReady?'Only replay-observed moves are scored for this custom Mega-Z form; other catalogue entries remain unverified.':'Custom Mega-Z move candidates are not verified for this league. Only moves confirmed in replays can be assessed.')
+    :coverageEvidenceReady?'Catalogue candidates are possibilities, not confirmed moves this coach selected or proof of current-format legality. Estimates use both attacking and defending stats, move category and STAB.'
+    :'Move evidence unavailable for this form or ruleset. Unknown coverage is not a safe matchup. Check the catalogue and selected season.';
   const typeGridChip=(type)=>{
     const row=coverageRows.find(r=>r.type===type);
-    const count=row?row.targets.length:0;
+    const meaningful=row?.targets.length||0;
+    const typeOnly=row?.typeTargets.length||0;
     const covered=!!row;
-    const cls=count>0?'tc2-type-hot':covered?'tc2-type-warm':'tc2-type-cold';
-    const title=count>0?`${type}: hits ${count} opposing Pokémon super-effectively - click to see moves`:covered?`${type}: no opposing Pokémon is weak to this - click to see moves`:`${type}: no damaging move of this type`;
+    const cls=meaningful?'tc2-type-hot':typeOnly||covered?'tc2-type-warm':'tc2-type-cold';
+    const title=meaningful?`${type}: meaningful super-effective baseline against ${meaningful} opponent${meaningful===1?'':'s'}`:
+      typeOnly?`${type}: type advantage exists, but damage is low or unassessed against ${typeOnly} opponent${typeOnly===1?'':'s'}`:
+      covered?`${type}: damaging candidate exists, but no super-effective target`:`${type}: no catalogued damaging candidate`;
     const monName=displaySpecies(selectedCoverageObj||{species:coverageSelected});
     const attrs=covered?` data-cov-type="${esc(type)}" data-cov-mon="${esc(monName)}" data-cov-moves="${esc(JSON.stringify(row.moves.map(m=>({name:m.name,category:m.category,power:m.power}))))}"`:'';
-    return `<div class="tc2-type-chip ${cls}${covered?' tc2-type-clickable':''}" title="${esc(title)}"${attrs}>${typePill(type)}${count>0?`<span class="tc2-type-count">${count}</span>`:''}</div>`;
+    const count=meaningful?meaningful:(typeOnly?'?':'');
+    return `<div class="tc2-type-chip ${cls}${covered?' tc2-type-clickable':''}" title="${esc(title)}"${attrs}>${typePill(type)}${count?`<span class="tc2-type-count">${count}</span>`:''}</div>`;
   };
   const oppCard=(mon)=>{
-    const hit=hitByMon.get(norm(mon.species));
-    return `<div class="tc2-opp-card ${hit?'tc2-opp-hit':'tc2-opp-safe'}">
+    const hit=coverageByMon.get(speciesKey(mon.species));
+    const assessed=coverageOutcome.get(speciesKey(mon.species));
+    const value=assessed?.estimatedPercent??null;
+    const state=value===null?'unknown':value>=45?'pressure':value>=20?'chip':'limited';
+    const label=value===null?'Damage unassessed':value>=45?'Potential pressure':value>=20?'Chip possible':'Limited baseline';
+    const detail=assessed?.best&&value!==null?`${assessed.best.name} (${assessed.best.category}) · ~${value}% baseline · ${assessed.evidence==='observed'?'observed in replay':'catalogue candidate'}`:
+      (assessed?.reason||'No move could be assessed; unknown is not evidence of safety');
+    const typeLabel=hit?.meaningfulTypes?.length?'Meaningful 2×+ options':hit?.types?.length?'Type advantage only; damage not established':'';
+    const typePillsHtml=hit?.meaningfulTypes?.length?hit.meaningfulTypes:hit?.types||[];
+    return `<div class="tc2-opp-card tc2-opp-${state}">
       <div class="tc2-opp-sprite-wrap">${sprite(mon.species,'tc2-opp-sprite')}</div>
       <div class="tc2-opp-name">${esc(displaySpecies(mon))}</div>
-      ${hit?`<div class="tc2-opp-hit-types">${hit.types.map(t=>typePill(t)).join('')}</div>`:'<div class="tc2-opp-safe-label">Not threatened</div>'}
+      <div class="tc2-opp-safe-label">${esc(label)}</div>
+      <div class="tc2-opp-explanation">${esc(detail)}</div>
+      ${typePillsHtml.length?`<div class="tc2-opp-hit-types" title="${esc(typeLabel)}"><small>${esc(typeLabel)}</small>${typePillsHtml.map(t=>typePill(t)).join('')}</div>`:''}
     </div>`;
   };
-  // Best 4-type coverage: brute-force the combination of up to 4 attacking
-  // types (from types the mon actually has damaging moves for) that hits
-  // the most *distinct* opposing Pokémon super-effectively. Small search
-  // space (at most a handful of covered types), so exact brute force is
-  // cheap and beats a greedy approximation.
+  // Select up to four attacking types by distinct opponents with meaningful
+  // baseline damage, not by type effectiveness alone.
   const bestCoverageCombo=(rows,k)=>{
     const candidates=rows.filter(r=>r.targets.length>0);
     if(!candidates.length)return{types:[],total:0};
@@ -1375,10 +1513,8 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
       candidates.forEach(r=>r.targets.forEach(t=>covered.add(norm(t.mon.species))));
       return{types:candidates.map(r=>({type:r.type,count:r.targets.length})),total:covered.size};
     }
-    const n=candidates.length;
-    let best=null;
-    const chosen=[];
-    const recurse=(start)=>{
+    const n=candidates.length;let best=null;const chosen=[];
+    const recurse=start=>{
       if(chosen.length===k){
         const covered=new Set();let sum=0;
         chosen.forEach(i=>{candidates[i].targets.forEach(t=>covered.add(norm(t.mon.species)));sum+=candidates[i].targets.length;});
@@ -1392,18 +1528,19 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
     return{types:best.idx.map(i=>({type:candidates[i].type,count:candidates[i].targets.length})),total:best.size};
   };
   const bestCombo=bestCoverageCombo(coverageRows,4);
-  const bestComboBlock=bestCombo.types.length?`<div class="tc2-best-combo"><span class="tc2-best-combo-label">Best ${bestCombo.types.length===1?'':bestCombo.types.length+'-type'} coverage</span><div class="tc2-best-combo-types">${bestCombo.types.map(t=>typePill(t.type)).join('')}</div><span class="tc2-best-combo-note">${bestCombo.total} of ${coverageOpp.length} opponents</span></div>`:'';
+  const bestComboBlock=bestCombo.types.length?`<div class="tc2-best-combo"><span class="tc2-best-combo-label">Meaningful ${bestCombo.types.length===1?'':'4-type '}coverage</span><div class="tc2-best-combo-types">${bestCombo.types.map(t=>typePill(t.type)).join('')}</div><span class="tc2-best-combo-note">${bestCombo.total} of ${coverageOpp.length} opponents</span></div>`:'';
   const topThree=coverageRows.filter(r=>r.targets.length>0).sort((a,b)=>b.targets.length-a.targets.length).slice(0,3);
-  const topThreeBlock=topThree.length?`<div class="tc2-top3"><span class="tc2-top3-label">Top types</span><div class="tc2-top3-list">${topThree.map((r,i)=>`<div class="tc2-top3-item"><span class="tc2-top3-rank">${i+1}</span>${typePill(r.type)}<span class="tc2-top3-count">${r.targets.length}</span></div>`).join('')}</div></div>`:'';
-  const monStrip=selectedCoverageObj?`<div class="tc2-mon-strip">${sprite(selectedCoverageObj.species,'tc2-mon-sprite')}<div class="tc2-mon-info"><strong>${esc(displaySpecies(selectedCoverageObj))}</strong><div class="type-row">${(typeMap[selectedCoverageObj.species]||[]).map(t=>typePill(t)).join('')}</div></div>${bestComboBlock}<div class="tc2-mon-metrics"><div class="tc2-metric"><b>${coverageRows.length}</b><span>Types&nbsp;covered</span></div><div class="tc2-metric"><b>${superEffectiveTargets.length}/${coverageOpp.length}</b><span>Threatened</span></div></div></div>`:'';
+  const topThreeBlock=topThree.length?`<div class="tc2-top3"><span class="tc2-top3-label">Top damaging types</span><div class="tc2-top3-list">${topThree.map((r,i)=>`<div class="tc2-top3-item"><span class="tc2-top3-rank">${i+1}</span>${typePill(r.type)}<span class="tc2-top3-count">${r.targets.length}</span></div>`).join('')}</div></div>`:'';
+  const monStrip=selectedCoverageObj?`<div class="tc2-mon-strip">${sprite(selectedCoverageObj.species,'tc2-mon-sprite')}<div class="tc2-mon-info"><strong>${esc(displaySpecies(selectedCoverageObj))}</strong><div class="type-row">${(typeMap[selectedCoverageObj.species]||[]).map(t=>typePill(t)).join('')}</div></div>${bestComboBlock}<div class="tc2-mon-metrics"><div class="tc2-metric"><b>${coverageRows.filter(r=>r.targets.length).length}</b><span>Types with meaningful hits</span></div><div class="tc2-metric"><b>${superEffectiveTargets.length}/${coverageOpp.length}</b><span>Opponents with 2× damage options</span></div></div></div>`:'';
   const coverageSection=`<section id="prepTeamCoverage" class="panel prep-selectable-section tc2" data-prep-section="coverage">
-    <div class="tc2-head"><div class="tc2-head-text"><div class="coverage-kicker">OFFENSIVE SCOUTING</div><h2>Type Coverage</h2><p class="panel-desc" style="margin:0">Pick one of your Pokémon to see what it threatens super-effectively, type by type.</p></div><div class="coverage-analysis-select"><label for="prepCoverageMon">Your Pokémon</label><select id="prepCoverageMon">${your.map(m=>`<option value="${esc(m.species)}" ${norm(m.species)===norm(coverageSelected)?'selected':''}>${esc(displaySpecies(m))}</option>`).join('')}</select></div></div>
+    <div class="tc2-head"><div class="tc2-head-text"><div class="coverage-kicker">OFFENSIVE SCOUTING</div><h2>Type Coverage</h2><p class="panel-desc" style="margin:0">Select a Pokémon to compare its catalogue move candidates against the opposing roster. Colours reflect assessed damage, not type effectiveness alone. Amber means a type advantage exists but damage is low or unknown.</p></div><div class="coverage-analysis-select"><label for="prepCoverageMon">Your Pokémon</label><select id="prepCoverageMon">${your.map(m=>`<option value="${esc(m.species)}" ${norm(m.species)===norm(coverageSelected)?'selected':''}>${esc(displaySpecies(m))}</option>`).join('')}</select></div></div>
     ${monStrip}
+    <p class="tc2-source-hint">${coverageEvidenceHint} Two-turn and recharge moves require conditions and are excluded from this baseline. A 1× move can still deal significant damage.</p>
     <div class="tc2-map">
       <div class="tc2-panel"><div class="tc2-panel-head"><span>Type coverage</span><em>By attacking type</em></div>${topThreeBlock}<div class="tc2-type-grid">${TYPE_NAMES.map(typeGridChip).join('')}</div></div>
-      <div class="tc2-panel"><div class="tc2-panel-head"><span>Opponent scouting</span><em>${superEffectiveTargets.length} of ${coverageOpp.length} exploitable</em></div><div class="tc2-opp-grid">${coverageOpp.length?coverageOpp.map(oppCard).join(''):'<div class="tc2-empty">No opposing roster loaded yet.</div>'}</div></div>
+      <div class="tc2-panel"><div class="tc2-panel-head"><span>Opponent scouting</span><em>${superEffectiveTargets.length} of ${coverageOpp.length} have meaningful 2× damage options</em></div><div class="tc2-opp-grid">${coverageOpp.length?coverageOpp.map(oppCard).join(''):'<div class="tc2-empty">No opposing roster loaded yet.</div>'}</div></div>
     </div>
-    ${!coverageRows.length?'<div class="tc2-empty">No legal damaging moves outside Normal-type were found for this Pokémon.</div>':''}
+    ${!coverageRows.length?`<div class="tc2-empty">${coverageUnverifiedCustom&&!coverageEvidenceReady?'Custom Mega-Z move legality is unverified. No unobserved catalogue moves are counted as coverage.':'No assessable damaging move candidates are available. This is missing data, not zero offensive coverage.'}</div>`:''}
   </section>`;
 
 
@@ -1419,34 +1556,134 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
   STATE.prepPlannerSelected=validPlannerNames.filter(sp=>STATE.prepPlannerSelected.some(v=>speciesKey(v)===speciesKey(sp))).slice(0,6);
   const intel=window.SBL?.matchupIntelligence;
   if(!intel)throw new Error('Shared matchup intelligence service was not loaded. Refresh Match Prep.');
+  // Base stats are already in the exact-form profile cache from roster preload.
+  // Never substitute a normal form's stats when a custom Mega is missing.
+  const intelStatsFor=species=>POKEMON_DATA_CACHE.get(speciesKey(species))?.stats||{};
   const intelMoveCache=new Map();
   const intelMoveInFlight=new Map();
   const intelMon=m=>({species:m.species,types:typeMap[m.species]||[],maxSpeed:m.maxSpeed,
-    baseSpeed:m.baseSpeed,legalMoves:intelMoveCache.get(speciesKey(m.species))||[],
+    baseSpeed:m.baseSpeed,stats:intelStatsFor(m.species),candidateMoves:intelMoveCache.get(speciesKey(m.species))||[],
     observedMoves:observedFor(usageFor(m)),usage:usageFor(m)});
   const intelModel=()=>intel.evaluate({your:your.map(m=>({species:m.species,types:typeMap[m.species]||[],
-    maxSpeed:m.maxSpeed,baseSpeed:m.baseSpeed,legalMoves:window.__sblPlannerMoves?.[m.species]||[]})),
+    maxSpeed:m.maxSpeed,baseSpeed:m.baseSpeed,stats:intelStatsFor(m.species),candidateMoves:window.__sblPlannerMoves?.[m.species]||[],observedMoves:observedFor(m),usage:m})),
     opponent:opp.map(intelMon),selected:STATE.prepPlannerSelected,
     games:opponentAggregate.games.length});
-  const evidenceLabel=e=>({'observed':'Observed replay move','possible':'Catalogued, not observed',
-    'typing-only':'Possible STAB type (move unverified)','observed-untyped':'Observed, move type unknown'}[e]||'Unknown');
+  const evidenceLabel=e=>({'observed':'Observed replay move','possible':'Catalogue candidate; format and set unverified','catalogued':'Catalogue candidate; format and set unverified',
+    'typing-only':'Possible STAB type (move unverified)','observed-untyped':'Observed, move type unknown','conditional':'Conditional move, not baseline','ruleset-unverified':'Custom-form move legality unverified'}[e]||'Unknown');
   const intelPairSummary=pair=>pair.best?
-    `${pair.best.name?esc(pair.best.name):esc(pair.best.type)+' STAB potential'} · ${fmtMult(pair.maxMultiplier)} · ${esc(evidenceLabel(pair.evidence))}`:
+    `${esc(pair.best.name)} · ~${pair.estimatedPercent}% baseline · ${esc(evidenceLabel(pair.evidence))}`:
     esc(pair.reason);
+  const intelStatusTone=(score,valid=true)=>!valid||score===null?'unknown':score>=70?'high':score>=40?'medium':'low';
+  const intelPressureGrade=(score,valid=true)=>!valid||score===null?'Unassessed':score>=70?'High potential':score>=40?'Moderate potential':'Low projected damage';
+  const intelEvidenceBadge=(kind)=>`<span class="prep-intel-evidence ${kind==='observed'?'observed':(kind==='possible'||kind==='catalogued')?'possible':'unverified'}">${esc(evidenceLabel(kind))}</span>`;
+  const intelTypeList=(species)=>(typeMap[species]||[]).length?(typeMap[species]||[]).map(typePill).join(''):'<span class="prep-intel-faint">Type unknown</span>';
+  const intelMonMarkup=(mon,klass='prep-intel-mini-sprite')=>`<span class="prep-intel-mon">${sprite(mon.species,klass)}<span class="prep-intel-mon-name"><strong>${esc(displaySpecies(mon))}</strong><span class="prep-intel-types">${intelTypeList(mon.species)}</span></span></span>`;
+  const intelMultLabel=(multiplier)=>multiplier===null?'?':multiplier===0?'0×':multiplier===.25?'¼×':multiplier===.5?'½×':Number.isInteger(multiplier)?`${multiplier}×`:`${multiplier}×`;
+  // Every matrix cell compares assessable attacks in both directions. Keep
+  // conditional moves and the exact assumptions in expandable evidence, not
+  // in an unexplained colour or raw type multiplier.
+  const intelOptionLine=(pair,side)=>pair?.best?
+    `<strong>${esc(pair.best.name)}</strong> · ~${pair.estimatedPercent}% baseline · ${esc(evidenceLabel(pair.best.evidence))}${pair.moveContrast?`<small class="prep-intel-contrast">${esc(pair.moveContrast)}</small>`:''}`:
+    `<strong>Not assessed</strong> · ${esc(pair?.reason||'Move or exact-form data missing')}`;
+  const intelAttackEvidence=(pair,label)=>`<div class="prep-intel-pair-evidence"><h5>${esc(label)}</h5>
+    ${pair?.attacks?.length?`<ul>${pair.attacks.map(a=>`<li><strong>${esc(a.name||a.type||'Unknown move')}</strong><span>${esc(a.evidence==='conditional'?'Needs setup/charging, not scored':a.evidence==='observed'?'Seen in replay':a.evidence==='typing-only'?'Typing only, move unverified':a.evidence==='ruleset-unverified'?'Custom-form legality unverified':'Catalogue candidate; format and set unverified')} · ${a.estimatedPercent===null?'Damage not assessed':'~'+a.estimatedPercent+'% baseline'} · ${intelMultLabel(a.multiplier)} type</span></li>`).join('')}</ul>`:'<p>No available attack data.</p>'}
+</div>`;
+  const intelPairDetails=(enemy,ally,pair)=>{
+    const yours=intel.pair(ally,intelMon(enemy));
+    const options=intel.assessOptions(yours,pair);
+    const context=options.fullyAssessed?'Both directions have baseline move and stat data. This is not a predicted outcome.':
+      'At least one direction lacks assessable moves or exact-form stats. Do not interpret an unknown as a safe matchup.';
+    return `<div class="prep-intel-pair-detail">
+      <div class="prep-intel-pair-heading"><div><span class="prep-intel-kicker">Matchup options</span><h4>${esc(displaySpecies(ally))} vs ${esc(displaySpecies(enemy))}</h4></div><span class="prep-intel-outcome ${options.tone}">${esc(options.label)}</span></div>
+      <p class="prep-intel-muted">${esc(context)}</p>
+      <div class="prep-intel-options-grid"><div><span>Your available attack</span><p>${intelOptionLine(yours,'you')}</p></div><div><span>Opponent's possible attack</span><p>${intelOptionLine(pair,'them')}</p></div></div>
+      <div class="prep-intel-actions"><button type="button" data-intel-switch="${esc(enemy.species)}">Check actual damage in Switch-In</button></div>
+      <details class="prep-intel-extra prep-intel-pair-advanced"><summary>Scored move evidence and assumptions</summary>
+        <p class="prep-intel-muted">These estimates assume level 100, neutral natures, 0 EVs, 31 IVs, average damage rolls, and no items, abilities, boosts or field effects. Catalogue candidates are hypothetical, not confirmed legal moves or a confirmed four-move set. Charge/recharge moves are excluded from baseline threat ratings.</p>
+        <div class="prep-intel-options-grid">${intelAttackEvidence(yours,'Your candidate moves')}${intelAttackEvidence(pair,'Opponent candidate moves')}</div>
+        <p class="prep-intel-muted">Defensive typing alone does not establish a safe switch-in. Check abilities, items, Speed and actual damage before deciding.</p>
+      </details>
+    </div>`;
+  };
   const intelDetailMarkup=row=>{
-    if(!row)return '<div class="prep-new-empty">Select an opposing Pokémon to inspect the matchup.</div>';
-    const m=row.enemy,u=m.usage||{},sc=row.scouting;
+    if(!row)return '<div class="prep-new-empty">Choose an opposing Pokémon to inspect the matchup.</div>';
+    const m=row.enemy,sc=row.scouting;
     const resists=row.pairs.filter(x=>x.maxMultiplier!==null&&x.maxMultiplier<=.5);
     const hits=row.affected;
+    const weakButMinor=row.pairs.filter(x=>!x.threatened&&x.maxMultiplier>=2);
     const obs=m.observedMoves||[];
-    return `<div class="prep-new-detail-head">${sprite(m.species,'prep-new-detail-sprite')}<div><h3>${esc(displaySpecies(m))}</h3><div class="type-row">${(typeMap[m.species]||[]).map(typePill).join('')}</div><span>${sc.confidence}</span></div></div>
-      <div class="prep-intel-score-pair"><div><small>MATCHUP PRESSURE</small><strong>${row.score===null?'N/A':row.score+'/100'}</strong><span>${esc(row.label)}</span><em>${esc(row.evidence)}</em></div><div><small>SCOUTING PRIORITY</small><strong>${sc.score===null?'N/A':sc.score+'/100'}</strong><span>${esc(sc.label)}</span><em>${sc.games} recorded opponent match${sc.games===1?'':'es'}</em></div></div>
-      <div class="prep-new-statgrid"><div><small>BROUGHT</small><b>${sc.bring===null?'Unknown':sc.bring+'%'}</b></div><div><small>SENT OUT</small><b>${sc.sent===null?'Unknown':sc.sent+'%'}</b></div><div><small>KOs</small><b>${Number(u.kills||0)}</b></div><div><small>AFFECTED</small><b>${hits.length}/${row.pairs.length}</b></div></div>
-      <div class="prep-new-detail-block"><h4>HOW IT THREATENS YOUR SIX</h4>${hits.length?hits.map(x=>`<div class="prep-intel-match-row"><strong>${esc(displaySpecies(x.ally))}</strong><span>${intelPairSummary(x)}</span></div>`).join(''):'<p class="prep-intel-muted">No super-effective coverage identified from the available information. Neutral damage or setup may still matter.</p>'}</div>
-      <div class="prep-new-detail-block"><h4>TYPE-BASED POSSIBLE ANSWERS</h4><div class="prep-new-chips">${resists.length?resists.map(x=>`<span>${esc(displaySpecies(x.ally))}</span>`).join(''):'<i>No clearly resistant selection identified</i>'}</div><p class="prep-intel-muted">Resistance alone does not prove a safe switch-in; items, abilities, Speed, EVs and damage need verification.</p></div>
-      <div class="prep-new-detail-block"><h4>REPLAY-OBSERVED MOVES</h4><div class="prep-new-chips">${obs.length?obs.slice(0,10).map(x=>`<span>${esc(x)}</span>`).join(''):'<i>No move replay evidence yet</i>'}</div></div>
-      <div class="prep-intel-actions"><button type="button" data-intel-load="${esc(m.species)}">Inspect catalogue moves</button><button type="button" data-intel-switch="${esc(m.species)}">Check in Switch-In Analyser</button></div>
-      <p class="prep-intel-muted">This is a preparation aid, not a win probability. Potential STAB coverage remains unconfirmed until matching move metadata is available; no damage or ability assumptions are made here.</p>`;
+    const observed=moveEvidence(m);
+    const sample=Number(m.usage?.appearances||0);
+    const statsComplete=!!intelStatsFor(m.species)?.hp;
+    const headline=row.assessed===0?'Not enough reliable data to rank this threat':
+      hits.length?`Potential pressure against ${hits.length} of your ${row.pairs.length} picks`:
+      `No high-pressure baseline hit identified in ${row.assessed} assessed matchups`;
+    const customUnverified=window.SBL?.matchupIntelligence?.unverifiedCustomForm?.(m);
+    const nextStep=row.assessed===0?
+      (isProtectedBattleForm(m.species)&&!statsComplete?'Exact-form Mega stats are missing. Check form data before assessing damage.':
+        customUnverified?'Custom Mega-Z moves are not verified for this league ruleset. Check an actual replay or validate the format-specific movepool before ranking an attack.':
+        'Inspect its catalogued moves and exact-form stats to assess attacks.'):
+      hits.length?'Check its strongest plausible attacks in the damage calculator before choosing a switch-in.':
+      'Check possible coverage, abilities and setup before treating a defensive answer as safe.';
+    const hitRow=x=>`<div class="prep-intel-target-row">${intelMonMarkup(x.ally)}<div class="prep-intel-attack"><strong>${x.best?.name?esc(x.best.name):'Move not established'}</strong><span>${x.best?`${x.best.power} BP · ${esc(x.best.category)} · ${intelMultLabel(x.best.multiplier)}${x.best.stab>1?' STAB':''} · ~${x.estimatedPercent}% baseline`:'Damage unassessed'}</span>${intelEvidenceBadge(x.evidence)}${x.moveContrast?`<small class="prep-intel-contrast">${esc(x.moveContrast)}</small>`:''}</div></div>`;
+    const shortObserved=observed.moves.slice(0,3).map(x=>esc(x.name)).join(', ');
+    return `<div class="prep-intel-detail-top">${intelMonMarkup(m,'prep-new-detail-sprite')}
+      <span class="prep-intel-evidence ${row.assessed?'medium':'unknown'}">${row.assessed?row.assessed+'/'+row.pairs.length+' assessed':'Unassessed'}</span></div>
+      <section class="prep-dossier-readout" aria-label="Scouting summary"><span class="prep-intel-kicker">Quick read</span>
+        <h3>${esc(headline)}</h3>
+        <div class="prep-dossier-facts"><div><span>Seen in replays</span><strong>${sample} ${sample===1?'appearance':'appearances'}</strong><small>${shortObserved?'Moves: '+shortObserved:'No moves observed this season'}</small></div>
+        <div><span>Against your selected six</span><strong>${row.assessed}/${row.pairs.length} assessed</strong><small>${hits.length} possible meaningful baseline hits; unassessed is not safe</small></div></div>
+        <p class="prep-dossier-next"><strong>What to do next:</strong> ${esc(nextStep)}</p>
+      </section>
+      ${hits.length?`<section class="prep-dossier-top-threats"><h4>Top possible threats</h4>${hits.slice(0,2).map(hitRow).join('')}${hits.length>2?`<p class="prep-intel-muted">${hits.length-2} more in full evidence below.</p>`:''}</section>`:''}
+      <div class="prep-intel-actions"><button type="button" data-intel-load="${esc(m.species)}">Load / refresh move data</button><button type="button" data-intel-switch="${esc(m.species)}">Check damage in Switch-In</button></div>
+      <details class="prep-intel-extra prep-dossier-advanced" data-intel-extra="dossier"><summary>Full scouting evidence and calculations</summary>
+        <div class="prep-intel-detail-scores"><div class="prep-intel-kpi"><span>Hypothetical offensive potential</span><strong>${row.score===null||!row.pairs.length?'Unassessed':row.score+' / 100'}</strong><small>${row.assessed}/${row.pairs.length} pairs assessed; not a set prediction</small></div><div class="prep-intel-kpi"><span>Replay scouting priority</span><strong>${sample?sc.score+' / 100':'No sample'}</strong><small>${esc(sc.confidence)}, ${sample} appearances</small></div></div>
+        ${intelMoveHistory(m)}
+        <div class="prep-intel-detail-block"><h4>Meaningful potential attacks</h4>${hits.length?hits.map(hitRow).join(''):'<p class="prep-intel-muted">None established by the baseline screen. This does not prove safety.</p>'}</div>
+        ${weakButMinor.length?`<div class="prep-intel-detail-block"><h4>Type advantages without established major damage</h4><p class="prep-intel-muted">Super-effective typing alone is not a reliable threat. Move power, stats, conditions or observations may be missing.</p>${weakButMinor.map(hitRow).join('')}</div>`:''}
+        <div class="prep-intel-detail-block"><h4>Potential defensive answers</h4>${resists.length?`<div class="prep-intel-answer-list">${resists.map(x=>`<span>${esc(displaySpecies(x.ally))} <b>${intelMultLabel(x.maxMultiplier)}</b></span>`).join('')}</div>`:'<p class="prep-intel-muted">No fully resisted or immune pairing established by available typing.</p>'}<p class="prep-intel-muted">Resistances cannot establish safe switch-ins, especially against uncovered moves.</p></div>
+        <div class="prep-intel-detail-block"><h4>Moves observed in replays</h4><div class="prep-intel-evidence-list">${obs.length?obs.map(x=>`<span>${esc(x)}</span>`).join(''):'<span class="prep-intel-faint">No observed moves yet</span>'}</div></div>
+        <p class="prep-intel-muted">Baseline: level 100, neutral nature, 0 EVs, 31 IVs, average damage roll. No assumed item, ability, boost, weather or investment. Conditional two-turn attacks are not default recommendations; see catalogue candidates for possibilities.</p>
+      </details>
+      ${intelDossierNotes(m.species)}`;
+  };
+  // CP4.177: private Pokémon dossiers reuse the existing, RLS-protected
+  // preparation records. Never put notes in shared replay or scouting data.
+  const dossierScope={leagueId:String(SBL.leagueDb?.selectedLeagueId?.()||''),
+    seasonId:String(SBL.leagueDb?.selectedSeasonId?.()||''),opponent};
+  const dossierNotes={items:[],loaded:false,error:'',drafts:new Map(),busy:false};
+  const dossierKey=species=>speciesKey(species);
+  const monNotes=species=>dossierNotes.items.filter(x=>x.item_type==='finding'&&
+    x.context?.kind==='pokemon-note'&&dossierKey(x.context?.species)===dossierKey(species));
+  const moveEvidence=mon=>{
+    const usage=usageFor(mon);
+    return SBL.moveIntelligence?.summarize?.(usage,opponentAggregate.games.length)||{moves:[],indexed:0,available:0};
+  };
+  const intelDossierNotes=species=>`<section class="prep-dossier-notes" aria-label="Private notes for ${esc(species)}">
+      <div class="prep-dossier-heading"><h4>Private notes for ${esc(species)}</h4><span>Only you can see these notes</span></div>
+      <form data-intel-note-form="${esc(species)}" class="prep-dossier-note-form">
+        <label for="prepIntelNoteText">Scouting observation or reminder</label>
+        <textarea id="prepIntelNoteText" data-intel-note-text="${esc(species)}" rows="3" maxlength="2000" placeholder="e.g. Review a possible coverage move, observed item, or planned defensive answer">${esc(dossierNotes.drafts.get(dossierKey(species))||'')}</textarea>
+        <button type="submit" ${dossierNotes.busy?'disabled':''}>Save Pokémon note</button>
+      </form>
+      <div class="prep-dossier-note-status" id="prepIntelNoteStatus" role="status" aria-live="polite">${esc(dossierNotes.error||(!dossierNotes.loaded?'Loading private notes...':''))}</div>
+      <div class="prep-dossier-note-list">${monNotes(species).length?monNotes(species).map(note=>`<div class="prep-dossier-note"><p>${esc(note.content)}</p><button type="button" data-intel-note-delete="${esc(note.id)}" aria-label="Delete note">Delete</button></div>`).join(''):
+        `<p class="prep-intel-muted">${dossierNotes.loaded?'No notes about this Pokémon yet.':'Your saved notes will appear here.'}</p>`}</div>
+    </section>`;
+  const intelMoveHistory=mon=>{
+    const stats=moveEvidence(mon);
+    const entries=stats.moves.slice(0,12);
+    const rows=entries.map(move=>`<tr><th scope="row">${esc(move.name)}</th>
+      <td>${move.battles}/${stats.available}</td><td>${move.uses}</td>
+      <td>${move.hits?`${move.hits} hit${move.hits===1?'':'s'}`:'Not indexed'}</td>
+      <td>${move.medianPercent===null?'Unknown':`${move.medianPercent.toFixed(1)}%`}</td>
+      <td>${move.totalPercent===null?'Unknown':`${move.totalPercent.toFixed(1)}%`}</td></tr>`).join('');
+    return `<div class="prep-intel-detail-block prep-dossier-moves"><h4>Observed move performance</h4>
+      <p class="prep-intel-muted">Replays show what this coach actually used, not their unrevealed set. Percentages are target max HP lost, not predicted damage. Critical hits, investment and conditions can alter results.</p>
+      ${entries.length?`<div class="prep-dossier-moves-scroll"><table><thead><tr><th>Move</th><th>Replays</th><th>Uses</th><th>Hits</th><th>Median hit</th><th>Total HP%</th></tr></thead><tbody>${rows}</tbody></table></div>`:`<p class="prep-intel-muted">${Number(mon?.usage?.appearances||0)>0?'Confirmed in the replay team, but no move was observed or indexed for this Pokémon. Being brought does not prove a move was used.':'No replay appearances or observed moves recorded for this Pokémon in the selected season.'}</p>`}
+      <p class="prep-intel-muted">${stats.indexed?`${stats.indexed} damaging move${stats.indexed===1?'':'s'} with indexed hit evidence.`:'Damage by move has not been indexed in existing replays.'} Older replays need reprocessing to populate exact move-damage evidence. Indirect damage is excluded.</p>
+    </div>`;
   };
   const threatLevel=s=>s===null?'low':s>=70?'high':s>=40?'medium':'low';
   STATE.prepThreatSelected=opp.some(m=>speciesKey(m.species)===speciesKey(STATE.prepThreatSelected))?
@@ -1491,55 +1728,103 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
     const query=String(root.querySelector('#prepThreatSearch')?.value||'').trim().toLowerCase();
     const filter=root.querySelector('#prepThreatFilter')?.value||'all';
     const sort=root.querySelector('#prepThreatSort')?.value||'matchup';
-    let rows=model.threats.filter(r=>!query||displaySpecies(r.enemy).toLowerCase().includes(query)||
-      (typeMap[r.enemy.species]||[]).join(' ').toLowerCase().includes(query));
-    rows=rows.filter(r=>filter==='all'||(filter==='unscouted'?r.scouting.score===null:
-      filter==='high'?r.score>=70:filter==='medium'?r.score>=40&&r.score<70:r.score<40));
+    let rows=model.threats.filter(r=>!query||displaySpecies(r.enemy).toLowerCase().includes(query)||(typeMap[r.enemy.species]||[]).join(' ').toLowerCase().includes(query));
+    rows=rows.filter(r=>filter==='all'||(filter==='unscouted'?!Number(r.enemy.usage?.appearances||0):
+      filter==='high'?r.score>=70:filter==='medium'?r.score>=40&&r.score<70:filter==='unassessed'?r.score===null:r.score!==null&&r.score<40));
     rows.sort((a,b)=>sort==='scouting'?(b.scouting.score??-1)-(a.scouting.score??-1):
       sort==='bring'?(b.scouting.bring??-1)-(a.scouting.bring??-1):
       sort==='kos'?Number(b.scouting.kos||0)-Number(a.scouting.kos||0):
       (b.score??-1)-(a.score??-1));
     const body=root.querySelector('#prepThreatRows');
-    if(body)body.innerHTML=rows.map(r=>`<tr data-threat-mon="${esc(r.enemy.species)}" class="${speciesKey(r.enemy.species)===speciesKey(STATE.prepThreatSelected)?'selected':''}"><td><div class="prep-new-mon-cell">${sprite(r.enemy.species,'prep-new-table-sprite')}<div><strong>${esc(displaySpecies(r.enemy))}</strong><small>${(typeMap[r.enemy.species]||[]).map(esc).join(' / ')||'Typing unavailable'}</small></div></div></td><td><span class="prep-new-threat-pill ${threatLevel(r.score)}">${esc(r.label)}</span><div class="prep-new-meter"><i style="width:${r.score??0}%"></i></div></td><td>${esc(r.scouting.label)}<small class="prep-intel-minor">${esc(r.scouting.confidence)}</small></td><td>${r.affected.length}/${model.active.length}</td><td>${r.scouting.games}</td></tr>`).join('');
+    if(body)body.innerHTML=rows.map(r=>{
+      const selected=speciesKey(r.enemy.species)===speciesKey(STATE.prepThreatSelected);
+      const evidence=moveEvidence(r.enemy);
+      const top=evidence.moves[0];
+      const plays=Number(r.enemy.usage?.appearances||0);
+      return `<button type="button" class="prep-dossier-card ${selected?'selected':''}"
+        data-threat-mon="${esc(r.enemy.species)}" aria-pressed="${selected?'true':'false'}" aria-controls="prepThreatDetail">
+        ${intelMonMarkup(r.enemy,'prep-new-table-sprite')}
+        <span class="prep-dossier-snapshot"><span>${plays} ${plays===1?'appearance':'appearances'}</span><span>${Number(r.enemy.usage?.kills||0)} KOs</span></span>
+        <span class="prep-dossier-secondary">${top?`Observed: ${esc(top.name)} (${top.battles} ${top.battles===1?'battle':'battles'})`:'No observed move data'}</span>
+        <span class="prep-dossier-open">${selected?'Viewing dossier':'View dossier'}</span>
+      </button>`;
+    }).join('');
     const empty=root.querySelector('#prepThreatEmpty');if(empty)empty.hidden=!!rows.length;
     const count=root.querySelector('#prepThreatCount');if(count)count.textContent=`${rows.length} of ${opp.length} opponent Pokémon`;
+    const overview=root.querySelector('#prepIntelThreatSummary');
+    if(overview){const high=model.threats.filter(t=>model.active.length&&t.score>=70).length,scouted=model.threats.filter(t=>Number(t.enemy.usage?.appearances||0)>0).length;
+      overview.innerHTML=`<div class="prep-intel-summary-tile"><span>Selected team</span><strong>${model.active.length} / 6</strong><small>Change in Team Planner</small></div><div class="prep-intel-summary-tile"><span>Possible coverage to check</span><strong>${model.active.length?high:'N/A'}</strong><small>Hypothetical screen, not confirmed danger</small></div><div class="prep-intel-summary-tile"><span>Replay evidence</span><strong>${scouted} / ${opp.length}</strong><small>Opponents brought in replays</small></div>`;}
     const selected=model.threats.find(r=>speciesKey(r.enemy.species)===speciesKey(STATE.prepThreatSelected));
-    const detail=root.querySelector('#prepThreatDetail');if(detail)detail.innerHTML=intelDetailMarkup(selected);
+    const detail=root.querySelector('#prepThreatDetail');
+    if(detail){
+      const draft=detail.querySelector('[data-intel-note-text]');
+      if(draft)dossierNotes.drafts.set(dossierKey(draft.dataset.intelNoteText),draft.value);
+      const wasExpanded=detail.querySelector('[data-intel-extra="dossier"]')?.open||false;
+      detail.innerHTML=intelDetailMarkup(selected);
+      const nowAdvanced=detail.querySelector('[data-intel-extra="dossier"]');
+      if(nowAdvanced&&wasExpanded)nowAdvanced.open=true;
+    }
   };
-  const threatBoardSection=`<section id="prepThreatBoard" class="panel prep-selectable-section prep-new-section" data-prep-section="threats">
-    <div class="prep-new-section-head"><div><span class="prep-new-kicker">EVIDENCE-AWARE SCOUTING</span><h2>Opponent Threat Board</h2><p class="panel-desc">Matchup pressure estimates potential type coverage against your selected six. Scouting priority measures recorded usage. Unverified coverage is clearly labelled, not treated as an observed move.</p></div><div class="prep-new-count"><strong id="prepThreatCount">${opp.length} opponent Pokémon</strong><small>SCOUTING POOL</small></div></div>
-    <div class="prep-new-toolbar"><input id="prepThreatSearch" type="search" placeholder="Search opponent Pokémon or type…" aria-label="Search opponent threats"><select id="prepThreatSort" aria-label="Sort threats"><option value="matchup">Matchup pressure</option><option value="scouting">Scouting priority</option><option value="bring">Bring rate</option><option value="kos">KOs</option></select><select id="prepThreatFilter" aria-label="Filter threat priority"><option value="all">All matchups</option><option value="high">High pressure</option><option value="medium">Medium pressure</option><option value="low">Lower pressure</option><option value="unscouted">No replay sample</option></select><button type="button" data-intel-load-all>Inspect opponent moves</button><span class="prep-intel-muted" id="prepIntelLoadStatus">Move coverage loads on request</span></div>
-    <div class="prep-new-threat-layout"><div class="prep-new-table-wrap"><table class="prep-new-table"><thead><tr><th>Pokémon</th><th>Matchup pressure</th><th>Scouting</th><th>Affected</th><th>Sample</th></tr></thead><tbody id="prepThreatRows"></tbody></table><div id="prepThreatEmpty" class="prep-new-empty" hidden>No Pokémon match this filter.</div></div><aside id="prepThreatDetail" class="prep-new-detail"></aside></div>
-    <p class="prep-new-footnote">Move legality and evidence are not guaranteed by typing. Scouting depends on replay sample size. Catalogue moves may not be legal in every format; damage ranges require the Switch-In Analyser.</p>
+  const threatBoardSection=`<section id="prepThreatBoard" class="panel prep-selectable-section prep-new-section prep-intel-v2" data-prep-section="threats">
+    <div class="prep-new-section-head"><div><span class="prep-new-kicker">MATCHUP SCOUTING</span><h2>Opponent Scouting Board</h2><p class="panel-desc">See which opposing Pokémon pressure your selected six and why. Scouting history and matchup danger are shown separately.</p></div><div class="prep-new-count"><strong id="prepThreatCount">${opp.length} opponent Pokémon</strong><small>OPPONENT ROSTER</small></div></div>
+    <div id="prepIntelThreatSummary" class="prep-intel-summary" aria-label="Threat overview"></div>
+    <div class="prep-new-toolbar prep-intel-toolbar"><input id="prepThreatSearch" type="search" placeholder="Find an opponent or type" aria-label="Search opponent threats"><select id="prepThreatSort" aria-label="Sort threats"><option value="matchup">Sort: matchup pressure</option><option value="scouting">Sort: scouting priority</option><option value="bring">Sort: bring rate</option><option value="kos">Sort: KOs</option></select><select id="prepThreatFilter" aria-label="Filter threat priority"><option value="all">All opponents</option><option value="high">High potential</option><option value="medium">Moderate potential</option><option value="low">Lower potential</option><option value="unassessed">Damage unassessed</option><option value="unscouted">No recorded appearances</option></select><button type="button" data-intel-load-all>Analyse all opponent moves</button><span class="prep-intel-muted" id="prepIntelLoadStatus" role="status">Move data loads for the selected dossier; use Analyse all for the entire roster</span></div>
+    <div class="prep-new-threat-layout"><div class="prep-intel-threat-list-panel"><div class="prep-intel-list-heading"><strong>Opponent roster</strong><span>Choose a Pokémon to open its dossier below</span></div><div id="prepThreatRows" class="prep-intel-threat-list" aria-label="Threat roster"></div><div id="prepThreatEmpty" class="prep-new-empty" hidden>No Pokémon match this filter.</div></div><aside id="prepThreatDetail" class="prep-new-detail" aria-label="Selected threat details"></aside></div>
+    <p class="prep-new-footnote">Offensive potential uses base power, physical or special attacking and defensive stats, STAB and type effectiveness, limited to a hypothetical four-move coverage screen. No EVs, items, abilities or setup are assumed. It is not an actual damage calculation or a confirmed opponent set.</p>
   </section>`;
   const plannerMarkup=()=>{
     const query=String(STATE.prepPlannerSearch||'').toLowerCase();
     const model=intelModel(),team=model.active;
     const filtered=your.filter(m=>!query||displaySpecies(m).toLowerCase().includes(query)||(typeMap[m.species]||[]).join(' ').toLowerCase().includes(query));
+    const high=model.threats.filter(t=>t.score>=70).length;
     const speedRows=team.map(m=>({mon:m,beats:opp.filter(o=>m.maxSpeed!=null&&o.maxSpeed!=null&&m.maxSpeed>o.maxSpeed).length,
       total:opp.filter(o=>m.maxSpeed!=null&&o.maxSpeed!=null).length})).sort((a,b)=>b.beats-a.beats);
     const offensiveRows=team.map(ally=>{
       const attacker={species:ally.species,types:typeMap[ally.species]||[],
-        legalMoves:window.__sblPlannerMoves?.[ally.species]||[],observedMoves:[]};
+        candidateMoves:window.__sblPlannerMoves?.[ally.species]||[],observedMoves:observedFor(ally)};
       const targets=opp.map(enemy=>({enemy,hit:intel.pair(attacker,{species:enemy.species,types:typeMap[enemy.species]||[]})}))
-        .filter(entry=>entry.hit.threatened && entry.hit.evidence!=='typing-only');
+        .filter(entry=>entry.hit.threatened&&entry.hit.evidence!=='typing-only');
       return {ally,targets};
     }).filter(row=>row.targets.length).sort((a,b)=>b.targets.length-a.targets.length);
-    const weaknessMarkup=model.weaknesses.map(w=>`<details class="prep-intel-weakness"><summary>${typePill(w.type)} <b>${w.vulnerable.length}/${team.length} weak</b> <small>${w.sources.length} opposing potential source${w.sources.length===1?'':'s'}</small></summary>
-      <div class="prep-intel-weakness-body"><p>Vulnerable: ${w.vulnerable.map(x=>esc(displaySpecies(x))).join(', ')}</p>
-      ${w.sources.length?w.sources.map(src=>`<div class="prep-intel-match-row"><strong>${esc(displaySpecies(src.enemy))}</strong><span>${src.move?esc(src.move):esc(w.type)+' STAB potential'} · ${esc(evidenceLabel(src.evidence))}<br>Targets: ${src.targets.map(x=>esc(displaySpecies(x))).join(', ')}</span><button type="button" data-intel-load="${esc(src.enemy.species)}">Check moves</button><button type="button" data-intel-switch="${esc(src.enemy.species)}">Switch-In</button></div>`).join(''):'<p>No opponent move source established from available data.</p>'}
+    const pressuredWeaknesses=model.weaknesses.filter(w=>w.sources.length).sort((a,b)=>b.sources.length-a.sources.length||b.vulnerable.length-a.vulnerable.length);
+    const unpressuredWeaknesses=model.weaknesses.filter(w=>!w.sources.length);
+    const weaknessMarkup=pressuredWeaknesses.map(w=>`<details class="prep-intel-weakness" data-intel-weakness="${esc(w.type)}"><summary><span class="prep-intel-weakness-leading">${typePill(w.type)}<span><strong>${w.vulnerable.length} of ${team.length} weak</strong><small>${w.sources.length} opposing attack source${w.sources.length===1?'':'s'}</small></span></span><span class="prep-intel-weakness-preview">${w.sources.length?esc(displaySpecies(w.sources[0].enemy))+' and others':'No identified source'}</span></summary>
+      <div class="prep-intel-weakness-body"><div class="prep-intel-weakness-targets"><span class="prep-intel-kicker">Your Pokémon at risk</span><div class="prep-intel-answer-list">${w.vulnerable.map(x=>`<span>${esc(displaySpecies(x))}</span>`).join('')}</div></div>
+      <span class="prep-intel-kicker">Opponents that can exploit it</span>
+      ${w.sources.length?w.sources.map(src=>`<div class="prep-intel-source-row">${intelMonMarkup(src.enemy)}<div class="prep-intel-source-explain"><strong>${src.move?esc(src.move):esc(w.type)+' STAB potential'}</strong>${intelEvidenceBadge(src.evidence)}<span>Targets: ${src.targets.map(x=>esc(displaySpecies(x))).join(', ')}</span></div><div class="prep-intel-source-actions"><button type="button" data-intel-load="${esc(src.enemy.species)}">Moves</button><button type="button" data-intel-switch="${esc(src.enemy.species)}">Switch-In</button></div></div>`).join(''):'<p class="prep-intel-muted">No confirmed opponent move source. This is still a vulnerability worth checking.</p>'}
       </div></details>`).join('');
-    const matrix=`<div class="prep-intel-matrix-wrap"><table class="prep-intel-matrix"><thead><tr><th>Your six ↓ / Opponent →</th>${opp.map(x=>`<th>${esc(displaySpecies(x))}</th>`).join('')}</tr></thead><tbody>${team.map(ally=>`<tr><th>${esc(displaySpecies(ally))}</th>${model.threats.length?opp.map(enemy=>{const pair=model.lookup(enemy,ally),symbol=pair.unknown?'?':pair.threatened?'!':pair.maxMultiplier<=.5?'✓':'·';const cls=pair.unknown?'unknown':pair.threatened?'risk':pair.maxMultiplier<=.5?'resist':'neutral';return `<td><button type="button" class="prep-intel-cell ${cls}" data-intel-switch="${esc(enemy.species)}" title="${esc(pair.reason)}" aria-label="${esc(displaySpecies(enemy))} versus ${esc(displaySpecies(ally))}: ${esc(pair.reason)}">${symbol}</button></td>`;}).join(''):''}</tr>`).join('')||`<tr><td colspan="${opp.length+1}">Choose up to six Pokémon.</td></tr>`}</tbody></table></div>`;
-    return `<div class="prep-new-planner-layout"><div class="prep-new-roster-side"><div class="prep-new-planner-top"><div><h3>Your roster</h3><p>Choose up to six Pokémon. Threat Board updates automatically.</p></div><span class="prep-new-selected-count"><b>${team.length}</b> / 6 selected</span></div><div class="prep-new-roster-grid">${filtered.map(m=>{const on=team.some(x=>speciesKey(x.species)===speciesKey(m.species));return `<button type="button" class="prep-new-roster-card ${on?'selected':''}" data-planner-mon="${esc(m.species)}" ${!on&&team.length>=6?'disabled':''}>${sprite(m.species,'prep-new-roster-sprite')}<span><strong>${esc(displaySpecies(m))}</strong><small>${(typeMap[m.species]||[]).map(esc).join(' / ')||'Type unavailable'} · Spe ${m.baseSpeed??'N/A'}</small></span><i>${on?'✓':'＋'}</i></button>`;}).join('')||'<div class="prep-new-empty">No Pokémon found.</div>'}</div></div>
-      <aside class="prep-new-planner-side"><section class="prep-new-planner-card"><div class="prep-new-card-title"><h3>Selected six</h3><button type="button" class="prep-new-clear" data-planner-clear>Clear</button></div><div class="prep-new-selected-list">${team.length?team.map(m=>`<div class="prep-new-selected-row">${sprite(m.species,'prep-new-selected-sprite')}<div><strong>${esc(displaySpecies(m))}</strong><small>${(typeMap[m.species]||[]).join(' / ')}</small></div><button type="button" data-planner-remove="${esc(m.species)}" aria-label="Remove ${esc(displaySpecies(m))}">×</button></div>`).join(''):'<div class="prep-new-empty">Choose Pokémon from your roster.</div>'}</div><p class="prep-new-validation">${team.length===6?'Complete team selected.':`${6-team.length} selections remaining.`}</p></section>
-      <section class="prep-new-planner-card"><h3>Defensive weaknesses explained</h3><p>Open a type to see exactly who on your team is weak, which opposing Pokémon might exploit it, and with what evidence.</p>${weaknessMarkup||'<div class="prep-new-empty">No weaknesses identified for this selection.</div>'}</section></aside></div>
-      <div class="prep-intel-wide"><section class="prep-new-planner-card"><h3>Selected-six matchup matrix</h3><p>! = super-effective potential · ✓ = resisted/immune by typing · ? = missing data. Click a cell to inspect that opposing attacker in Switch-In.</p>${matrix}<p class="prep-intel-muted">A resistant cell is a type advantage, not a damage-verified safe switch-in.</p></section></div>
-      <div class="prep-new-planner-insights"><section class="prep-new-planner-card"><h3>Your offensive coverage</h3><p>Catalogued attacking moves that could hit the opponent super-effectively. These are possibilities, not confirmed sets.</p>${offensiveRows.length?offensiveRows.map(x=>`<div class="prep-intel-match-row"><strong>${esc(displaySpecies(x.ally))}</strong><span>${x.targets.map(t=>`${esc(displaySpecies(t.enemy))}: ${intelPairSummary(t.hit)}`).join('<br>')}</span></div>`).join(''):'<i>No usable move metadata yet. Select a Pokémon to load available move metadata.</i>'}</section><section class="prep-new-planner-card"><h3>Potential team changes</h3><p>Suggestions compare super-effective type exposures only, not actual damage or teammate roles.</p>${model.suggestions.length?model.suggestions.map(s=>`<div class="prep-intel-suggestion"><strong>${esc(displaySpecies(s.incoming))} instead of ${esc(displaySpecies(s.outgoing))}</strong><span>Potential exposures ${s.oldCount} → ${s.newCount} (−${s.gain})</span></div>`).join(''):'<i>No obvious type-exposure reduction from your benched Pokémon.</i>'}</section>
-      <section class="prep-new-planner-card"><h3>Opposing pressure</h3><p>Who threatens your selected six, using the same evidence as Threat Board.</p>${model.threats.map(t=>`<div class="prep-new-pressure-row">${sprite(t.enemy.species,'prep-new-pressure-sprite')}<strong>${esc(displaySpecies(t.enemy))}</strong><span>${t.affected.length}/${team.length} · ${esc(t.evidence)}</span><button type="button" data-intel-load="${esc(t.enemy.species)}">Moves</button></div>`).join('')||'<div class="prep-new-empty">No opponent roster selected.</div>'}</section>
-      <section class="prep-new-planner-card"><h3>Speed outlook</h3><p>Maximum standard level-100 Speed, assuming 252 EVs and a positive nature; no field modifiers.</p>${speedRows.map(x=>`<div class="prep-new-speed-row">${sprite(x.mon.species,'prep-new-pressure-sprite')}<strong>${esc(displaySpecies(x.mon))}</strong><b>${x.mon.maxSpeed??'N/A'}</b><span>${x.total?`${x.beats}/${x.total} outsped`:'Unknown'}</span></div>`).join('')||'<div class="prep-new-empty">Select your six.</div>'}</section></div>`;
+    const matrix=`<div class="prep-intel-matrix-wrap" role="region" aria-label="Matchup options matrix" tabindex="0"><table class="prep-intel-matrix"><thead><tr><th scope="col">Your team / Opponent</th>${opp.map(x=>`<th scope="col"><span class="prep-intel-matrix-mon">${sprite(x.species,'prep-intel-matrix-sprite')}<span>${esc(displaySpecies(x))}</span></span></th>`).join('')}</tr></thead><tbody>${team.map(ally=>`<tr><th scope="row">${intelMonMarkup(ally,'prep-intel-matrix-sprite')}</th>${opp.map(enemy=>{
+      const against=model.lookup(enemy,ally),ours=intel.pair(ally,intelMon(enemy));
+      const outcome=intel.assessOptions(ours,against);
+      const oursLabel=ours.best?'~'+ours.estimatedPercent+'%':'?';
+      const theirsLabel=against.best?'~'+against.estimatedPercent+'%':'?';
+      const detail=`Your option: ${ours.best?.name||'unassessed'} (${oursLabel}); opponent option: ${against.best?.name||'unassessed'} (${theirsLabel}). Hypothetical baseline, not a predicted winner.`;
+      return `<td><button type="button" class="prep-intel-cell ${outcome.tone}" data-intel-pair="${esc(enemy.species)}" data-intel-defender="${esc(ally.species)}" title="${esc(detail)}" aria-label="${esc(displaySpecies(ally))} versus ${esc(displaySpecies(enemy))}: ${esc(outcome.label)}. ${esc(detail)}"><strong>${esc(outcome.label)}</strong><small>You ${oursLabel} · Them ${theirsLabel}</small></button></td>`;
+    }).join('')}</tr>`).join('')||`<tr><td colspan="${opp.length+1}" class="prep-new-empty">Select Pokémon to compare matchups.</td></tr>`}</tbody></table></div>`;
+    const prior=STATE.prepIntelPair||{};
+    const selectedEnemy=opp.find(x=>speciesKey(x.species)===speciesKey(prior.enemy));
+    const selectedAlly=team.find(x=>speciesKey(x.species)===speciesKey(prior.ally));
+    const pairDetails=selectedEnemy&&selectedAlly?intelPairDetails(selectedEnemy,selectedAlly,model.lookup(selectedEnemy,selectedAlly)):
+      '<div class="prep-intel-pair-placeholder">Select any matrix cell to see the move evidence for that pairing, then open Switch-In to calculate damage.</div>';
+    const biggest=model.threats.filter(t=>t.affected.length).slice(0,4);
+    return `<div class="prep-intel-summary" aria-label="Selected team overview"><div class="prep-intel-summary-tile"><span>Your picks</span><strong>${team.length} / 6</strong><small>${team.length===6?'Team complete':`${6-team.length} spots to fill`}</small></div><div class="prep-intel-summary-tile"><span>Identified pressure types</span><strong>${pressuredWeaknesses.length}</strong><small>${unpressuredWeaknesses.length} other vulnerabilities</small></div><div class="prep-intel-summary-tile"><span>Scouting screens completed</span><strong>${team.length?model.threats.reduce((n,t)=>n+t.assessed,0)+' / '+(team.length*opp.length):'N/A'}</strong><small>${team.length?'Unknown matchups are not safe matchups':'Select a Pokémon first'}</small></div></div>
+    <div class="prep-new-planner-layout"><section class="prep-new-roster-side prep-intel-surface"><div class="prep-new-planner-top"><div><h3>Build your six</h3><p>Select a Pokémon to add or remove it. Changes update both tools.</p></div><span class="prep-new-selected-count"><b>${team.length}</b> / 6</span></div><div class="prep-new-roster-grid">${filtered.map(m=>{const on=team.some(x=>speciesKey(x.species)===speciesKey(m.species));return `<button type="button" class="prep-new-roster-card ${on?'selected':''}" aria-pressed="${on?'true':'false'}" data-planner-mon="${esc(m.species)}" ${!on&&team.length>=6?'disabled':''}>${sprite(m.species,'prep-new-roster-sprite')}<span><strong>${esc(displaySpecies(m))}</strong><small>${(typeMap[m.species]||[]).map(esc).join(' / ')||'Typing unavailable'} | Speed ${m.baseSpeed??'N/A'}</small></span><i aria-hidden="true">${on?'✓':'+'}</i></button>`;}).join('')||'<div class="prep-new-empty">No Pokémon match your search.</div>'}</div></section>
+    <section class="prep-new-planner-card prep-intel-selected-panel"><div class="prep-new-card-title"><h3>Selected six</h3><button type="button" class="prep-new-clear" data-planner-clear>Clear team</button></div><div class="prep-new-selected-list">${team.length?team.map(m=>`<div class="prep-new-selected-row">${sprite(m.species,'prep-new-selected-sprite')}<div><strong>${esc(displaySpecies(m))}</strong><small>${(typeMap[m.species]||[]).join(' / ')}</small></div><button type="button" data-planner-remove="${esc(m.species)}" aria-label="Remove ${esc(displaySpecies(m))}">×</button></div>`).join(''):'<div class="prep-new-empty">Choose from your roster to start the matchup analysis.</div>'}</div><p class="prep-new-validation">${team.length===6?'Ready to review matchups.':`${6-team.length} selections remaining.`}</p></section></div>
+    <div class="prep-intel-priority-grid"><section class="prep-new-planner-card"><div class="prep-intel-panel-heading"><div><span class="prep-intel-kicker">DEFENSIVE PRESSURE</span><h3>Weaknesses worth preparing for</h3></div><span class="prep-intel-panel-count">${pressuredWeaknesses.length} types</span></div><p>Start with type vulnerabilities the opposing roster could exploit. A type weakness does not mean the move deals meaningful damage.</p>${team.length?(weaknessMarkup||'<div class="prep-new-empty">No opposing attack source identified yet. Other raw type weaknesses are below.</div>'):'<div class="prep-new-empty">Choose Pokémon above to reveal team weaknesses.</div>'}
+      ${team.length&&unpressuredWeaknesses.length?`<details class="prep-intel-extra prep-intel-raw"><summary>Other type weaknesses (${unpressuredWeaknesses.length}), no identified opposing source</summary><div class="prep-intel-raw-list">${unpressuredWeaknesses.map(w=>`<div>${typePill(w.type)} <strong>${w.vulnerable.length}/${team.length} weak</strong><span>${w.vulnerable.map(x=>esc(displaySpecies(x))).join(', ')}</span></div>`).join('')}</div><p>These are type vulnerabilities, but the current opponent data does not identify an attack source. Unknown coverage remains possible.</p></details>`:''}</section>
+      <section class="prep-new-planner-card"><div class="prep-intel-panel-heading"><div><span class="prep-intel-kicker">OPPONENT WATCHLIST</span><h3>Who threatens this selection?</h3></div><span class="prep-intel-panel-count">${biggest.length} flagged</span></div><p>Potential damaging moves checked against the selected six, considering base power and offensive and defensive stats. Not a confirmed set.</p>${team.length&&biggest.length?biggest.map(t=>`<div class="prep-intel-watch-row">${intelMonMarkup(t.enemy)}<div class="prep-intel-watch-meta"><strong>${t.affected.length}/${team.length} at risk</strong><span>${t.affected.slice(0,2).map(x=>esc(displaySpecies(x.ally))).join(', ')}${t.affected.length>2?' and more':''}</span></div><button type="button" data-intel-load="${esc(t.enemy.species)}">Moves</button></div>`).join(''):'<div class="prep-new-empty">No matchups flagged yet. Select your six to start.</div>'}</section></div>
+    <section class="prep-new-planner-card prep-intel-matrix-panel"><div class="prep-intel-panel-heading"><div><span class="prep-intel-kicker">PAIRWISE COMPARISON</span><h3>Matchup matrix</h3></div><span class="prep-intel-panel-count">${team.length} × ${opp.length}</span></div><p>Colours compare the attacks actually assessable on both sides, not just type weaknesses. Each cell shows your strongest available option and the opponent's possible option. Tap for move evidence, assumptions and alternatives. Colours are <strong>not win probabilities or safe-switch guarantees</strong>.</p><div class="prep-intel-matrix-legend"><span><b class="edge">Edge</b> Your potential advantage</span><span><b class="trade">Trade</b> Both sides threaten</span><span><b class="risk">Risk</b> Opponent pressure</span><span><b class="caution">Check</b> Conditional / partial</span><span><b class="even">Even</b> No clear baseline edge</span><span><b class="unknown">?</b> Missing data</span></div>${matrix}<div id="prepIntelPairDetail" class="prep-intel-pair-detail-container" aria-live="polite">${pairDetails}</div></section>
+    <div class="prep-new-planner-insights"><section class="prep-new-planner-card"><div class="prep-intel-panel-heading"><div><span class="prep-intel-kicker">OPTIONAL CHANGES</span><h3>Possible swaps</h3></div></div><p>These improve type exposure only, not predicted results.</p>${model.suggestions.length?model.suggestions.map(s=>`<div class="prep-intel-suggestion"><strong>${esc(displaySpecies(s.incoming))} for ${esc(displaySpecies(s.outgoing))}</strong><span>${s.oldCount} to ${s.newCount} potential pressures, down ${s.gain}</span></div>`).join(''):'<span class="prep-intel-faint">No obvious type-exposure improvement from the bench.</span>'}</section>
+      <section class="prep-new-planner-card"><details class="prep-intel-extra"><summary>Offensive coverage</summary><p>Catalogued moves that could hit opponents super-effectively.</p>${offensiveRows.length?offensiveRows.map(x=>`<div class="prep-intel-match-row"><strong>${esc(displaySpecies(x.ally))}</strong><span>${x.targets.map(t=>`${esc(displaySpecies(t.enemy))}: ${intelPairSummary(t.hit)}`).join(' | ')}</span></div>`).join(''):'<span class="prep-intel-faint">Move metadata is not available yet. Select a Pokémon to load it.</span>'}</details><details class="prep-intel-extra"><summary>Speed overview</summary><p>Level 100 maximum Speed, positive nature, 252 EVs and no field effects.</p>${speedRows.map(x=>`<div class="prep-new-speed-row">${sprite(x.mon.species,'prep-new-pressure-sprite')}<strong>${esc(displaySpecies(x.mon))}</strong><b>${x.mon.maxSpeed??'N/A'}</b><span>${x.total?`${x.beats}/${x.total} outsped`:'Unknown'}</span></div>`).join('')||'<span class="prep-intel-faint">Select your six.</span>'}</details></section></div>`;
   };
-  window.__sblRefreshPrepTeamPlanner=()=>{const root=document.getElementById('prepPlannerContent');if(root)root.innerHTML=plannerMarkup();};
-  const teamPlannerSection=`<section id="prepTeamPlanner" class="panel prep-selectable-section prep-new-section" data-prep-section="planner"><div class="prep-new-section-head"><div><span class="prep-new-kicker">BUILD YOUR MATCHUP</span><h2>Six-Pokémon Team Planner</h2><p class="panel-desc">See which opposing Pokémon exploit your weaknesses, compare every pairing, and test alternative selections. All coverage labels indicate the strength of their evidence.</p></div></div><div class="prep-new-toolbar"><input id="prepPlannerSearch" type="search" value="${esc(STATE.prepPlannerSearch||'')}" placeholder="Search your roster…" aria-label="Search your roster"></div><div id="prepPlannerContent"></div></section>`;
+  window.__sblRefreshPrepTeamPlanner=()=>{
+    const root=document.getElementById('prepPlannerContent');
+    if(!root)return;
+    const expanded=[...root.querySelectorAll('details[data-intel-weakness][open]')].map(x=>x.dataset.intelWeakness);
+    root.innerHTML=plannerMarkup();
+    root.querySelectorAll('details[data-intel-weakness]').forEach(x=>{if(expanded.includes(x.dataset.intelWeakness))x.open=true;});
+  };
+  const teamPlannerSection=`<section id="prepTeamPlanner" class="panel prep-selectable-section prep-new-section prep-intel-v2" data-prep-section="planner"><div class="prep-new-section-head"><div><span class="prep-new-kicker">PREPARE YOUR SIX</span><h2>Team Planner</h2><p class="panel-desc">Build your six, see who exploits each weakness and investigate potential counters. Threat Board updates from the same selection.</p></div></div><div class="prep-new-toolbar"><input id="prepPlannerSearch" type="search" value="${esc(STATE.prepPlannerSearch||'')}" placeholder="Search your roster…" aria-label="Search your roster"></div><div id="prepPlannerContent"></div></section>`;
   window.__sblPlannerMoves={};
   window.__sblLoadPlannerMoveTypes=async species=>{
     if(!window.__sblPlannerMoves[species]){
@@ -1752,7 +2037,7 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
   const switchMon=switchAttackerMons.find(m=>m.species===defaultOppMon)||switchAttackerMons[0];
   const observedMoveOptions=switchMon?observedFor(switchMon):[];
   // The analyser must work even when a move has never appeared in a replay.
-  // The selector is populated from the legal damaging learnset immediately
+  // The selector is populated from the shared damaging move candidates immediately
   // after render, with observed moves used only as a preferred starting point.
   const defaultMove=STATE.prepSwitchMove||observedMoveOptions[0]||'';
   const switchRows=`<div id="switchResults"><div class="empty">Select a damaging move to calculate switch-ins.</div></div>`;
@@ -1763,10 +2048,17 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
   const switchWeatherOptions=[['','Clear'],['Rain','Rain'],['Sun','Sun'],['Sand','Sand'],['Snow','Snow'],['Hail','Hail'],['Strong Winds','Strong Winds'],['Heavy Rain','Heavy Rain'],['Harsh Sunshine','Harsh Sunshine']];
   const switchTerrainOptions=[['','None'],['Electric','Electric'],['Grassy','Grassy'],['Misty','Misty'],['Psychic','Psychic']];
   const switchFieldSelect=(id,value,options)=>`<select id="${id}">${options.map(([v,label])=>`<option value="${esc(v)}" ${v===value?'selected':''}>${esc(label)}</option>`).join('')}</select>`;
-  const switchSection=`<section id="prepSwitchAnalyser" class="panel prep-selectable-section" data-prep-section="switch"><div class="switch-analyser-head"><div><h2>Switch-In Analyser</h2><p class="panel-desc">Choose the attacking side, damaging move, and switch-in defender.</p></div><button type="button" id="prepSwitchRoleToggle" class="switch-role-toggle" aria-pressed="false">↔ Swap attacker / defender</button></div><p class="panel-desc">Choose an attacking Pokémon and one of its damaging learnset moves. Set the offensive EVs and each switch-in Pokémon's defensive EVs individually. Weather and terrain only affect moves they actually influence.</p><div class="prep-switch-controls"><div><label>Attacker Pokémon <span class="switch-side-label">(${switchAttackerSide==='your'?'Your Team':'Opponent Team'})</span></label><select id="prepSwitchMon">${switchAttackerMons.map(m=>`<option value="${esc(m.species)}" ${m.species===switchMon?.species?'selected':''}>${esc(displaySpecies(m))}</option>`).join('')}</select></div><div><label>Damaging Move</label><select id="prepSwitchMove"><option value="">${observedMoveOptions.length?'Select a damaging move':'Loading moves…'}</option>${observedMoveOptions.map(m=>`<option value="${esc(m)}" ${norm(m)===norm(defaultMove)?'selected':''}>${esc(m)}</option>`).join('')}</select></div><div id="prepSwitchHitsField" style="display:none"><label>Number of Hits</label><select id="prepSwitchHits"><option value="">Auto</option></select></div></div><div class="prep-item-controls"><div><label>Attacker Item</label>${switchItemSelect('prepSwitchAtkItem',switchAtkItem,'offensive')}</div><div><label>Switch-In Item</label>${switchItemSelect('prepSwitchDefItem',switchDefItem,'defensive')}</div><div><label>Offensive EVs</label><button type="button" id="prepSwitchAtkEVs" class="damage-calc-primary">Set EVs</button></div><div><label>Defensive EVs</label><button type="button" id="prepSwitchAllDefEVs" class="prep-all-evs-btn">Set All EVs</button></div></div><div class="prep-item-controls"><div><label>Weather</label>${switchFieldSelect('prepSwitchWeather',switchWeather,switchWeatherOptions)}</div><div><label>Terrain</label>${switchFieldSelect('prepSwitchTerrain',switchTerrain,switchTerrainOptions)}</div></div>${switchRows}</section>`;
+  const switchSection=`<section id="prepSwitchAnalyser" class="panel prep-selectable-section" data-prep-section="switch"><div class="switch-analyser-head"><div><h2>Switch-In Analyser</h2><p class="panel-desc">Choose the attacking side, damaging move, and switch-in defender.</p></div><button type="button" id="prepSwitchRoleToggle" class="switch-role-toggle" aria-pressed="false">↔ Swap attacker / defender</button></div><p class="panel-desc">Choose an attacking Pokémon and one of its catalogued damaging move candidates. Current-format legality is not implied. Set the offensive EVs and each switch-in Pokémon's defensive EVs individually. Weather and terrain only affect moves they actually influence.</p><div class="prep-switch-controls"><div><label>Attacker Pokémon <span class="switch-side-label">(${switchAttackerSide==='your'?'Your Team':'Opponent Team'})</span></label><select id="prepSwitchMon">${switchAttackerMons.map(m=>`<option value="${esc(m.species)}" ${m.species===switchMon?.species?'selected':''}>${esc(displaySpecies(m))}</option>`).join('')}</select></div><div><label>Damaging Move</label><select id="prepSwitchMove"><option value="">${observedMoveOptions.length?'Select a damaging move':'Loading moves…'}</option>${observedMoveOptions.map(m=>`<option value="${esc(m)}" ${norm(m)===norm(defaultMove)?'selected':''}>${esc(m)}</option>`).join('')}</select></div><div id="prepSwitchHitsField" style="display:none"><label>Number of Hits</label><select id="prepSwitchHits"><option value="">Auto</option></select></div></div><div class="prep-item-controls"><div><label>Attacker Item</label>${switchItemSelect('prepSwitchAtkItem',switchAtkItem,'offensive')}</div><div><label>Switch-In Item</label>${switchItemSelect('prepSwitchDefItem',switchDefItem,'defensive')}</div><div><label>Offensive EVs</label><button type="button" id="prepSwitchAtkEVs" class="damage-calc-primary">Set EVs</button></div><div><label>Defensive EVs</label><button type="button" id="prepSwitchAllDefEVs" class="prep-all-evs-btn">Set All EVs</button></div></div><div class="prep-item-controls"><div><label>Weather</label>${switchFieldSelect('prepSwitchWeather',switchWeather,switchWeatherOptions)}</div><div><label>Terrain</label>${switchFieldSelect('prepSwitchTerrain',switchTerrain,switchTerrainOptions)}</div></div>${switchRows}</section>`;
 
   const latestMatchesSection=matchHistoryForTeam(opponent,false).replace('<section class="panel">','<section id="prepLatestMatches" class="panel prep-selectable-section" data-prep-section="matches">');
-  return `<section class="panel prep-hero-panel"><div class="prep-hero"><div><h2>Match Prep</h2><p class="panel-desc" style="margin:0">Prepare <strong>${esc(yourTeam)}</strong> for a match against <strong>${esc(opponent)}</strong>. Match usage, scouting, recent replays and battle tools are combined here.</p></div><div class="prep-hero-controls"><div><label>Your Team</label><select id="prepYourTeam">${names.map(n=>`<option value="${esc(n)}" ${sameTeam(n,yourTeam)?'selected':''}>${esc(n)}</option>`).join('')}</select></div><div><label>Opponent</label><select id="prepOpponent">${names.filter(n=>!sameTeam(n,yourTeam)).map(n=>`<option value="${esc(n)}" ${sameTeam(n,opponent)?'selected':''}>${esc(n)}</option>`).join('')}</select></div></div><div class="prep-side-swap"><span class="prep-side-swap-label">Team sides</span><button type="button" id="prepSwapTeams" aria-label="Swap your team and opponent">↔ Swap Team</button><button type="button" id="prepNotesToggle" class="prep-notes-toggle" aria-expanded="false" aria-controls="prepNotesPanel">✎ Notes <kbd>Alt+N</kbd>${matchupNote?.content?.trim()?' ·':''}</button></div></div></section>
+  // CP4.179: The matchup renderer and the interactive event handlers are
+  // different function scopes. Handlers must receive the live, per-render
+  // scouting context explicitly; previously dossierScope and several other
+  // locals were referenced out of scope, aborting ALL event registration.
+  if(intelBridge)Object.assign(intelBridge,{
+    dossierScope,dossierNotes,dossierKey,intelModel,intelPairDetails,opp
+  });
+  return `<section class="panel prep-hero-panel"><div class="prep-hero"><div><h2>Match Prep</h2><p class="panel-desc" style="margin:0">Prepare <strong>${esc(yourTeam)}</strong> for a match against <strong>${esc(opponent)}</strong>. Match usage, scouting, recent replays and battle tools are combined here.</p></div><div class="prep-hero-controls"><div><label>Your Team</label><select id="prepYourTeam">${names.map(n=>`<option value="${esc(n)}" ${sameTeam(n,yourTeam)?'selected':''}>${esc(n)}</option>`).join('')}</select></div><div><label>Opponent</label><select id="prepOpponent">${names.filter(n=>!sameTeam(n,yourTeam)).map(n=>`<option value="${esc(n)}" ${sameTeam(n,opponent)?'selected':''}>${esc(n)}</option>`).join('')}</select></div></div><div class="prep-side-swap"><span class="prep-side-swap-label">Team sides</span><button type="button" id="prepSwapTeams" aria-label="Swap your team and opponent">↔ Swap Team</button><button type="button" id="prepNotesToggle" class="prep-notes-toggle" aria-expanded="false" aria-controls="prepNotesPanel">✎ Notebook <kbd>Alt+N</kbd>${matchupNote?.content?.trim()?' ·':''}</button></div></div></section>
   <div id="prepNotesBackdrop" class="prep-notes-backdrop" hidden></div>
   <section id="prepNotesPanel" class="prep-notes-panel" hidden aria-label="Matchup notes" role="dialog" aria-modal="true" aria-labelledby="prepNotesTitle">
     <div class="prep-notes-editor">
@@ -1817,15 +2109,24 @@ async function renderMatchPrep(yourTeam, selectedOpponent){
 async function render(){
   const renderToken=(STATE.prepRenderToken||0)+1;
   STATE.prepRenderToken=renderToken;
-  const sel=$('teamSelect');const team=sel.value;
-  if(!team){$('main').innerHTML='<div class="panel"><div class="empty">No franchise data available.</div></div>';return}
+  const sel=$('teamSelect');
+  const availableTeams=teamNames();
+  const team=availableTeams.find(n=>sameTeam(n,STATE.prepOpponent)) ||
+    availableTeams.find(n=>sameTeam(n,sel?.value)) || '';
+  if(!availableTeams.length){$('main').innerHTML='<div class="panel"><div class="empty">No franchise data available.</div></div>';return}
   {
-    if(!STATE.prepYourTeam || !teamNames().some(n=>sameTeam(n,STATE.prepYourTeam))) STATE.prepYourTeam=STATE.profileTeam||team;
+    if(!STATE.prepYourTeam || !availableTeams.some(n=>sameTeam(n,STATE.prepYourTeam))) {
+      STATE.prepYourTeam=availableTeams.find(n=>sameTeam(n,STATE.profileTeam))||team;
+    }
     const yourTeam=STATE.prepYourTeam;
     const scheduled=SBL.schedule.nextOpponentForTeam(yourTeam,STATE.settings,STATE.replays,STATE.teamMap);
     const scheduledOpponent=scheduled.status==='upcoming' ? scheduled.opponent : '';
     let opponent=(STATE.prepOpponent && !sameTeam(STATE.prepOpponent,yourTeam)) ? STATE.prepOpponent : scheduledOpponent;
-    if(scheduled.status!=='upcoming' || !opponent || sameTeam(opponent,yourTeam)) opponent='';
+    // Manual matchup preparation is valid even when the fixture has no
+    // upcoming game. Only the automatic default requires an upcoming match.
+    if(!opponent || sameTeam(opponent,yourTeam)) {
+      opponent=availableTeams.find(n=>!sameTeam(n,yourTeam))||'';
+    }
     STATE.prepOpponent=opponent;
     // Switch-In Analyser role swapping: mirror the same attacker/defender side
     // logic used inside renderMatchPrep so the event handlers below (which run
@@ -1834,19 +2135,59 @@ async function render(){
     const switchAttackerSide=STATE.prepSwitchAttackerSide==='your'?'your':'opponent';
     const switchAttackerTeamName=switchAttackerSide==='your'?yourTeam:opponent;
     const switchDefenderTeamName=switchAttackerSide==='your'?opponent:yourTeam;
+    const intelBridge={};
     // Build the next view off-DOM. Never paint an intermediate loading state
     // when a team/section control changes; replacing the current view atomically
     // prevents the visible page-flash that used to look like a reload.
     try{
-      const nextMarkup=await renderMatchPrep(yourTeam,opponent);
+      const nextMarkup=await renderMatchPrep(yourTeam,opponent,intelBridge);
       // A selector can change again while the async view is being built. Never
       // let an older render win the race and replace the newer selection.
       if(renderToken!==STATE.prepRenderToken) return;
       const main=$('main');
       if(main){
         main.innerHTML=nextMarkup;
+        // Bind primary matchup controls BEFORE optional scouting widgets.
+        // A failure in a secondary widget must never disable team switching.
+        $('prepYourTeam')?.addEventListener('change',async e=>{
+          STATE.prepSection=STATE.prepSection||'overview';
+          const previousOpponent=STATE.prepOpponent;
+          STATE.prepYourTeam=e.target.value;
+          const next=SBL.schedule.nextOpponentForTeam(STATE.prepYourTeam,STATE.settings,STATE.replays,STATE.teamMap);
+          const candidates=[next.status==='upcoming'?next.opponent:'',previousOpponent,...teamNames()];
+          STATE.prepOpponent=candidates.find(name=>name && teamNames().some(t=>sameTeam(t,name)) && !sameTeam(name,STATE.prepYourTeam))||'';
+          if($('teamSelect'))$('teamSelect').value=STATE.prepOpponent;
+          if(STATE.prepOpponent){const u=new URL(location.href);u.searchParams.set('team',STATE.prepOpponent);history.replaceState(null,'',u);}
+          STATE.prepSwitchMon='';STATE.prepSwitchMove='';STATE.prepSwitchHits='';STATE.prepSwitchAtkItem='';STATE.prepSwitchDefItem='';STATE.prepSwitchEVsByMon={};STATE.prepCoverageMon='';
+          await render();
+        });
+        $('prepSwapTeams')?.addEventListener('click',async()=>{
+          const previousYour=STATE.prepYourTeam;
+          const previousOpponent=STATE.prepOpponent;
+          if(!previousYour || !previousOpponent || sameTeam(previousYour,previousOpponent)) return;
+          STATE.prepYourTeam=previousOpponent;
+          STATE.prepOpponent=previousYour;
+          STATE.prepSection=STATE.prepSection||'overview';
+          STATE.prepSwitchMon='';STATE.prepSwitchMove='';STATE.prepSwitchHits='';STATE.prepSwitchAtkItem='';STATE.prepSwitchDefItem='';STATE.prepSwitchEVsByMon={};STATE.prepCoverageMon='';
+          if($('teamSelect')) $('teamSelect').value=STATE.prepOpponent;
+          const u=new URL(location.href);u.searchParams.set('team',STATE.prepOpponent);history.replaceState(null,'',u);
+          await render();
+        });
+        $('prepOpponent')?.addEventListener('change',async e=>{
+          STATE.prepSection=STATE.prepSection||'overview';
+          STATE.prepOpponent=e.target.value;STATE.prepSwitchMon='';STATE.prepSwitchMove='';STATE.prepSwitchHits='';STATE.prepSwitchAtkItem='';STATE.prepSwitchDefItem='';STATE.prepSwitchEVsByMon={};STATE.prepCoverageMon='';
+          if($('teamSelect')) $('teamSelect').value=e.target.value;
+          const u=new URL(location.href);u.searchParams.set('team',e.target.value);history.replaceState(null,'',u);
+          await render();
+        });
         window.__sblRefreshPrepThreatBoard?.(); window.__sblRefreshPrepTeamPlanner?.();
-        // Two bounded background workers add legal move evidence incrementally.
+        // The currently viewed dossier should not stay unassessed just because
+        // nobody discovered an extra "Inspect moves" button. Load its data
+        // automatically; bulk lookup remains opt-in to avoid a large fallback
+        // PokéAPI request burst on every team change.
+        const initialThreat=STATE.prepThreatSelected;
+        if(initialThreat) void window.__sblLoadIntelOpponentMoves?.(initialThreat);
+        // Two bounded background workers add catalogue move candidates incrementally.
         // Renders are token-scoped, so an older selection cannot refresh the
         // newly selected team after a slow external catalogue response.
         const selectedNames=[...(STATE.prepPlannerSelected||[])];
@@ -1869,6 +2210,9 @@ async function render(){
       return;
     }
 
+    // Event wiring uses the exact context captured while building this view;
+    // do not read closures that only exist inside renderMatchPrep().
+    const {dossierScope,dossierNotes,dossierKey,intelModel,intelPairDetails,opp}=intelBridge;
     // Section picker: sections are shown one at a time.
     const prepSectionTabs=Array.from(document.querySelectorAll('.prep-section-tab'));
     const prepSelectableSections=Array.from(document.querySelectorAll('.prep-selectable-section[data-prep-section]'));
@@ -1886,9 +2230,43 @@ async function render(){
     prepSectionTabs.forEach(tab=>tab.addEventListener('click',()=>showPrepSection(tab.dataset.section)));
     const threatRoot=$('prepThreatBoard');
     if(threatRoot){
+      // Load only the account's records for this opponent and season.
+      // Do not block viewing the roster if authentication or migration fails.
+      if(SBL.prepTracker?.list){
+        void SBL.prepTracker.list(dossierScope).then(items=>{
+          if(!threatRoot.isConnected)return;
+          dossierNotes.items=items||[];dossierNotes.loaded=true;dossierNotes.error='';
+          window.__sblRefreshPrepThreatBoard?.();
+        }).catch(error=>{
+          if(!threatRoot.isConnected)return;
+          dossierNotes.loaded=true;dossierNotes.error='Could not load private notes: '+String(error?.message||error);
+          window.__sblRefreshPrepThreatBoard?.();
+        });
+      }
+      threatRoot.addEventListener('input',event=>{
+        const note=event.target.closest('[data-intel-note-text]');
+        if(note)dossierNotes.drafts.set(dossierKey(note.dataset.intelNoteText),note.value);
+      });
+      threatRoot.addEventListener('submit',async event=>{
+        const form=event.target.closest('[data-intel-note-form]');if(!form)return;
+        event.preventDefault();
+        const species=form.dataset.intelNoteForm;
+        const text=form.querySelector('textarea')?.value.trim();
+        if(!text||dossierNotes.busy)return;
+        dossierNotes.busy=true;
+        const submit=form.querySelector('button[type=submit]');if(submit)submit.disabled=true;
+        const status=threatRoot.querySelector('#prepIntelNoteStatus');if(status)status.textContent='Saving...';
+        try{
+          const saved=await SBL.prepTracker.add(dossierScope,{type:'finding',content:text,
+            sourceWidget:'threats',context:{kind:'pokemon-note',species}});
+          dossierNotes.items.unshift(saved);dossierNotes.drafts.delete(dossierKey(species));
+          void SBL.prepWorkspace?.refreshItems?.();
+          if(threatRoot.isConnected)window.__sblRefreshPrepThreatBoard?.();
+        }catch(error){if(status)status.textContent='Could not save: '+String(error?.message||error);}
+        finally{dossierNotes.busy=false;if(submit)submit.disabled=false;}
+      });
       threatRoot.addEventListener('input',e=>{if(e.target.id==='prepThreatSearch')window.__sblRefreshPrepThreatBoard?.();});
       threatRoot.addEventListener('change',e=>{if(e.target.id==='prepThreatSort'||e.target.id==='prepThreatFilter')window.__sblRefreshPrepThreatBoard?.();});
-      threatRoot.addEventListener('click',e=>{const row=e.target.closest('[data-threat-mon]');if(row){STATE.prepThreatSelected=row.dataset.threatMon;window.__sblRefreshPrepThreatBoard?.();}});
     }
     const inspectIntelOpponent=async species=>{
       await window.__sblLoadIntelOpponentMoves?.(species);
@@ -1898,21 +2276,46 @@ async function render(){
       STATE.prepSwitchMon=species;
       STATE.prepSwitchMove='';
       STATE.prepSection='switch';
+      STATE.prepJumpToSection=true;
       await render();
     };
     $('prepThreatBoard')?.addEventListener('click',async e=>{
+      const removeNote=e.target.closest('[data-intel-note-delete]');
+      if(removeNote){
+        if(!window.confirm('Delete this private Pokémon note?'))return;
+        removeNote.disabled=true;
+        try{await SBL.prepTracker.remove(removeNote.dataset.intelNoteDelete);
+          dossierNotes.items=dossierNotes.items.filter(x=>String(x.id)!==removeNote.dataset.intelNoteDelete);
+          void SBL.prepWorkspace?.refreshItems?.();
+          window.__sblRefreshPrepThreatBoard?.();
+        }catch(error){const status=threatRoot.querySelector('#prepIntelNoteStatus');
+          if(status)status.textContent='Could not delete: '+String(error?.message||error);removeNote.disabled=false;}
+        return;
+      }
       const row=e.target.closest('[data-threat-mon]');
       const load=e.target.closest('[data-intel-load]');
       const link=e.target.closest('[data-intel-switch]');
       if(link){await inspectInSwitch(link.dataset.intelSwitch);return;}
       const all=e.target.closest('[data-intel-load-all]');
-      if(all){all.disabled=true;all.textContent='Inspecting moves…';try{await window.__sblLoadAllIntelOpponentMoves?.();}finally{all.disabled=false;all.textContent='Inspect opponent moves';}return;}
+      if(all){all.disabled=true;all.textContent='Inspecting moves…';try{await window.__sblLoadAllIntelOpponentMoves?.();}finally{all.disabled=false;all.textContent='Analyse all opponent moves';}return;}
       if(load){await inspectIntelOpponent(load.dataset.intelLoad);return;}
       if(row){STATE.prepThreatSelected=row.dataset.threatMon;
         window.__sblRefreshPrepThreatBoard?.();
-        await inspectIntelOpponent(row.dataset.threatMon);}
+        threatRoot.querySelector('#prepThreatDetail')?.scrollIntoView({behavior:'smooth',block:'start'});}
     });
     $('prepTeamPlanner')?.addEventListener('click',async e=>{
+      const pairButton=e.target.closest('[data-intel-pair]');
+      if(pairButton){
+        const model=intelModel();
+        const enemy=opp.find(m=>speciesKey(m.species)===speciesKey(pairButton.dataset.intelPair));
+        const ally=model.active.find(m=>speciesKey(m.species)===speciesKey(pairButton.dataset.intelDefender));
+        if(enemy&&ally){
+          STATE.prepIntelPair={enemy:enemy.species,ally:ally.species};
+          const dest=document.getElementById('prepIntelPairDetail');
+          if(dest)dest.innerHTML=intelPairDetails(enemy,ally,model.lookup(enemy,ally));
+        }
+        return;
+      }
       const load=e.target.closest('[data-intel-load]');
       const link=e.target.closest('[data-intel-switch]');
       if(link){await inspectInSwitch(link.dataset.intelSwitch);return;}
@@ -2018,7 +2421,7 @@ async function render(){
         setTimeout(()=>{$('prepMatchupNotes')?.focus();},0);
       }
     };
-    $('prepNotesToggle')?.addEventListener('click',()=>{toggleNotes();});
+    $('prepNotesToggle')?.addEventListener('click',()=>{if(!SBL.prepWorkspace?.reveal?.('notebook'))toggleNotes();});
     $('prepNotesClose')?.addEventListener('click',()=>{toggleNotes(false);});
     $('prepNotesBackdrop')?.addEventListener('click',()=>{toggleNotes(false);});
     notesWeekSelect?.addEventListener('change',async()=>{await saveMatchupNote();await loadNotesWeek(notesWeekSelect.value);});
@@ -2051,13 +2454,26 @@ async function render(){
       const target=event.target;
       const typing=target && (target.matches?.('input,textarea,select,[contenteditable="true"]') || target.isContentEditable);
       if(event.key==='Escape' && !$('prepNotesPanel')?.hidden){ event.preventDefault(); toggleNotes(false); return; }
-      if(!typing && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.key.toLowerCase()==='n'){ event.preventDefault(); toggleNotes(); }
+      if(!typing && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.key.toLowerCase()==='n'){ event.preventDefault(); if(!SBL.prepWorkspace?.reveal?.('notebook'))toggleNotes(); }
     });
     $('prepMatchupNotes')?.addEventListener('input',()=>{clearTimeout(matchupSaveTimer);setNotesStatus('Unsaved changes');matchupSaveTimer=setTimeout(saveMatchupNote,300);});
     $('prepMatchupNotes')?.addEventListener('change',()=>{clearTimeout(matchupSaveTimer);saveMatchupNote();});
     $('prepMatchupNotes')?.addEventListener('blur',()=>{clearTimeout(matchupSaveTimer);saveMatchupNote();});
     refreshWeekOptions();
     showPrepSection(STATE.prepSection||'overview');
+    // CP4.176: mount the actual Match Prep panels into a personal dashboard.
+    // This runs after the legacy tab state is set so it can reveal all chosen
+    // widgets, while preserving existing element IDs and event listeners.
+    SBL.prepWorkspace?.mount?.({
+      leagueId:SBL.leagueDb?.selectedLeagueId?.(),
+      seasonId:SBL.leagueDb?.selectedSeasonId?.(),
+      opponent:STATE.prepOpponent,
+      week:matchupWeek
+    });
+    if(STATE.prepJumpToSection){
+      SBL.prepWorkspace?.reveal?.(STATE.prepSection);
+      STATE.prepJumpToSection=false;
+    }
 
     // Type Chart: toggle between Defensive and Offensive matrices.
     {
@@ -2145,59 +2561,13 @@ async function render(){
       loadPrepPokemonData();
     }));
 
-$('prepYourTeam')?.addEventListener('change',async e=>{
-      STATE.prepSection=STATE.prepSection||'overview';
-      STATE.prepYourTeam=e.target.value;
-      { const next=SBL.schedule.nextOpponentForTeam(STATE.prepYourTeam,STATE.settings,STATE.replays,STATE.teamMap); STATE.prepOpponent=next.status==='upcoming'?next.opponent:''; }
-      STATE.prepSwitchMon='';STATE.prepSwitchMove='';STATE.prepSwitchHits='';STATE.prepSwitchAtkItem='';STATE.prepSwitchDefItem='';STATE.prepSwitchEVsByMon={};STATE.prepCoverageMon='';
-      await render();
-    });
-    $('prepSwapTeams')?.addEventListener('click',async()=>{
-      const previousYour=STATE.prepYourTeam;
-      const previousOpponent=STATE.prepOpponent;
-      if(!previousYour || !previousOpponent || sameTeam(previousYour,previousOpponent)) return;
-      STATE.prepYourTeam=previousOpponent;
-      STATE.prepOpponent=previousYour;
-      STATE.prepSection=STATE.prepSection||'overview';
-      STATE.prepSwitchMon='';STATE.prepSwitchMove='';STATE.prepSwitchHits='';STATE.prepSwitchAtkItem='';STATE.prepSwitchDefItem='';STATE.prepSwitchEVsByMon={};STATE.prepCoverageMon='';
-      if($('teamSelect')) $('teamSelect').value=STATE.prepOpponent;
-      const u=new URL(location.href);u.searchParams.set('team',STATE.prepOpponent);history.replaceState(null,'',u);
-      await render();
-    });
-    $('prepOpponent')?.addEventListener('change',async e=>{
-      STATE.prepSection=STATE.prepSection||'overview';
-      STATE.prepOpponent=e.target.value;STATE.prepSwitchMon='';STATE.prepSwitchMove='';STATE.prepSwitchHits='';STATE.prepSwitchAtkItem='';STATE.prepSwitchDefItem='';STATE.prepSwitchEVsByMon={};STATE.prepCoverageMon='';
-      if($('teamSelect')) $('teamSelect').value=e.target.value;
-      const u=new URL(location.href);u.searchParams.set('team',e.target.value);history.replaceState(null,'',u);
-      await render();
-    });
-    const refreshCoverageOnly=async()=>{
-      const current=document.getElementById('prepTeamCoverage');
-      if(!current)return;
-      current.setAttribute('aria-busy','true');
-      try{
-        const html=await renderMatchPrep(STATE.prepYourTeam,STATE.prepOpponent);
-        const holder=document.createElement('div');
-        holder.innerHTML=html;
-        const next=holder.querySelector('#prepTeamCoverage');
-        if(!next)throw new Error('Coverage section could not be rebuilt.');
-        current.replaceWith(next);
-        const select=next.querySelector('#prepCoverageMon');
-        select?.addEventListener('change',async ev=>{
-          STATE.prepCoverageMon=ev.target.value;
-          await refreshCoverageOnly();
-        });
-      }catch(err){
-        console.error('Coverage refresh failed:',err);
-      }finally{
-        document.getElementById('prepTeamCoverage')?.removeAttribute('aria-busy');
-      }
-    };
+    // CP4.181: never call renderMatchPrep() as an isolated HTML factory here.
+    // It also creates the planner/scouting closures and resets their caches.
+    // An orphaned coverage-only refresh previously corrupted all three tools.
     $('prepCoverageMon')?.addEventListener('change',async e=>{
-      e.preventDefault();
       STATE.prepCoverageMon=e.target.value;
       STATE.prepSection='coverage';
-      await refreshCoverageOnly();
+      await render();
     });
     $('prepSwitchMon')?.addEventListener('change',async e=>{
       const species=e.target.value;
@@ -2383,7 +2753,7 @@ $('prepYourTeam')?.addEventListener('change',async e=>{
       const sorted=[...(moves||[])].sort((a,b)=>(b.power||0)-(a.power||0)||String(a.name).localeCompare(String(b.name)));
       const chip=(m)=>`<span class="cov-move-chip cov-move-${esc(m.category)}"><i class="cov-move-cat">${m.category==='physical'?'P':'S'}</i>${esc(m.name)}<b>${esc(m.power)}</b></span>`;
       const host=document.createElement('div');host.className='switch-ev-modal';
-      host.innerHTML=`<div class="switch-ev-card" role="dialog" aria-modal="true"><div class="switch-ev-head"><div><h3>${typePill(type)}</h3><p>Damaging ${esc(type)}-type moves this Pokémon can learn.</p></div><button type="button" id="covMovesClose">Close ✕</button></div><div class="cov-moves-list">${sorted.length?sorted.map(chip).join(''):'<span class="small">No moves found.</span>'}</div></div>`;
+      host.innerHTML=`<div class="switch-ev-card" role="dialog" aria-modal="true"><div class="switch-ev-head"><div><h3>${typePill(type)}</h3><p>Damaging ${esc(type)}-type catalogue candidates. These are not confirmed set choices or proof of current-format legality.</p></div><button type="button" id="covMovesClose">Close ✕</button></div><div class="cov-moves-list">${sorted.length?sorted.map(chip).join(''):'<span class="small">No moves found.</span>'}</div></div>`;
       document.body.appendChild(host);
       requestAnimationFrame(()=>host.classList.add('open'));
       const close=()=>{host.classList.remove('open');setTimeout(()=>host.remove(),150);document.removeEventListener('keydown',onKey);};
@@ -2452,50 +2822,11 @@ requestAnimationFrame(()=>host.classList.add('open'));
 
     const switchMoveCache={};
     async function damagingLearnset(species){
-      const cacheKey=norm(species);
-      if(switchMoveCache[cacheKey]) return switchMoveCache[cacheKey];
-      if(window.SBL.pokemonCatalog?.getDamagingLearnset && !CATALOG_READ_FAILED){
-        try{
-          const result=await window.SBL.pokemonCatalog.getDamagingLearnset(species);
-          if(Array.isArray(result?.moves) && result.moves.length){switchMoveCache[cacheKey]=result.moves;return result.moves;}
-        }catch(error){CATALOG_READ_FAILED=true;console.warn('Move catalogue unavailable; using legacy data.',error);}
-      }
-      const candidates=isProtectedBattleForm(species)?apiProfileCandidates(species):pokemonDexCandidates(species);
-      let learnset=[];
-      for(const slug of candidates){
-        try{
-          const data=await requestPokemonApi(slug);
-          if(!data) continue;
-          learnset=(data.moves||[]).map(entry=>({name:entry.move?.name,url:entry.move?.url})).filter(x=>x.name&&x.url);
-          if(learnset.length) break;
-        }catch(e){}
-      }
-      if(!learnset.length){ switchMoveCache[cacheKey]=[]; return []; }
-      // Fetch move details concurrently in small batches so the selector does not
-      // sit on "Loading" indefinitely on large learnsets.
-      const details=[];
-      const batchSize=12;
-      for(let i=0;i<learnset.length;i+=batchSize){
-        const batch=learnset.slice(i,i+batchSize);
-        const results=await Promise.all(batch.map(async entry=>{
-          try{
-            const r=await fetch(entry.url,{cache:'force-cache'});
-            if(!r.ok) return null;
-            const md=await r.json();
-            const cls=String(md.damage_class?.name||'').toLowerCase();
-            const power=Number(md.power);
-            if(power>0 && (cls==='physical'||cls==='special')){
-              const pretty=String(md.name||entry.name).split('-').map(x=>x?x[0].toUpperCase()+x.slice(1):x).join(' ');
-              return {name:pretty,power};
-            }
-          }catch(e){}
-          return null;
-        }));
-        results.filter(Boolean).forEach(x=>details.push(x));
-      }
-      const unique=[...new Map(details.map(x=>[norm(x.name),x])).values()].sort((a,b)=>a.name.localeCompare(b.name));
-      switchMoveCache[cacheKey]=unique;
-      return unique;
+      const cacheKey=speciesKey(species);
+      if(switchMoveCache[cacheKey])return switchMoveCache[cacheKey];
+      const moves=await loadCoverageMoves(species);
+      switchMoveCache[cacheKey]=Array.isArray(moves)?moves:[];
+      return switchMoveCache[cacheKey];
     }
     async function populateSwitchMoveSelect(preferred=''){
       const sel=$('prepSwitchMove'); if(!sel) return [];
@@ -2528,11 +2859,11 @@ requestAnimationFrame(()=>host.classList.add('open'));
         }
         // Never default to an arbitrary observed move: some observed moves are
         // status/setup moves and are invalid for damage calculations.
-        sel.innerHTML='<option value="">No verified damaging moves available - check the Pokémon catalogue or replay observations</option>';
+        sel.innerHTML='<option value="">No damaging move candidates available - check the Pokémon catalogue or replay observations</option>';
         STATE.prepSwitchMove='';
         return [];
       }catch(err){
-        sel.innerHTML='<option value="">No verified damaging moves available - check the Pokémon catalogue or replay observations</option>';
+        sel.innerHTML='<option value="">No damaging move candidates available - check the Pokémon catalogue or replay observations</option>';
         STATE.prepSwitchMove='';
         return [];
       }
@@ -2919,6 +3250,14 @@ async function load(){
     if(!normalizedSeason && publishedRosters && typeof publishedRosters==='object' && Object.keys(STATE.settings.rosters||{}).length===0){
       STATE.settings.rosters=publishedRosters;
     }
+    // Load the league's current franchise directory independently of roster or
+    // replay presence. Failure to list is non-fatal; existing sources remain.
+    try{
+      const franchises=await SBL.leagueDb.listFranchises(leagueId,supabase);
+      STATE.franchiseNames=(franchises||[])
+        .filter(f=>String(f.status||'active').toLowerCase()==='active')
+        .map(f=>String(f.name||'').trim()).filter(Boolean);
+    }catch(error){console.warn('Match Prep franchise directory unavailable:',error);}
     const {data:tradeRows} = await SBL.trades.load(supabase);
     STATE.settings.rosters = SBL.trades.getEffectiveRosters(STATE.settings.rosters || {}, tradeRows || []);
   }catch(e){
@@ -2930,8 +3269,7 @@ async function load(){
     .flatMap(r=>[teamFor(r.players?.p1),teamFor(r.players?.p2)])
     .filter(Boolean);
   const rosterTeams=Object.keys(STATE.settings?.rosters||{});
-  const teams=[...new Set([...replayTeams,...rosterTeams])]
-    .sort((a,b)=>a.localeCompare(b));
+  const teams=teamNames();
 
   const qs=new URLSearchParams(location.search);
   const requested=qs.get('team');
@@ -3016,6 +3354,40 @@ window.__dashboardGetTeams = function(){
     .sort((a,b)=>String(a).localeCompare(String(b)));
 };
 window.__dashboardProfileTeam = function(){ return typeof STATE!=='undefined' ? (STATE.profileTeam||'') : ''; };
+
+// Private preparation snapshots contain only the current analyser inputs,
+// never account information, private draft queues or another player's sets.
+window.__sblPrepStateSnapshot=function(widget){
+  const fields=widget==='switch'
+    ?['prepSwitchAttackerSide','prepSwitchMon','prepSwitchMove','prepSwitchHits','prepSwitchAtkItem','prepSwitchDefItem','prepSwitchWeather','prepSwitchTerrain','prepSwitchAtkEVs','prepSwitchAllDefEVs','prepSwitchEVsByMon']
+    :widget==='speed'
+    ?['prepSpeedSelected','prepSpeedConfig','prepSpeedMods','prepSpeedPinned','prepSpeedBenchmark']
+    :widget==='planner'||widget==='threats'
+    ?['prepPlannerSelected','prepPlannerSearch']
+    :[];
+  const result={};
+  fields.forEach(key=>{if(STATE[key]!==undefined)result[key]=JSON.parse(JSON.stringify(STATE[key]));});
+  return result;
+};
+window.__sblRestorePrepState=async function(snapshot){
+  if(!snapshot||typeof snapshot!=='object')return;
+  const widget=String(snapshot.widget||'');
+  const allowed=widget==='switch'
+    ?['prepSwitchAttackerSide','prepSwitchMon','prepSwitchMove','prepSwitchHits','prepSwitchAtkItem','prepSwitchDefItem','prepSwitchWeather','prepSwitchTerrain','prepSwitchAtkEVs','prepSwitchAllDefEVs','prepSwitchEVsByMon']
+    :widget==='speed'
+    ?['prepSpeedSelected','prepSpeedConfig','prepSpeedMods','prepSpeedPinned','prepSpeedBenchmark']
+    :widget==='planner'||widget==='threats'
+    ?['prepPlannerSelected','prepPlannerSearch']
+    :[];
+  const source=snapshot.state||{};
+  for(const key of allowed){
+    if(Object.prototype.hasOwnProperty.call(source,key))STATE[key]=JSON.parse(JSON.stringify(source[key]));
+  }
+  STATE.prepSection=widget;
+  STATE.prepJumpToSection=true;
+  await render();
+};
+
 window.__dashboardNextOpponent = function(team){ try{ const next=SBL.schedule.nextOpponentForTeam(team||STATE.profileTeam,STATE.settings,STATE.replays,STATE.teamMap); return next.status==='upcoming'?next.opponent:''; }catch(e){ return ''; } };
 window.__dashboardGetRosterNames = function(team){
   const raw=rosterForTeam(team);

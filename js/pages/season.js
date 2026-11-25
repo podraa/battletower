@@ -1901,9 +1901,9 @@
       ${readContextNote}
       <div class="fixture-panel-head">
         <h2>Fixture</h2>
-        <select id="fixtureWeekSelect" class="fixture-week-select">
+        <div class="fixture-export-actions"><select id="fixtureWeekSelect" class="fixture-week-select">
           ${weekNames.map(w=>`<option value="${SBL.pokemon.escapeHtml(w)}" ${w===selectedFixtureWeek?'selected':''}>${SBL.pokemon.escapeHtml(w)}</option>`).join('')}
-        </select>
+        </select></div>
       </div>
       <div class="note">${rounds.length} week${rounds.length===1?'':'s'} · ${matchCount} match${matchCount===1?'':'es'}${fixture.source==='upload'?' · uploaded':''}</div>
       <div class="fixture-weeks">
@@ -1996,6 +1996,7 @@
     const finals=SBL.finals.resolveMatchups(STATE.settings.finals||SBL.finals.defaultFinalsState());
     if(finals.status==='inactive' || !finals.rounds.length) return `<div class="panel finals-panel"><div class="finals-kicker">FINALS MODE</div><h2>Finals</h2><div class="note">The regular season is still active. Finals will appear here once the commissioner generates the playoff bracket.</div></div>`;
     const statusLabel=finals.champion?'CHAMPION':finals.status==='complete'?'COMPLETE':finals.status==='live'?'LIVE':'SCHEDULED';
+    const regularFixtureRounds=SBL.fixtureWorkflow?.publishedRounds?.(STATE.settings)||(Array.isArray(STATE.settings?.fixture?.rounds)?STATE.settings.fixture.rounds:[]);
     const seedByTeam=new Map((finals.seeds||[]).map(s=>[s.team,s.seed]));
     const playin=finals.rounds.find(r=>r.key==='playin');
     const playinsComplete=!!playin && playin.matches.every(m=>m.winner);

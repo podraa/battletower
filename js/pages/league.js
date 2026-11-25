@@ -28,6 +28,8 @@
   let currentMembership = null;
   let currentSeasonParticipation = 'participating';
   let currentFranchise = null;
+  let currentSignaturePokemon = '';
+  let signaturePreferenceError = '';
   let requestedFranchise = null;
   let pendingFranchiseRequest = null;
   const SOFTWARE_NAME = window.SBL_CONFIG?.softwareName || 'Battle Tower';
@@ -339,6 +341,13 @@
   async function refreshAll(){
     await Promise.all([loadDashboardState(), loadProfile(), loadTrades()]);
     await loadAuthoritativeFranchiseContext();
+    currentSignaturePokemon='';signaturePreferenceError='';
+    if(currentFranchise?.franchiseId&&SBL.memberPreferences?.get){
+      try{
+        const preference=await SBL.memberPreferences.get(DASH.leagueId,session.user.id,supabase);
+        currentSignaturePokemon=String(preference?.signature_pokemon||'').trim();
+      }catch(error){signaturePreferenceError=String(error?.message||error);console.warn('Could not load signature Pokémon preference:',error);}
+    }
     if(SBL.leagueDb?.selectedLeagueId?.() && SBL.leagueDb?.selectedSeasonId?.())
       await SBL.tradeRules.load(supabase);
     const rawRosters = DASH.settings.rosters || {};
@@ -2155,6 +2164,11 @@
     const availableGroups = new Set(['All','Recent','Favorites',...themeGroupOrder]);
     if(!availableGroups.has(themePickerState.group)) themePickerState.group='All';
     const initialThemeGroup = themePickerState.group;
+    const signatureRoster=Array.isArray(myRoster())?myRoster():[];
+    const signatureOption=currentSignaturePokemon&&signatureRoster.some(mon=>SBL.pokemon?.sameSpeciesForm?.(typeof mon==='string'?mon:mon?.name,currentSignaturePokemon))?currentSignaturePokemon:'';
+    const signaturePickCard=leagueLanding
+      ? `<section class="panel account-card account-signature-card"><div class="account-card-head"><div><div class="account-card-kicker">LEAGUE PRESENTATION</div><h3>Signature Pokémon</h3><div class="note">Signature picks are saved separately for each league. Open a league to choose the Pokémon shown on your franchise card.</div></div></div></section>`
+      : `<section class="panel account-card account-signature-card"><div class="account-card-head"><div><div class="account-card-kicker">FRANCHISE PRESENTATION</div><h3>Your signature Pokémon</h3><div class="note">Choose the Pokémon displayed on your franchise card on the Rosters page. This preference only changes the presentation, not your roster.</div></div></div>${currentFranchise?.franchiseId&&signatureRoster.length?`<div class="account-signature-controls"><label for="accountSignaturePokemon">Signature pick</label><select id="accountSignaturePokemon"><option value="" ${!signatureOption?'selected':''}>Automatic pick</option>${signatureRoster.map(mon=>{const name=typeof mon==='string'?mon:mon?.name;const safe=SBL.pokemon.escapeHtml(name);return `<option value="${safe}" ${signatureOption&&SBL.pokemon?.sameSpeciesForm?.(name,signatureOption)?'selected':''}>${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(name)||name)}</option>`;}).join('')}</select><button type="button" class="ghost small" id="accountSaveSignaturePick">Save signature pick</button><div class="note" id="accountSignaturePickMessage" role="status">${signaturePreferenceError?SBL.pokemon.escapeHtml(signaturePreferenceError):'Choose Automatic pick to use the default roster selection.'}</div></div>`:`<div class="note">${currentFranchise?.franchiseId?'Your signature pick will be available once your roster is published.':'An active franchise assignment is required to set a signature pick.'}</div>`}</section>`;
     const spriteStyle = window.SBL?.pokemon?.getSpriteStyle?.() || document.documentElement.dataset.sblSpriteStyle || '3d';
     const favoriteSet = new Set(themeFavorites());
     const recentSet = new Set(themeRecent());
@@ -2201,6 +2215,8 @@
         </section>
       </div>
 
+      ${signaturePickCard}
+
       <section class="panel account-card account-theme-card">
         <div class="account-card-head"><div><div class="account-card-kicker">Appearance</div><h3>Theme Studio</h3><div class="note">Browse the full theme library, favorite the good ones, randomize, or build your own.</div></div><button type="button" class="ghost theme-random-btn" id="accountRandomTheme">🎲 Random</button></div>
         <div class="account-theme-picker">
@@ -2241,6 +2257,23 @@
       try{await SBL.profiles.changeUsername(session.user.id,next,supabase);await loadProfile();renderAccount();const updated=document.getElementById('accountUsernameMessage');if(updated){updated.className='note ok';updated.textContent='Username updated successfully.';}}
       catch(e){msg.className='note danger';msg.textContent=e.message||'Could not update username.';btn.disabled=false;}
     });
+    document.getElementById('accountSaveSignaturePick')?.addEventListener('click',async()=>{
+      const button=document.getElementById('accountSaveSignaturePick');
+      const select=document.getElementById('accountSignaturePokemon');
+      const message=document.getElementById('accountSignaturePickMessage');
+      if(!currentFranchise?.franchiseId||!DASH.leagueId){if(message)message.textContent='Open a league and claim an active franchise first.';return;}
+      const selected=String(select?.value||'').trim();
+      const roster=Array.isArray(myRoster())?myRoster():[];
+      if(selected&&!roster.some(mon=>SBL.pokemon?.sameSpeciesForm?.(typeof mon==='string'?mon:mon?.name,selected))){if(message)message.textContent='Choose a Pokémon from your current roster.';return;}
+      button.disabled=true;if(message){message.className='note';message.textContent='Saving signature pick…';}
+      try{
+        const saved=await SBL.memberPreferences.setSignaturePokemon(DASH.leagueId,session.user.id,selected,supabase);
+        currentSignaturePokemon=String(saved?.signature_pokemon||'').trim();signaturePreferenceError='';
+        if(message){message.className='note ok';message.textContent=selected?`${SBL.pokemon.displayNameWithForm?.(selected)||selected} is now your signature pick.`:'Your franchise card will use its automatic pick.';}
+      }catch(error){if(message){message.className='note danger';message.textContent=error?.message||'Could not save your signature pick. Apply the latest league migration and try again.';}}
+      finally{button.disabled=false;}
+    });
+
     document.getElementById('accountSpriteStyle')?.addEventListener('click', e=>{
       const btn=e.target.closest('[data-sprite-style]'); if(!btn) return;
       const style=window.SBL?.pokemon?.setSpriteStyle?.(btn.dataset.spriteStyle,true) || btn.dataset.spriteStyle;

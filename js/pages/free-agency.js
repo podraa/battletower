@@ -3,16 +3,26 @@
 const db = window.SBL.getSupabase();
 const DEFAULT_SEASON='Season 15';
 
-// ---- access gate: must be logged in AND have a claimed team, or bounce to login ----
+// Access is available to active franchise members and authorised league admins.
 async function enforceAccessGate(){
   const {data:{session}} = await db.auth.getSession();
   if(!session){ location.replace('index.html'); return false; }
   const leagueId = SBL.leagueDb?.selectedLeagueId?.() || '';
   if(!leagueId){ location.replace('index.html'); return false; }
+  const preview=!!window.SBL_SITE?.isUserPreview?.();
+  let profile=null,membership=null;
+  try{
+    profile=await SBL.profiles?.get?.(session.user.id,'id,is_commissioner,status',db);
+    membership=await SBL.leagueDb?.getMembership?.(leagueId,session.user.id,db);
+  }catch(error){console.warn('Free Agency permission context could not be fully loaded.',error);}
+  const activeMember=String(membership?.status||'').toLowerCase()==='active';
+  const role=String(membership?.role||'').toLowerCase();
+  canAdministerRoster=!preview&&(!!profile?.is_commissioner||(activeMember&&['commissioner','manager'].includes(role)));
   const currentFranchise = SBL.franchiseOwnership?.getUserFranchise
     ? await SBL.franchiseOwnership.getUserFranchise(leagueId, session.user.id, db)
     : null;
-  if(!currentFranchise?.franchiseId){ location.replace('index.html'); return false; }
+  if(!currentFranchise?.franchiseId&&!canAdministerRoster){ location.replace('index.html'); return false; }
+  if(currentFranchise?.franchise){myFranchiseId=currentFranchise.franchiseId;myFranchiseName=currentFranchise.franchise.name||'';}
   document.getElementById('app').style.display = '';
   return true;
 }
@@ -29,8 +39,10 @@ function installSeasonPicker(shared){
 
 let settings={rosters:{},freeAgency:{mons:[]}};
 let allRosters={};
+let currentFreeAgencyPool=[];
 let myFranchiseName='';
 let myFranchiseId='';
+let canAdministerRoster=false;
 let mulliganState=null;
 let mulliganStateKey='';
 let mulliganStateAt=0;
@@ -299,6 +311,7 @@ function openSelection(mon){
 let lastDataSignature=null;
 
 async function loadMulliganState(){
+  if(!myFranchiseId){mulliganState=null;return;}
   const leagueId=String(SBL.leagueDb?.selectedLeagueId?.()||'').trim();
   const seasonId=String(SBL.leagueDb?.selectedSeasonId?.()||'').trim();
   const cacheKey=leagueId+'|'+seasonId;
@@ -352,7 +365,6 @@ function syncMulliganPanel(){
   if(existing){if(html)existing.outerHTML=html;else existing.remove();}
   else if(html&&toolbar)toolbar.insertAdjacentHTML('beforebegin',html);
 }
-
 async function load(){
   try{
     const draftState=await SBL.draft.read();
@@ -364,6 +376,7 @@ async function load(){
   settings=result.settings||settings;
   const pointsRangeChanged=syncPublishedPointRange(settings.freeAgency?.mons);
   allRosters=result.rosters||{};
+  currentFreeAgencyPool=Array.isArray(result.pool)?result.pool:[];
   rebuildOwnerIndex();
   await loadMulliganState();
   const mons=result.pool||[];
@@ -662,7 +675,6 @@ function render(){
     renderResults();syncFilterControls();
   });
   wireMulliganAction();
-
   renderResults();
 }
 

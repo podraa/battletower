@@ -9,9 +9,6 @@
 
 
   const content = document.getElementById('content');
-  const toolbar = document.getElementById('toolbar');
-  const rosterSelect = document.getElementById('rosterSelect');
-  const rosterSummary = document.getElementById('rosterSummary');
   const esc = s => String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 
   // Remove an accidental top-level single-letter text node without touching real page content.
@@ -24,32 +21,10 @@
   function canonicalName(name){
     return SBL.pokemon?.displayNameWithForm ? SBL.pokemon.displayNameWithForm(name) : String(name ?? '').trim();
   }
-  function sprite(name){
-      // Rosters uses an explicit sprite map for the few form/typo names that
-      // have historically differed between roster data and Free Agency. This
-      // deliberately bypasses the generic form resolver for these entries.
-      const raw=String(name??'').trim().toLowerCase().replace(/[’']/g,'').replace(/\s+/g,'-');
-      const explicit={
-        'terapagos':'terapagos','terapogos':'terapagos','terapagos-middle':'terapagos','terapagos-mid':'terapagos',
-        'thundurus-i':'thundurus','thundurus-incarnate':'thundurus','thunduurs-i':'thundurus','thundurs-i':'thundurus','thundurs':'thundurus',
-        'tauros-blaze':'tauros-paldeablaze','taurus-blaze':'tauros-paldeablaze','tauros-paldea-blaze':'tauros-paldeablaze',
-        'tauros-combat':'tauros-paldeacombat','taurus-combat':'tauros-paldeacombat','tauros-paldea-combat':'tauros-paldeacombat',
-        'meowstic-male':'meowstic','meowstic-m':'meowstic',
-        'cincinno':'cinccino','cinccinno':'cinccino','daschbun':'dachsbun'
-      };
-      const file=explicit[raw];
-      if(file){
-        const label=SBL.pokemon?.displayNameWithForm ? SBL.pokemon.displayNameWithForm(name) : String(name??'').trim();
-        const safe=esc(label);
-        const fallback=(file==='tauros-paldeablaze'||file==='tauros-paldeacombat')?'tauros':(file==='thundurus'?'thundurus':'');
-        const fallbackAttr=fallback ? ` data-sbl-fallback=\"https://play.pokemonshowdown.com/sprites/home/${fallback}.png\"` : '';
-        return `<img class=\"sprite sbl-remote-sprite\" src=\"https://play.pokemonshowdown.com/sprites/home/${file}.png\" alt=\"${safe}\" title=\"${safe}\" width=\"96\" height=\"96\" decoding=\"async\"${fallbackAttr} onerror=\"if(this.dataset.sblFallback&&!this.dataset.sblTried){this.dataset.sblTried='1';this.src=this.dataset.sblFallback}else{this.style.display='none'}\">`;
-      }
-      return SBL.pokemon.spriteMarkup(name, 'sprite');
-    }
+  function sprite(name){ return SBL.pokemon.spriteMarkup(name, 'sprite'); }
 
   // CP4.63: team colours, owner usernames and the roster pop-out.
-  let TEAM_SETTINGS = {}, TEAM_MAP = {}, TEAM_ROSTERS = {};
+  let TEAM_SETTINGS = {}, TEAM_MAP = {}, TEAM_ROSTERS = {}, TEAM_FRANCHISES = [], TEAM_ACTIVE_ASSIGNMENTS = [], TEAM_SIGNATURE_BY_FRANCHISE = new Map(), TEAM_OWNER_LABELS = {};
   function ownerTag(team){ const o = SBL.teamColors?.ownerLabel?.(TEAM_MAP, team); return o ? `<span class="owner-tag">@${esc(o)}</span>` : ''; }
   function teamTintClass(settings,team){ return SBL.teamColors?.get?.(settings,team) ? ' team-tinted' : ''; }
   function teamTintStyle(settings,team){ return SBL.teamColors?.styleAttr?.(settings,team) || ''; }
@@ -79,8 +54,23 @@
   function showError(message){
     const app=document.getElementById('app');
     if(app) app.style.display='';
-    if(toolbar) toolbar.style.display='none';
     content.innerHTML = `<div class="empty">${esc(message)}</div>`;
+  }
+
+  function teamKey(value){return String(value||'').trim().toLowerCase().replace(/[^a-z0-9]/g,'');}
+  function conferenceInfo(team, settings=TEAM_SETTINGS, directory=TEAM_FRANCHISES){
+    const canonical=(directory||[]).find(row=>teamKey(row?.name)===teamKey(team));
+    const legacy=settings?.franchises&&typeof settings.franchises==='object'
+      ?Object.entries(settings.franchises).find(([name])=>teamKey(name)===teamKey(team))?.[1]:null;
+    const definition=settings?.franchiseDefinitions&&typeof settings.franchiseDefinitions==='object'
+      ?Object.entries(settings.franchiseDefinitions).find(([name])=>teamKey(name)===teamKey(team))?.[1]:null;
+    const raw=String(canonical?.conference||legacy||definition?.conference||'').trim();
+    if(!raw)return {key:'__unassigned',label:'Unassigned',assigned:false};
+    const key=raw.toLowerCase();
+    const names=settings?.conferenceNames&&typeof settings.conferenceNames==='object'?settings.conferenceNames:{};
+    const configured=names[key]??names[raw]??'';
+    const label=String(configured||((key==='a'||key==='b')?`Conference ${key.toUpperCase()}`:raw)).trim();
+    return {key,label,assigned:true};
   }
 
   function emptyRosterMessage(snapshot, settings){
@@ -129,6 +119,35 @@
       const result = await withTimeout(SBL.freeAgency.load(supabase), 10000, 'Loading the roster data');
       let rosters = result?.rosters || {};
       const settings = result?.settings || {};
+      // Franchise visibility is driven by canonical active ownership assignments,
+      // not the franchise definition list or stale roster keys. Unassigned and
+      // inactive definitions must never appear as participating teams.
+      TEAM_ACTIVE_ASSIGNMENTS=await withTimeout(
+        SBL.franchiseOwnership.listActiveMemberFranchises(leagueId,supabase),
+        7000,'Loading active franchise assignments'
+      );
+      TEAM_FRANCHISES=[...new Map(TEAM_ACTIVE_ASSIGNMENTS.map(row=>[teamKey(row?.franchise?.name),row?.franchise]).filter(([key,row])=>key&&row)).values()];
+      const activeUserIds=[...new Set(TEAM_ACTIVE_ASSIGNMENTS.map(row=>String(row?.userId||'')).filter(Boolean))];
+      let profiles=[];
+      try{
+        if(activeUserIds.length&&SBL.profiles?.list)profiles=await withTimeout(SBL.profiles.list({userIds:activeUserIds,fields:'id,username'},supabase),7000,'Loading active franchise owners');
+      }catch(error){console.warn('Active franchise usernames unavailable; roster cards will omit owner labels.',error);}
+      const usernames=new Map((profiles||[]).map(row=>[String(row.id),String(row.username||'').trim()]));
+      TEAM_MAP={};TEAM_OWNER_LABELS={};
+      TEAM_ACTIVE_ASSIGNMENTS.forEach(row=>{
+        const username=usernames.get(String(row.userId||''));
+        const franchise=String(row?.franchise?.name||'').trim();
+        if(username&&franchise){TEAM_MAP[username]=franchise;TEAM_OWNER_LABELS[franchise]=username;}
+      });
+      TEAM_SIGNATURE_BY_FRANCHISE=new Map();
+      try{
+        const preferences=await withTimeout(SBL.memberPreferences.list(leagueId,supabase),7000,'Loading signature picks');
+        const byUser=new Map((preferences||[]).map(row=>[String(row.user_id),String(row.signature_pokemon||'').trim()]));
+        TEAM_ACTIVE_ASSIGNMENTS.forEach(row=>{
+          const selected=byUser.get(String(row.userId||''));
+          if(selected)TEAM_SIGNATURE_BY_FRANCHISE.set(teamKey(row.franchise?.name),selected);
+        });
+      }catch(error){console.warn('Member signature preferences unavailable; using automatic signature picks.',error);}
       const draftSettings = settings?.draft;
       if(draftSettings && typeof draftSettings === 'object'){
         DRAFT_BUDGETS = {
@@ -137,7 +156,7 @@
         };
       }
 
-      TEAM_SETTINGS = settings; TEAM_MAP = result?.state?.teamMap || {}; TEAM_ROSTERS = rosters;
+      TEAM_SETTINGS = settings; TEAM_ROSTERS = rosters;
       // History is deliberately lazy: visiting Rosters loads no replay corpus.
       // The first Pokémon click uses the season-scoped replay service once;
       // subsequent selections reuse the same in-page promise and data.
@@ -157,43 +176,114 @@
         const {rows,state}=await profileReplaysPromise;
         return SBL.stats.franchisePokemonStat(TEAM_ROSTERS,rows,username=>SBL.domain.replayTeamLabel(state,username),team,species);
       };
-      SBL.teamPopup?.bind(document, () => ({settings: TEAM_SETTINGS, teamMap: TEAM_MAP, rosters: TEAM_ROSTERS, getPokemonProfile}));
-      const teams = Object.keys(rosters).sort((a,b)=>a.localeCompare(b));
+      SBL.teamPopup?.bind(document, () => ({settings: TEAM_SETTINGS, teamMap: TEAM_MAP, rosters: TEAM_ROSTERS,
+        franchises: TEAM_FRANCHISES, getPokemonProfile}));
+      const teams=[...new Map(TEAM_ACTIVE_ASSIGNMENTS.map(row=>{
+        const name=String(row?.franchise?.name||'').trim();return [teamKey(name),name];
+      }).filter(([key,name])=>key&&name)).values()].sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}));
       const draftStatus=String(settings?.draft?.status||'').trim().toLowerCase();
       if(!teams.length){
-        content.innerHTML = emptyRosterMessage(result?.snapshot, settings);
+        content.innerHTML = `<section class="roster-empty-state"><div class="roster-empty-kicker">FRANCHISE DIRECTORY</div><h2>No active franchises</h2><p>Only franchises with an active player assignment appear here. Once a coach is approved and assigned, their franchise will appear automatically.</p></section>`;
         return;
       }
 
-      // Franchise directory: roster contents remain out of sight until a tile is opened.
-      // Reuse the shared, keyboard-accessible roster dialog; no Team Analysis here.
-      if(toolbar) toolbar.style.display='none';
+      // Franchise contents remain hidden until a tile is opened. Conference
+      // assignment comes from the league-scoped franchises table, with the
+      // saved settings map retained only as a compatibility fallback.
       const draftNotice = ['setup','lobby','live'].includes(draftStatus)
         ? `<div class="roster-draft-notice" role="status"><strong>Draft ${draftStatus==='live'?'in progress':'not yet complete'}:</strong> Rosters may still change.</div>` : '';
-      // Signature pick is the first officially selected Pokémon for the franchise.
-      // If the draft order is not available, show the highest-point published
-      // roster entry as a clearly-presented fallback; never invent a Pokémon.
       const recordedPicks=Array.isArray(draftSettings?.picks)?draftSettings.picks:[];
-      const teamKey=value=>String(value||'').trim().toLowerCase();
+      const rosterForFranchise=team=>{
+        const entry=Object.entries(rosters).find(([name])=>teamKey(name)===teamKey(team));
+        return Array.isArray(entry?.[1])?entry[1]:[];
+      };
+      const exportAllRosters=()=>{
+        if(!SBL.leagueExports?.downloadAllRosters)throw new Error('The shared roster exporter is not loaded.');
+        SBL.leagueExports.downloadAllRosters({
+          settings,rosters,franchises:TEAM_FRANCHISES,activeFranchises:teams,
+          ownerLabels:TEAM_OWNER_LABELS,teamMap:TEAM_MAP
+        });
+        const status=content.querySelector('#rosterExportStatus');
+        if(status)status.textContent=`Exported ${teams.length} active franchises and ${teams.reduce((n,team)=>n+rosterForFranchise(team).length,0)} Pokémon.`;
+      };
       const signatureFor=team=>{
-        const members=Array.isArray(rosters[team])?rosters[team]:[];
+        const members=rosterForFranchise(team);
         if(!members.length)return null;
+        const coachChoice=TEAM_SIGNATURE_BY_FRANCHISE.get(teamKey(team));
+        if(coachChoice){
+          const chosen=members.find(mon=>SBL.pokemon?.sameSpeciesForm?.(mon?.name,coachChoice)||teamKey(mon?.name)===teamKey(coachChoice));
+          if(chosen)return {mon:chosen,label:'Coach-selected pick'};
+        }
         const picked=recordedPicks.filter(p=>teamKey(p.team||p.franchise||p.franchiseName)===teamKey(team))
           .sort((a,b)=>(Number(a.pickNumber)||999999)-(Number(b.pickNumber)||999999));
-        for(const p of picked){
-          const found=members.find(m=>SBL.pokemon?.sameSpeciesForm?.(m?.name,p?.name) || teamKey(m?.name)===teamKey(p?.name));
-          if(found)return found;
+        for(const pick of picked){
+          const found=members.find(m=>SBL.pokemon?.sameSpeciesForm?.(m?.name,pick?.name) || teamKey(m?.name)===teamKey(pick?.name));
+          if(found)return {mon:found,label:'Signature pick'};
         }
-        return members.slice().sort((a,b)=>(Number(b?.points)||0)-(Number(a?.points)||0))[0];
+        const fallback=members.slice().sort((a,b)=>(Number(b?.points)||0)-(Number(a?.points)||0))[0];
+        return fallback?{mon:fallback,label:'Highest-point pick'}:null;
       };
-      content.innerHTML=`${draftNotice}<div class="roster-directory-intro"><h1>Franchises</h1><span>${teams.length} teams</span></div><div class="roster-franchise-grid">${teams.map(name=>{
-        const signature=signatureFor(name);
-        return `<button type="button" class="roster-franchise-tile${teamTintClass(settings,name)}"${teamTintStyle(settings,name)} data-team-popup="${esc(name)}" aria-label="Open ${esc(name)} roster">
-          <span class="roster-franchise-name">${esc(name)}</span>
-          <span class="roster-franchise-signature-art" aria-hidden="true">${signature?sprite(signature.name):'<span class="roster-franchise-empty-mark">?</span>'}</span>
-          <span class="roster-franchise-signature-name">${signature?esc(canonicalName(signature.name)):'Awaiting draft'}</span>
-        </button>`;
-      }).join('')}</div>`;
+      const conferenceRows=[...new Map(teams.map(team=>{
+        const info=conferenceInfo(team,settings,TEAM_FRANCHISES);return [info.key,info];
+      }))].map(([key,info])=>({key,...info}));
+      const conferenceOrder=Object.keys(settings?.conferenceNames||{}).map(key=>String(key).toLowerCase());
+      conferenceRows.sort((a,b)=>{
+        const ai=conferenceOrder.indexOf(a.key),bi=conferenceOrder.indexOf(b.key);
+        if(ai>=0||bi>=0)return (ai<0?999:ai)-(bi<0?999:bi)||a.label.localeCompare(b.label);
+        if(a.key==='__unassigned')return 1;if(b.key==='__unassigned')return -1;
+        return a.label.localeCompare(b.label);
+      });
+      const options=conferenceRows.map(row=>`<option value="${esc(row.key)}">${esc(row.label)}</option>`).join('');
+      content.innerHTML=`<div class="roster-page">
+        <header class="roster-directory-intro"><div><span class="roster-page-kicker">LEAGUE DIRECTORY</span><h1>Franchises</h1><p>Browse franchise rosters by conference.</p></div><div class="roster-directory-actions"><span class="roster-total-count" id="rosterTotalCount">${teams.length} franchises</span><button type="button" class="primary roster-export-button" id="exportAllRosters">Export All Rosters (.xlsx)</button><span class="roster-export-status" id="rosterExportStatus" role="status"></span></div></header>
+        ${draftNotice}
+        <div class="roster-toolbar" role="search" aria-label="Filter franchises">
+          <div class="roster-filter-field roster-search-field"><label for="rosterSearch">Search franchises</label><input id="rosterSearch" type="search" placeholder="Search by team name..." autocomplete="off"></div>
+          <div class="roster-filter-field"><label for="rosterConferenceFilter">Conference</label><select id="rosterConferenceFilter"><option value="all">All conferences</option>${options}</select></div>
+          <div class="roster-summary" id="rosterSummary" aria-live="polite">Showing ${teams.length} of ${teams.length} franchises</div>
+        </div>
+        <div id="rosterDirectoryGroups" class="roster-directory-groups"></div>
+      </div>`;
+      const renderDirectory=()=>{
+        const search=String(content.querySelector('#rosterSearch')?.value||'').trim().toLowerCase();
+        const selected=String(content.querySelector('#rosterConferenceFilter')?.value||'all');
+        const filtered=teams.filter(name=>{
+          const info=conferenceInfo(name,settings,TEAM_FRANCHISES);
+          const signature=signatureFor(name)?.mon;
+          const matchesConference=selected==='all'||info.key===selected;
+          const matchesSearch=!search||name.toLowerCase().includes(search)||String(signature?.name||'').toLowerCase().includes(search);
+          return matchesConference&&matchesSearch;
+        });
+        const groups=conferenceRows.filter(row=>selected==='all'||row.key===selected)
+          .map(row=>({key:row.key,label:row.label,teams:filtered.filter(name=>conferenceInfo(name,settings,TEAM_FRANCHISES).key===row.key).sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}))}))
+          .filter(row=>row.teams.length);
+        const groupMarkup=groups.map(group=>`<section class="roster-conference-section" aria-labelledby="rosterGroup-${esc(group.key)}">
+          <div class="roster-conference-heading"><h2 id="rosterGroup-${esc(group.key)}">${esc(group.label)}</h2><span>${group.teams.length} ${group.teams.length===1?'franchise':'franchises'}</span></div>
+          <div class="roster-franchise-grid">${group.teams.map(name=>{
+            const members=rosterForFranchise(name);
+            const signature=signatureFor(name);
+            const info=conferenceInfo(name,settings,TEAM_FRANCHISES);
+            const spent=rosterPoints(members);
+            const signatureArt=signature?sprite(signature.mon.name):'<span class="roster-franchise-empty-mark">+</span>';
+            const signatureCopy=signature?`<small>${esc(signature.label)}</small><strong>${esc(canonicalName(signature.mon.name))}</strong><span>${members.length} Pokémon · ${spent} pts</span>`:'<small>Roster status</small><strong>Awaiting draft</strong><span>No published picks yet</span>';
+            return `<button type="button" class="roster-franchise-tile${teamTintClass(settings,name)}"${teamTintStyle(settings,name)} data-team-popup="${esc(name)}" aria-label="Open ${esc(name)} roster">
+              <span class="roster-franchise-card-top"><strong class="roster-franchise-name">${esc(name)}</strong><span class="roster-conference-pill">${esc(info.label)}</span></span>
+              <span class="roster-franchise-card-body"><span class="roster-franchise-signature-art sbl-signature-sprite-frame" aria-hidden="true">${signatureArt}</span><span class="roster-franchise-signature-copy">${signatureCopy}</span><span class="roster-franchise-card-arrow" aria-hidden="true">›</span></span>
+              ${ownerTag(name)}
+            </button>`;
+          }).join('')}</div>
+        </section>`).join('');
+        const groupsHost=content.querySelector('#rosterDirectoryGroups');
+        if(groupsHost)groupsHost.innerHTML=groupMarkup||'<div class="roster-filter-empty">No franchises match these filters.</div>';
+        const summary=content.querySelector('#rosterSummary');
+        if(summary)summary.textContent=`Showing ${filtered.length} of ${teams.length} franchises`;
+        const total=content.querySelector('#rosterTotalCount');
+        if(total)total.textContent=`${filtered.length} of ${teams.length} franchises`;
+      };
+      content.querySelector('#rosterSearch')?.addEventListener('input',renderDirectory);
+      content.querySelector('#rosterConferenceFilter')?.addEventListener('change',renderDirectory);
+      content.querySelector('#exportAllRosters')?.addEventListener('click',()=>{try{exportAllRosters();}catch(error){const status=content.querySelector('#rosterExportStatus');if(status)status.textContent=`Could not export rosters: ${error?.message||error}`;}});
+      renderDirectory();
     }catch(err){
       console.error('Roster load failed:', err);
       showError(`Could not load rosters: ${err?.message || err}`);

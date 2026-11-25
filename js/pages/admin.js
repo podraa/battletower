@@ -1351,6 +1351,7 @@ Choose Cancel to keep draft status unchanged.`);
       'bug-reports': renderBugReports,
       draft: renderDraft,
       freeagency: renderFreeAgency,
+      exports: renderExports,
       'pokemon-roles': renderPokemonRoles,
       trades: renderTrades,
       updates: renderUpdates,
@@ -1377,7 +1378,7 @@ Choose Cancel to keep draft status unchanged.`);
   }
 
   const ADMIN_SECTION_WORKSPACE_TABS = new Set([
-    'league','people','legacy-migration','draft','freeagency','pokemon-roles','trades','updates',
+    'league','people','legacy-migration','draft','freeagency','pokemon-roles','trades','updates','exports',
     'franchise-requests','settings-franchises','settings-data','settings-system','seasonsetup','process','players'
   ]);
   function applyAdminSectionWorkspace(container=contentEl, workspaceKey='main', headingOverride=''){
@@ -3679,11 +3680,132 @@ function renderDraft(){ return drawDraft(); }
     });
   }
 
-  function renderFreeAgency(){
-    const current=Array.isArray(STATE.settings?.freeAgency?.mons)?STATE.settings.freeAgency.mons:[];
-    const groups={};
-    current.forEach(m=>{const p=Number(m.points)||0;(groups[p]??=[]).push(m);});
+  async function loadLeagueExportContext(){
+    requireAdmin();
+    const leagueId=String(SBL.leagueDb?.selectedLeagueId?.()||'').trim();
+    if(!leagueId)throw new Error('Select a league before exporting.');
+    const assignments=await SBL.franchiseOwnership.listActiveMemberFranchises(leagueId,supabase);
+    const activeFranchises=[...new Map((assignments||[]).map(row=>[String(row?.franchise?.id||''),row?.franchise]).filter(([id,row])=>id&&row)).values()];
+    const userIds=[...new Set((assignments||[]).map(row=>String(row?.userId||'')).filter(Boolean))];
+    const profiles=userIds.length&&SBL.profiles?.list?await SBL.profiles.list({userIds,fields:'id,username'},supabase):[];
+    const usernames=new Map((profiles||[]).map(row=>[String(row.id),String(row.username||'').trim()]));
+    const ownerLabels={};
+    (assignments||[]).forEach(row=>{const name=String(row?.franchise?.name||'').trim(),username=usernames.get(String(row?.userId||''));if(name&&username)ownerLabels[name]=username;});
+    let trades=[];try{const tradeResult=await SBL.trades?.load?.(supabase)||{data:[]};trades=Array.isArray(tradeResult)?tradeResult:(tradeResult?.data||[]);}catch(error){console.warn('Export roster trade projection unavailable:',error);}
+    const effectiveRostersAll=SBL.trades?.getEffectiveRosters?.(STATE.settings?.rosters||{},trades)||STATE.settings?.rosters||{};
+    const activeKeys=new Set(activeFranchises.map(row=>String(row?.name||'').trim().toLowerCase().replace(/[^a-z0-9]/g,'')));
+    const effectiveRosters=Object.fromEntries(Object.entries(effectiveRostersAll).filter(([team])=>activeKeys.has(String(team||'').trim().toLowerCase().replace(/[^a-z0-9]/g,''))));
+    const effectivePool=SBL.trades?.restoreFutureFreeAgencyPool?.(STATE.settings?.freeAgency?.mons||[],STATE.settings?.rosters||{},trades)||STATE.settings?.freeAgency?.mons||[];
+    const settings={...(STATE.settings||{}),rosters:effectiveRosters,freeAgency:{...(STATE.settings?.freeAgency||{}),mons:effectivePool}};
+    const canonicalTeamMap={...(STATE.teamMap||{})};
+    Object.entries(ownerLabels).forEach(([franchise,username])=>{if(username)canonicalTeamMap[username]=franchise;});
+    return {settings,rosters:effectiveRosters,replays:STATE.replays||{},teamMap:canonicalTeamMap,franchises:activeFranchises,activeFranchises,ownerLabels};
+  }
+  function renderExports(){
+    const draftCount=Array.isArray(STATE.settings?.draft?.pool)?STATE.settings.draft.pool.length:0;
+    const faCount=Array.isArray(STATE.settings?.freeAgency?.mons)?STATE.settings.freeAgency.mons.length:0;
+    const rosterCount=Object.keys(STATE.settings?.rosters||{}).length;
+    const fixtureCount=SBL.fixtureWorkflow?.publishedRounds?.(STATE.settings)?.reduce((sum,round)=>sum+(Array.isArray(round.matches)?round.matches.length:0),0)||0;
+    contentEl.innerHTML=`<section class="admin-section admin-exports-workspace"><div class="admin-section-title"><div><div class="admin-dashboard-kicker">LEAGUE DATA EXPORTS</div><h2>Exports & Downloads</h2><p class="note">Download the current league and season data for spreadsheet-based preparation. Exports are scoped to the selected league and season.</p></div></div>
+      <div class="admin-export-grid">
+        <article class="admin-export-card"><div class="admin-export-card-kicker">DRAFT & FREE AGENCY</div><h3>Free Agency Draft Board</h3><p>Point-tier draft board with taken Pokémon highlighted and the franchise that owns each pick identified. Includes a full data sheet and status legend.</p><div class="admin-export-meta">${draftCount} draft catalogue entries · ${faCount} currently available</div><button type="button" class="primary" data-admin-export="draft-board">Download Draft Board (.xlsx)</button><div class="note" data-admin-export-status="draft-board" role="status"></div></article>
+        <article class="admin-export-card"><div class="admin-export-card-kicker">ROSTER PREPARATION</div><h3>All Franchise Rosters</h3><p>One row per Pokémon plus a franchise summary with conference, owner, roster size, points spent, budget remaining and Mega count.</p><div class="admin-export-meta">${rosterCount} roster records in current season data</div><button type="button" class="primary" data-admin-export="rosters">Export All Rosters (.xlsx)</button><div class="note" data-admin-export-status="rosters" role="status"></div></article>
+        <article class="admin-export-card"><div class="admin-export-card-kicker">SCHEDULE & RESULTS</div><h3>Season Fixture</h3><p>Full fixture with conferences, match type, played status, winner and scores, plus a weekly summary.</p><div class="admin-export-meta">${fixtureCount} scheduled matches</div><button type="button" class="primary" data-admin-export="fixture">Download Fixture (.xlsx)</button><div class="note" data-admin-export-status="fixture" role="status"></div></article>
+      </div></section>`;
+    contentEl.querySelectorAll('[data-admin-export]').forEach(button=>button.addEventListener('click',async()=>{
+      const kind=button.dataset.adminExport,status=contentEl.querySelector(`[data-admin-export-status="${kind}"]`);
+      button.disabled=true;if(status)status.textContent='Preparing export…';
+      try{
+        const context=await loadLeagueExportContext();
+        if(!SBL.leagueExports)throw new Error('The shared export service is not loaded.');
+        if(kind==='draft-board')SBL.leagueExports.downloadDraftBoard(context);
+        else if(kind==='rosters')SBL.leagueExports.downloadAllRosters(context);
+        else if(kind==='fixture')SBL.leagueExports.downloadFixture(context);
+        if(status)status.textContent='Download prepared.';
+      }catch(error){if(status){status.className='note danger';status.textContent=error?.message||String(error);}}
+      finally{button.disabled=false;}
+    }));
+  }
+
+  let FREE_AGENCY_ADD_CATALOGUE=null;
+  let FREE_AGENCY_ADD_CATALOGUE_WARNING='';
+  let FREE_AGENCY_ADD_STATUS='';
+  let FREE_AGENCY_EFFECTIVE_ROSTERS={};
+  let FREE_AGENCY_EFFECTIVE_POOL=[];
+  let FREE_AGENCY_TRADE_ROWS=[];
+  async function loadFreeAgencyAddCatalogue(){
+    if(FREE_AGENCY_ADD_CATALOGUE)return FREE_AGENCY_ADD_CATALOGUE;
+    let rows=[];
+    try{
+      if(!SBL.pokemonCatalog?.listSpecies)throw new Error('The central Pokémon catalogue is not loaded.');
+      rows=await SBL.pokemonCatalog.listSpecies({limit:5000,pageSize:750});
+      if(!rows.length){FREE_AGENCY_ADD_CATALOGUE_WARNING='The global catalogue has no active rows. The dropdown is limited to Pokémon already present in the draft pool.';rows=(STATE.settings?.draft?.pool||[]).map(mon=>({name:mon.name,is_mega:!!mon.isMega,base_stats:mon.baseStats||mon.stats||null,types:mon.types||[],abilities:mon.abilities||[]}));}
+    }catch(error){
+      console.warn('Central Pokémon catalogue unavailable for post-draft Free Agency additions; using known draft pool entries.',error);
+      FREE_AGENCY_ADD_CATALOGUE_WARNING='The global catalogue is unavailable. The dropdown is limited to Pokémon already present in the draft pool.';
+      rows=(STATE.settings?.draft?.pool||[]).map(mon=>({name:mon.name,is_mega:!!mon.isMega,base_stats:mon.baseStats||mon.stats||null,types:mon.types||[],abilities:mon.abilities||[]}));
+    }
+    if(!rows.length)throw new Error('No Pokémon catalogue entries are available. Confirm migration 057 is installed and the global catalogue has been imported.');
+    const byKey=new Map();
+    rows.forEach(row=>{
+      const raw=String(row?.name||'').trim();if(!raw)return;
+      const name=normalizeFreeAgencyName(raw),k=freeAgencyKey(name);if(!k)return;
+      if(!byKey.has(k))byKey.set(k,{name,isMega:!!(row.is_mega||row.isMega||SBL.pokemon?.isMega?.(name)),types:Array.isArray(row.types)?row.types:[],baseStats:row.base_stats||row.baseStats||row.stats||null,abilities:row.abilities||[]});
+    });
+    FREE_AGENCY_ADD_CATALOGUE=[...byKey.values()].sort((a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:'base'}));
+    return FREE_AGENCY_ADD_CATALOGUE;
+  }
+  async function loadEffectiveFreeAgencyRosters(){
+    try{
+      const tradeResult=await SBL.trades?.load?.(supabase)||{data:[]};
+      const trades=Array.isArray(tradeResult)?tradeResult:(tradeResult?.data||[]);
+      FREE_AGENCY_TRADE_ROWS=trades;
+      const projection=SBL.trades?.projectRosterState?.(STATE.settings||{},trades)||null;
+      FREE_AGENCY_EFFECTIVE_ROSTERS=projection?.rosters||SBL.trades?.getEffectiveRosters?.(STATE.settings?.rosters||{},trades)||STATE.settings?.rosters||{};
+      FREE_AGENCY_EFFECTIVE_POOL=projection?.available||SBL.trades?.restoreFutureFreeAgencyPool?.(STATE.settings?.freeAgency?.mons||[],STATE.settings?.rosters||{},trades)||STATE.settings?.freeAgency?.mons||[];
+    }catch(error){
+      console.warn('Could not resolve effective post-trade rosters for Free Agency pool management:',error);
+      FREE_AGENCY_EFFECTIVE_ROSTERS=STATE.settings?.rosters||{};
+      FREE_AGENCY_EFFECTIVE_POOL=Array.isArray(STATE.settings?.freeAgency?.mons)?STATE.settings.freeAgency.mons:[];
+      FREE_AGENCY_TRADE_ROWS=[];
+    }
+    return FREE_AGENCY_EFFECTIVE_ROSTERS;
+  }
+  function freeAgencyRosterOwner(name){
+    const target=freeAgencyKey(name);
+    for(const [team,mons] of Object.entries(FREE_AGENCY_EFFECTIVE_ROSTERS||STATE.settings?.rosters||{})){
+      if((Array.isArray(mons)?mons:[]).some(mon=>freeAgencyKey(typeof mon==='string'?mon:mon?.name)===target))return team;
+    }
+    return '';
+  }
+  function freeAgencyKnownPointValue(name){
+    const target=freeAgencyKey(name);
+    const sources=[STATE.settings?.freeAgency?.mons,STATE.settings?.draft?.pool];
+    for(const source of sources){
+      const found=(Array.isArray(source)?source:[]).find(mon=>freeAgencyKey(mon?.name)===target);
+      if(found&&found.points!==undefined&&found.points!==null&&found.points!=='')return Number(found.points);
+    }
+    return '';
+  }
+  async function renderFreeAgency(){
+    await loadEffectiveFreeAgencyRosters();
+    const current=Array.isArray(FREE_AGENCY_EFFECTIVE_POOL)?FREE_AGENCY_EFFECTIVE_POOL:(Array.isArray(STATE.settings?.freeAgency?.mons)?STATE.settings.freeAgency.mons:[]);
+    const groups={};current.forEach(m=>{const p=Number(m.points)||0;(groups[p]??=[]).push(m);});
     const tiers=Object.keys(groups).sort((a,b)=>Number(b)-Number(a));
+    const draftComplete=String(STATE.settings?.draft?.status||'').toLowerCase()==='complete';
+    let catalogue=[],catalogueError='';
+    if(draftComplete){
+      try{catalogue=await loadFreeAgencyAddCatalogue();}
+      catch(error){catalogueError=error?.message||String(error);}
+    }
+    const currentKeys=new Set(current.map(mon=>freeAgencyKey(mon?.name)));
+    const addOptions=catalogue.map(mon=>{
+      const ownedBy=freeAgencyRosterOwner(mon.name),alreadyAvailable=currentKeys.has(freeAgencyKey(mon.name));
+      const disabled=!!ownedBy||alreadyAvailable;
+      const label=alreadyAvailable?'Already available':ownedBy?`On ${ownedBy}`:'';
+      const cost=freeAgencyKnownPointValue(mon.name);
+      return `<option value="${SBL.pokemon.escapeHtml(mon.name)}" data-points="${Number.isFinite(cost)?cost:''}" ${disabled?'disabled':''}>${SBL.pokemon.escapeHtml(SBL.pokemon.displayNameWithForm?.(mon.name)||mon.name)}${Number.isFinite(cost)?` · ${cost} pts`:''}${label?` · ${SBL.pokemon.escapeHtml(label)}`:''}</option>`;
+    }).join('');
 
     contentEl.innerHTML=`
       <div class="panel">
@@ -3695,17 +3817,53 @@ function renderDraft(){ return drawDraft(); }
         </div>
         <div id="freeAgencyStatus" style="margin-top:12px"></div>
       </div>
+      ${draftComplete?`<section class="panel fa-admin-add-pool-panel"><div class="section-head-row"><div><div class="admin-dashboard-kicker">POST-DRAFT POOL MANAGEMENT</div><h2>Add Pokémon to Available Free Agency</h2><p class="note">Add one Pokémon to the existing available pool. This does not reset the draft, change picks, edit rosters, or alter draft plans. Set its point value before saving.</p></div><span class="badge">ADMIN ONLY</span></div><div class="fa-admin-add-pool-controls"><div><label for="addFreeAgencyPokemon">Pokémon</label><select id="addFreeAgencyPokemon"><option value="">Choose a Pokémon…</option>${addOptions}</select></div><div><label for="addFreeAgencyPoints">Point value</label><input id="addFreeAgencyPoints" type="number" min="0" max="1000" step="1" placeholder="Enter points"></div><button type="button" class="primary" id="addFreeAgencyPokemonButton" ${catalogue.length?'':'disabled'}>Add to available pool</button></div><div class="note" id="addFreeAgencyPokemonStatus" role="status">${SBL.pokemon.escapeHtml(FREE_AGENCY_ADD_STATUS||catalogueError||FREE_AGENCY_ADD_CATALOGUE_WARNING||'Only Pokémon not already available or owned by a franchise can be added.')}</div></section>`:`<section class="panel"><h2>Post-draft additions</h2><p class="note">Individual additions to the available Free Agency pool become available after the draft is marked complete.</p></section>`}
       <div class="panel">
         <h2>Published Free Agency <span class="badge">${current.length} Pokémon</span></h2>
         ${current.length?`<div class="note">${SBL.pokemon.escapeHtml(STATE.settings?.freeAgency?.source||'Workbook')} · ${tiers.length} point tiers</div><div style="max-height:380px;overflow:auto;margin-top:12px"><table><thead><tr><th>Pokémon</th><th>Points</th><th>Roles</th></tr></thead><tbody>${current.map(m=>`<tr><td>${SBL.pokemon.spriteMarkup(m.name,'sprite')} ${SBL.pokemon.escapeHtml(m.name)}</td><td class="num">${Number(m.points)||0}</td><td>${rolesForAdmin(m.name).map(r=>SBL.pokemon.escapeHtml(roleLabelAdmin(r))).join(' · ')||'<span class="note">Unassigned</span>'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">No Free Agency pool published yet.</div>'}
-      </div>
-      `;
+      </div>`;
+
+    const addSelect=document.getElementById('addFreeAgencyPokemon');
+    const addPoints=document.getElementById('addFreeAgencyPoints');
+    addSelect?.addEventListener('change',()=>{
+      const selected=addSelect.selectedOptions?.[0];
+      if(addPoints&&selected?.dataset?.points!=='')addPoints.value=selected?.dataset?.points||'';
+      else if(addPoints)addPoints.value='';
+    });
+    document.getElementById('addFreeAgencyPokemonButton')?.addEventListener('click',async event=>{
+      const button=event.currentTarget,status=document.getElementById('addFreeAgencyPokemonStatus');
+      const name=String(addSelect?.value||'').trim(),pointsRaw=String(addPoints?.value??'').trim(),points=Number(pointsRaw);
+      const fail=message=>{if(status){status.className='note danger';status.textContent=message;}};
+      if(!draftComplete){fail('The draft must be complete before adding individual Free Agency entries.');return;}
+      if(!name){fail('Choose a Pokémon first.');return;}
+      if(pointsRaw===''||!Number.isFinite(points)||points<0||points>1000){fail('Enter a valid point value between 0 and 1000.');return;}
+      const rawCurrent=Array.isArray(STATE.settings?.freeAgency?.mons)?STATE.settings.freeAgency.mons:[];
+      if(current.some(mon=>freeAgencyKey(mon?.name)===freeAgencyKey(name))||rawCurrent.some(mon=>freeAgencyKey(mon?.name)===freeAgencyKey(name))){fail(`${name} is already in the available Free Agency pool.`);return;}
+      const owner=freeAgencyRosterOwner(name);if(owner){fail(`${name} is currently owned by ${owner} and cannot be added to Free Agency.`);return;}
+      const source=catalogue.find(mon=>freeAgencyKey(mon.name)===freeAgencyKey(name));
+      const entry={name,points,isMega:!!(source?.isMega||SBL.pokemon?.isMega?.(name)),...(source?.types?.length?{types:source.types.slice()}:{}),...(source?.baseStats?{baseStats:source.baseStats}:{}),...(source?.abilities?.length?{abilities:source.abilities.slice()}: {})};
+      button.disabled=true;if(status){status.className='note';status.textContent='Adding to the existing Free Agency pool…';}
+      try{
+        const previousFreeAgency=STATE.settings.freeAgency;
+        const freeAgency={...(previousFreeAgency||{})};
+        freeAgency.mons=[...rawCurrent.map(mon=>({...mon})),entry];
+        freeAgency.adminAddedMons=[...(Array.isArray(freeAgency.adminAddedMons)?freeAgency.adminAddedMons:[]),{...entry,addedAt:new Date().toISOString(),addedBy:adminUser?.id||null}];
+        const source=String(freeAgency.source||'Workbook').trim();
+        freeAgency.source=/admin additions/i.test(source)?source:`${source} + Admin additions`;
+        freeAgency.updatedAt=new Date().toISOString();
+        STATE.settings.freeAgency=freeAgency;
+        try{await saveSettings();}catch(error){STATE.settings.freeAgency=previousFreeAgency;throw error;}
+        try{await logAdminAction('add_free_agency_pool_pokemon',`Added ${name} (${points} points) to the available Free Agency pool without resetting the draft board.`,{pokemon:name,points,isMega:entry.isMega,draftStatus:STATE.settings.draft?.status});}catch(logError){console.warn('Free Agency addition saved, but admin log entry failed:',logError);}
+        FREE_AGENCY_ADD_STATUS=`Added ${name} to available Free Agency at ${points} points. Existing picks, rosters, draft order and plans were not changed.`;
+        await renderFreeAgency();
+      }catch(error){fail(`Could not add ${name}: ${error?.message||String(error)}`);button.disabled=false;}
+    });
 
     document.getElementById('importFreeAgency').onclick=async()=>{
       const file=document.getElementById('freeAgencyFile').files?.[0];
       const status=document.getElementById('freeAgencyStatus');
       if(!file){status.innerHTML='<div class="note danger">Choose the Tier List workbook first.</div>';return;}
-      const btn=document.getElementById('importFreeAgency'); btn.disabled=true; status.innerHTML='<div class="note">Scanning workbook sheets and detecting Pokémon point values…</div>';
+      const btn=document.getElementById('importFreeAgency');btn.disabled=true;status.innerHTML='<div class="note">Scanning workbook sheets and detecting Pokémon point values…</div>';
       try{
         const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});
         const pool=parseFreeAgencyWorkbook(wb);
@@ -3721,7 +3879,7 @@ function renderDraft(){ return drawDraft(); }
   // renderer and handlers, but present only the role tools rather than making
   // admins navigate through the Free Agency workbook importer.
   function renderPokemonRoles(){
-    const current=Array.isArray(STATE.settings?.freeAgency?.mons)?STATE.settings.freeAgency.mons:[];
+    const current=Array.isArray(FREE_AGENCY_EFFECTIVE_POOL)?FREE_AGENCY_EFFECTIVE_POOL:(Array.isArray(STATE.settings?.freeAgency?.mons)?STATE.settings.freeAgency.mons:[]);
     contentEl.innerHTML=`<section class="admin-section pokemon-roles-workspace"><div class="admin-section-title"><div><div class="admin-dashboard-kicker">COMPETITIVE CLASSIFICATION</div><h2>Pokémon Roles</h2><p class="note">Manage the competitive role catalogue, automatic suggestions and protected manual assignments independently of workbook publishing.</p></div></div>${roleSettingsPanelHtml()}${renderRoleAssignmentPanel(current)}</section>`;
     wireRoleSettings();
     wireRoleAssignmentPanel(current);
