@@ -73,6 +73,23 @@
     if (error) throw error;
     return data || [];
   }
+  async function listSpecies(options = {}) {
+    const limit=Math.max(1,Math.min(5000,Number(options.limit)||2500));
+    const pageSize=Math.max(100,Math.min(1000,Number(options.pageSize)||750));
+    const fields='pokemon_id,name,base_species,forme,num,generation,types,base_stats,abilities,is_mega,is_battle_only,is_nonstandard';
+    const rows=[];
+    for(let offset=0;offset<limit;offset+=pageSize){
+      const end=Math.min(limit-1,offset+pageSize-1);
+      let query=client().from('pokemon_catalog_active').select(fields).order('num',{ascending:true}).order('name',{ascending:true}).range(offset,end);
+      if(options.standardOnly===true)query=query.is('is_nonstandard',null);
+      const {data,error}=await query;
+      if(error)throw error;
+      rows.push(...(data||[]));
+      if(!data||data.length<end-offset+1)break;
+    }
+    return rows;
+  }
+
   async function getMoves(moveIds) {
     const ids = [...new Set((Array.isArray(moveIds) ? moveIds : [moveIds]).map(normalizeId).filter(Boolean))];
     if (!ids.length) return [];
@@ -292,12 +309,40 @@
           rows=await getLearnset(inheritedFrom);
         }
       }
-      if(!rows.length)return {moves:[],source:'global-catalogue',inheritedFrom};
+      const meta=await getMeta();
+      if(!rows.length)return {moves:[],source:profile?'global-catalogue':'inherited-base-learnset',inheritedFrom,
+        version:String(profile?.version||meta?.active_version||''),evidence:'catalogued',rulesetVerified:false};
       const known=await getMoves(rows.map(row=>row.move_id));
       const moves=known.filter(m=>Number(m.base_power)>0 && ['Physical','Special'].includes(String(m.category||'').replace(/^./,x=>x.toUpperCase())))
-        .map(m=>({name:String(m.name||m.move_id||''),type:String(m.type||''),category:String(m.category||'').toLowerCase(),power:Number(m.base_power),sources:rows.find(row=>row.move_id===m.move_id)?.sources||[]}))
+        .map(m=>({name:String(m.name||m.move_id||''),type:String(m.type||''),category:String(m.category||'').toLowerCase(),power:Number(m.base_power),
+          sources:rows.find(row=>row.move_id===m.move_id)?.sources||[],source:profile?'global-catalogue':'inherited-base-learnset',evidence:'catalogued',rulesetVerified:false,
+          catalogVersion:String(m.source_version||profile?.version||meta?.active_version||'')}))
         .filter(m=>m.name).sort((a,b)=>a.name.localeCompare(b.name));
-      return {moves,source:profile?'global-catalogue':'inherited-base-learnset',inheritedFrom};
+      return {moves,source:profile?'global-catalogue':'inherited-base-learnset',inheritedFrom,
+        version:String(profile?.version||meta?.active_version||''),evidence:'catalogued',rulesetVerified:false};
+    });
+  }
+
+  // One canonical read facade for Match Prep. Identity, exact-form battle
+  // profile and damaging move candidates are resolved through the same active
+  // catalogue version. Learnset rows are cross-generation catalogue evidence,
+  // not proof that a move is legal in the selected league format or on a real
+  // opponent set. Callers must preserve that provenance in their UI.
+  async function getMatchupBundle(name){
+    const identity=SBL.domain?.pokemonKey?.(name)||String(name||'').trim().toLowerCase();
+    const id=normalizeId(name);
+    if(!id)return null;
+    return once('catalog:matchup:'+id,async()=>{
+      const [profile,learnset]=await Promise.all([getBattleProfile(name),getDamagingLearnset(name)]);
+      const moves=Array.isArray(learnset?.moves)?learnset.moves.map(move=>({...move,
+        evidence:'catalogued',rulesetVerified:false,
+        source:move.source||learnset.source||'global-catalogue',
+        catalogVersion:move.catalogVersion||learnset.version||profile?.version||''})):[];
+      return Object.freeze({identity:String(identity),catalogId:id,profile:profile||null,moves,
+        profileSource:profile?.source||'unavailable',profileVersion:String(profile?.version||''),
+        moveSource:String(learnset?.source||'unavailable'),moveVersion:String(learnset?.version||profile?.version||''),
+        inheritedFrom:learnset?.inheritedFrom||null,rulesetVerified:false,
+        moveEvidence:'catalogued',hasExactProfile:!!profile});
     });
   }
 
@@ -307,10 +352,12 @@
     isReady,
     getSpecies,
     searchSpecies,
+    listSpecies,
     getMoves,
     getLearnset,
     getSpeciesWithLearnset,
     getDamagingLearnset,
+    getMatchupBundle,
     getBattleProfile,
     createCalcPokemon,
     preloadBattleProfiles,

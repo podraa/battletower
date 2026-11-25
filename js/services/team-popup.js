@@ -23,6 +23,18 @@
     }
     return [];
   }
+  function conferenceFor(ctx,team){
+    const settings=ctx?.settings||{};
+    const canonical=(ctx?.franchises||[]).find(row=>TC().key(row?.name)===TC().key(team));
+    const legacy=settings.franchises&&typeof settings.franchises==='object'
+      ?Object.entries(settings.franchises).find(([name])=>TC().key(name)===TC().key(team))?.[1]:null;
+    const definition=settings.franchiseDefinitions&&typeof settings.franchiseDefinitions==='object'
+      ?Object.entries(settings.franchiseDefinitions).find(([name])=>TC().key(name)===TC().key(team))?.[1]:null;
+    const raw=String(canonical?.conference||legacy||definition?.conference||'').trim();
+    if(!raw)return '';
+    const key=raw.toLowerCase(),names=settings.conferenceNames||{};
+    return String(names[key]||names[raw]||((key==='a'||key==='b')?`Conference ${key.toUpperCase()}`:raw));
+  }
   function close() {
     const el = document.getElementById('sblTeamPopup');
     if (el) el.remove();
@@ -45,13 +57,14 @@
     const nameOf = name => { try { return window.SBL.pokemon.displayNameWithForm(name) || name; } catch (_) { return name; } };
     const isMega = m => { try { return !!window.SBL.pokemon.isMega(m.name); } catch (_) { return false; } };
     const megas = roster.filter(isMega).length;
+    const conference = conferenceFor(ctx,team);
     const wrap = document.createElement('div');
     wrap.id = 'sblTeamPopup';
     wrap.className = 'team-popup-backdrop';
     wrap.innerHTML = `<div class="team-popup${color ? ' team-tinted' : ''}" role="dialog" aria-modal="true" aria-labelledby="tpTitle"${color ? ` style="--team-color:${color}"` : ''}>
-      <header class="tp-head"><div><h2 id="tpTitle">${esc(team)}</h2>${owners.length ? `<div class="tp-owner">${owners.map(u => '@' + esc(u)).join(' \u00b7 ')}</div>` : ''}</div><button type="button" class="tp-close" aria-label="Close roster">\u2715</button></header>
-      <div class="tp-meta"><span>${roster.length} Pok\u00e9mon</span><span>${spent} pts</span>${megas ? `<span>${megas} Mega${megas === 1 ? '' : 's'}</span>` : ''}</div>
-      <div class="tp-grid">${roster.length ? roster.map(m => `<div class="tp-mon"><button type="button" class="tp-profile-btn" data-tp-profile="${esc(m.name)}" aria-label="Open ${esc(nameOf(m.name))} Pokémon Profile">${spriteOf(m.name)}<span><strong>${esc(nameOf(m.name))}</strong>${m.points == null || m.points === '' ? '' : `<span>${esc(m.points)} pts</span>`}<small>Pokémon Profile</small></span></button></div>`).join('') : '<div class="tp-empty">No Pok\u00e9mon on this roster yet.</div>'}</div><div class="tp-history" data-tp-history-panel hidden role="status" aria-live="polite"></div></div>`;
+      <header class="tp-head"><div class="tp-heading-copy"><h2 id="tpTitle">${esc(team)}</h2><div class="tp-subtitle">${owners.length ? `<span class="tp-owner">${owners.map(u => '@' + esc(u)).join(' · ')}</span>` : ''}${conference ? `<span class="tp-conference">${esc(conference)}</span>` : ''}</div></div><button type="button" class="tp-close" aria-label="Close roster">×</button></header>
+      <div class="tp-meta"><span><strong>${roster.length}</strong><small>Pokémon</small></span><span><strong>${spent}</strong><small>Points spent</small></span>${megas ? `<span><strong>${megas}</strong><small>Mega${megas === 1 ? '' : 's'}</small></span>` : ''}</div>
+      <div class="tp-grid">${roster.length ? roster.map(m => `<button type="button" class="tp-profile-btn" data-tp-profile="${esc(m.name)}" aria-label="Open Pokémon profile for ${esc(nameOf(m.name))}" title="Open Pokémon profile"><span class="tp-sprite-wrap">${spriteOf(m.name)}</span><span class="tp-profile-copy"><strong>${esc(nameOf(m.name))}</strong>${m.points == null || m.points === '' ? '' : `<span class="tp-points">${esc(m.points)} pts</span>`}</span><span class="tp-open-indicator" aria-hidden="true">›</span></button>`).join('') : '<div class="tp-empty">No Pokémon on this roster yet.</div>'}</div><div class="tp-history" data-tp-history-panel hidden role="status" aria-live="polite"></div></div>`;
     wrap.addEventListener('click',async e=>{
       if(e.target===wrap || e.target.closest('.tp-close')){close();return;}
       const button=e.target.closest('[data-tp-profile]');if(!button)return;

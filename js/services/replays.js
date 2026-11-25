@@ -667,6 +667,7 @@
     const appearedThisReplay = new Set();
     const teamRoster = {p1:[], p2:[]};
     let lastMove = null; // {source, target, move}
+    // Direct damaging hits only; never blend indirect hazards/status/recoil into move performance.
     let currentTurn = 0;
     let winner = null;
     const parseWarnings=[];
@@ -942,7 +943,7 @@
       if(!mons[k]) mons[k] = {
         id:k, side:s.side, species:s.species, damageDealt:0, damageTaken:0,
         kills:0, deaths:0, assists:0, appearances:0, sentOut:0, killLog:[], deathLog:[], assistLog:[],
-        moves: {}, items: {}, confirmedItems: {}, inferredItems: {}, heldItem:null, switches:0, leads:0,
+        moves: {}, moveDamage:{}, items: {}, confirmedItems: {}, inferredItems: {}, heldItem:null, switches:0, leads:0,
         damageDealt:0, damageTaken:0, directDamage:0, indirectDamage:0,
         totalHpAvailable:(Number(s.hpMax)>0 ? Number(s.hpMax) : 100),
         initialHp:(Number(s.hpMax)>0 ? Number(s.hpMax) : 100),
@@ -953,6 +954,7 @@
       // maps, otherwise an explicit item such as Leftovers can throw:
       // `Cannot read properties of undefined (reading 'Leftovers')`.
       mons[k].moves ||= {};
+      mons[k].moveDamage ||= {};
       mons[k].items ||= {};
       mons[k].confirmedItems ||= {};
       mons[k].inferredItems ||= {};
@@ -1550,6 +1552,7 @@
         }
       } else if(cmd === '-crit'){
         const target = parts[2] ? parts[2].split(':')[0].trim() : null;
+        if(lastMove && target === lastMove.target)lastMove.critTarget=target;
         if(lastMove && target && lastMove.source && sideOf(lastMove.source) !== sideOf(target)){
           const attackerSide = sideOf(lastMove.source);
           // Guaranteed-crit moves are deterministic and must not count as lucky crits.
@@ -1829,6 +1832,48 @@
           const ap=miscPokemon(attackerStats); if(ap){ ap.damageDealt=(Number(ap.damageDealt)||0)+dmg; ap.largestHit=Math.max(Number(ap.largestHit)||0,dmg); }
           if(damageClass === 'indirect') attackerStats.indirectDamage += dmg;
           else attackerStats.directDamage += dmg;
+          // Record exact observed move damage only when the source and move can be
+          // established from the battle log. Side-effects and weather/status
+          // never become a direct move hit. Unknown attribution stays unknown.
+          if(damageClass === 'direct'){
+            const explicitMove = /^move:\s*(.+)$/i.exec(String(cause||''))?.[1]?.trim() ||
+              /\[from\]\s*move:\s*([^|\]]+)/i.exec(tags)?.[1]?.trim() || '';
+            const sameMove = lastMove && lastMove.source &&
+              attackerStats === ensureMon(lastMove.source) && lastMove.turn === currentTurn &&
+              sideOf(lastMove.source) !== sideOf(slot) &&
+              (!lastMove.target || lastMove.target === slot);
+            // Explicit delayed attacks are allowed even though their original
+            // move command happened on an earlier turn. Never use a stale
+            // lastMove for ordinary residual or item effects.
+            const delayed = DELAYED_MOVES.find(name=>moveKey(name)===moveKey(cause));
+            const moveName=explicitMove || (delayed|| (sameMove && tags==='' ? lastMove.move : ''));
+            // A [from] move event is often lingering chip (Leech Seed,
+            // trapping, etc.). Only the recognised delayed strike is an
+            // independently verifiable direct hit. Be conservative here.
+            const taggedMove=/\[from\]\s*move:/i.test(tags);
+            if(moveName && (!taggedMove || DELAYED_MOVES.some(name=>moveKey(name)===moveKey(moveName))) &&
+               !RESIDUAL_MOVES.some(name=>moveKey(name)===moveKey(moveName)) &&
+               (!tags.includes('[of]') || (taggedMove && DELAYED_MOVES.some(name=>moveKey(name)===moveKey(moveName))))){
+              const maxHp=Number(parseMaxHP(parts[3])||slots[slot].hpMax||0);
+              const percent=maxHp>0?Math.min(100,100*dmg/maxHp):null;
+              const bucket=attackerStats.moveDamage[moveName] ||= {
+                uses:0,hits:0,damage:0,percentSum:0,percentHits:0,percentSamples:[],
+                maxPercent:null,critHits:0,targets:{},conditionsUnknown:true
+              };
+              bucket.hits++;bucket.damage+=dmg;
+              if(percent!==null){
+                bucket.percentSum+=percent;bucket.percentHits++;
+                // Keep a bounded deterministic sample for replay-level median;
+                // full raw logs remain the authoritative source.
+                if(bucket.percentSamples.length<64)bucket.percentSamples.push(Number(percent.toFixed(2)));
+                bucket.maxPercent=Math.max(bucket.maxPercent??0,percent);
+              }
+              if(lastMove?.critTarget===slot)bucket.critHits++;
+              const targetName=canonicalBattleSpecies(targetStats?.species||slots[slot].species||'');
+              if(targetName){const t=bucket.targets[targetName] ||= {hits:0,percentSum:0,percentHits:0};
+                t.hits++;if(percent!==null){t.percentSum+=percent;t.percentHits++;}}
+            }
+          }
           // Track this attacker's cumulative contribution to this specific victim.
           const victimMk = monKey(slot);
           const attackerMk = attackerStats.id || (attackerStats.side + '|' + normName(attackerStats.species));
@@ -2189,7 +2234,7 @@
         if(!aggregatedMons[key]){
           aggregatedMons[key]={
             id:key, side, species, appearances:1, sentOut:0, kills:0, deaths:0, assists:0,
-            moves:{}, items:{}, confirmedItems:{}, inferredItems:{}, itemEvidence:{}, heldItem:null, killLog:[], deathLog:[], assistLog:[], switches:0, leads:0,
+            moves:{}, moveDamage:{}, items:{}, confirmedItems:{}, inferredItems:{}, itemEvidence:{}, heldItem:null, killLog:[], deathLog:[], assistLog:[], switches:0, leads:0,
             damageDealt:0, damageTaken:0, directDamage:0, indirectDamage:0,
             totalHpAvailable:0, initialHp:100, maxHpObserved:null
           };
@@ -2203,7 +2248,7 @@
       if(!aggregatedMons[key]){
         aggregatedMons[key] = Object.assign({}, stint, {
           id:key, species, appearances:1, sentOut:Number(stint.appearances||0),
-          moves:{...(stint.moves||{})}, items:{...(stint.items||{})}, confirmedItems:{...(stint.confirmedItems||{})}, inferredItems:{...(stint.inferredItems||{})}, heldItem:stint.heldItem||null,
+          moves:{...(stint.moves||{})}, moveDamage:JSON.parse(JSON.stringify(stint.moveDamage||{})), items:{...(stint.items||{})}, confirmedItems:{...(stint.confirmedItems||{})}, inferredItems:{...(stint.inferredItems||{})}, heldItem:stint.heldItem||null,
           killLog:[...(stint.killLog||[])], deathLog:[...(stint.deathLog||[])], assistLog:[...(stint.assistLog||[])],
           switches:Number(stint.switches||0), leads:Number(stint.leads||0),
           directDamage:Number(stint.directDamage||0), indirectDamage:Number(stint.indirectDamage||0),
@@ -2226,6 +2271,17 @@
         out.deathLog.push(...(stint.deathLog||[]));
         out.assistLog.push(...(stint.assistLog||[]));
         for(const [mv,count] of Object.entries(stint.moves||{})) out.moves[mv]=(out.moves[mv]||0)+Number(count||0);
+        out.moveDamage ||= {};
+        for(const [mv,entry] of Object.entries(stint.moveDamage||{})){
+          const dest=out.moveDamage[mv] ||= {hits:0,damage:0,percentSum:0,percentHits:0,percentSamples:[],maxPercent:null,critHits:0,targets:{}};
+          for(const field of ['hits','damage','percentSum','percentHits','critHits'])dest[field]+=Number(entry[field]||0);
+          dest.percentSamples.push(...(entry.percentSamples||[]).slice(0,Math.max(0,64-dest.percentSamples.length)));
+          if(entry.maxPercent!==null&&entry.maxPercent!==undefined)dest.maxPercent=Math.max(dest.maxPercent??0,Number(entry.maxPercent)||0);
+          for(const [target,record] of Object.entries(entry.targets||{})){
+            const destTarget=dest.targets[target] ||= {hits:0,percentSum:0,percentHits:0};
+            for(const field of ['hits','percentSum','percentHits'])destTarget[field]+=Number(record[field]||0);
+          }
+        }
         for(const [item,count] of Object.entries(stint.items||{})) out.items[item]=(out.items[item]||0)+Number(count||0);
         for(const [item,count] of Object.entries(stint.confirmedItems||{})) out.confirmedItems[item]=(out.confirmedItems[item]||0)+Number(count||0);
         for(const [item,count] of Object.entries(stint.inferredItems||{})) out.inferredItems[item]=(out.inferredItems[item]||0)+Number(count||0);
@@ -2236,6 +2292,9 @@
 
     for(const m of Object.values(aggregatedMons)){
       m.appearances = 1;
+      for(const [name,count] of Object.entries(m.moves||{})){
+        if(m.moveDamage?.[name])m.moveDamage[name].uses=Number(count)||0;
+      }
       m.gameSets=[{moves:{...(m.moves||{})}, items:{...(m.items||{})}, confirmedItems:{...(m.confirmedItems||{})}, inferredItems:{...(m.inferredItems||{})}, itemEvidence:{...(m.itemEvidence||{})}, sentOut:Number(m.sentOut||0), led:Number(m.leads||0)>0 ? 1 : 0}];
     }
 
@@ -2286,7 +2345,7 @@
       for(const k of ['crits','critLuck','dodges','moveDodgeLuck','lowAccuracyHits','lowAccuracyHitLuck','lowAccuracyDodges','statusDodgeLuck','secondaryProcs','secondaryLuck','secondaryDodges','secondaryDodgeLuck','flinches','flinchLuck','confusionSelfHits','confusionLuck','protectSuccesses','protectLuck','fullParalysis','paralysisDodgeLuck','paralysisDodges','sleepTurns','sleepEvents','sleepDurationLuck','freezeTurns','freezeEvents','freezeDurationLuck']) out[k]+=Number(l[k]||0);
       out.luckEvents.push(...(l.luckEvents||[]));
     }
-    return { parserVersion: 8, id: replayId, format: json.formatid || json.format || '', uploadtime: json.uploadtime || null,
+    return { parserVersion: 9, id: replayId, format: json.formatid || json.format || '', uploadtime: json.uploadtime || null,
       players, mons:aggregatedMons, winner, teamRoster, luck, luckPokemon:aggregatedLuckPokemon, misc,
       parseWarnings
       };
