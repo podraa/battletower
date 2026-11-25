@@ -173,3 +173,39 @@ table tbody tr[style*="--team-color"] td:first-child{box-shadow:inset 4px 0 0 va
 .shared-pokemon-profile .scout-type-list,.shared-pokemon-profile .scout-abilities{display:flex;gap:5px;flex-wrap:wrap}.shared-pokemon-profile .scout-ability,.shared-pokemon-profile .scout-type-pill{display:inline-block;padding:5px 8px;background:var(--panel);border:1px solid var(--border);border-radius:6px;font-size:11px}
 .myteam-mon-profile{display:block;width:100%;border:0;background:transparent;color:inherit;cursor:pointer;text-align:left;padding:0;font:inherit}.myteam-mon-profile:focus-visible,.tp-profile-btn:focus-visible{outline:2px solid var(--accent,#8b5cf6);outline-offset:4px}
 @media(max-width:680px){.shared-pokemon-profile .scout-popup-columns,.shared-pokemon-profile .scout-nature-stats{grid-template-columns:1fr}.shared-pokemon-modal{padding:8px}.shared-pokemon-modal .prep-detail-dialog{padding:12px;max-height:95vh}}
+
+/* CP4.182: compact, theme-aware franchise roster popup. */
+.team-popup-backdrop{padding:18px;background:rgba(8,12,20,.68);backdrop-filter:blur(5px)}
+.team-popup{width:min(900px,calc(100vw - 32px));max-height:min(88vh,860px);overflow:hidden;border:1px solid var(--border);border-top:3px solid var(--team-color,var(--accent));border-radius:17px;background:var(--panel);color:var(--text);box-shadow:0 24px 70px rgba(0,0,0,.28)}
+.team-popup.team-tinted{border-left:1px solid var(--border);border-top:3px solid var(--team-color,var(--accent));background:var(--panel)}
+.tp-head{align-items:flex-start;padding:19px 21px 13px;border-bottom:1px solid var(--border)}
+.tp-heading-copy{display:grid;gap:7px;min-width:0}
+.tp-head h2{margin:0;color:var(--text);font-size:21px;font-weight:800;letter-spacing:-.025em;line-height:1.2;overflow-wrap:anywhere}
+.tp-subtitle{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.tp-owner,.tp-conference{display:inline-flex;align-items:center;padding:4px 8px;border:1px solid var(--border);border-radius:999px;background:var(--panel-alt);color:var(--text-dim);font-size:10px;font-weight:650;line-height:1.2}
+.tp-close{display:grid;place-items:center;width:34px;height:34px;flex:0 0 34px;padding:0;border:1px solid var(--border);border-radius:9px;background:var(--panel-alt);color:var(--text);font-size:19px;line-height:1;cursor:pointer}
+.tp-close:hover,.tp-close:focus-visible{border-color:var(--team-color,var(--accent));background:var(--panel-alt);outline:none}
+.tp-meta{display:flex;gap:9px;flex-wrap:wrap;padding:12px 21px;border-bottom:1px solid var(--border);opacity:1}
+.tp-meta>span{display:inline-flex;align-items:baseline;gap:6px;padding:6px 9px;border:1px solid var(--border);border-radius:9px;background:var(--panel-alt);color:var(--text)}
+.tp-meta strong{font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}
+.tp-meta small{color:var(--text-dim);font-size:10px;font-weight:650}
+.tp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:9px;max-height:calc(min(88vh,860px) - 145px);overflow:auto;padding:15px 21px 21px}
+.tp-profile-btn{display:grid!important;grid-template-columns:54px minmax(0,1fr) 16px;align-items:center;gap:11px;width:100%;min-width:0;min-height:76px;padding:9px 11px!important;border:1px solid var(--border)!important;border-radius:11px!important;background:var(--panel-alt)!important;color:var(--text)!important;text-align:left!important;font:inherit!important;box-shadow:none!important;cursor:pointer;transition:border-color .14s,background .14s,transform .14s}
+.tp-profile-btn:hover{transform:translateY(-1px);border-color:var(--team-color,var(--accent))!important;background:color-mix(in srgb,var(--team-color,var(--accent)) 7%,var(--panel-alt))!important}
+.tp-profile-btn:focus-visible{outline:2px solid var(--team-color,var(--accent));outline-offset:2px}
+.tp-sprite-wrap{display:grid;place-items:center;width:54px;height:54px;overflow:hidden;border:1px solid var(--border);border-radius:9px;background:var(--panel)}
+.tp-profile-btn .tp-sprite{display:block;width:52px!important;height:52px!important;max-width:100%;object-fit:contain}
+.tp-profile-copy{display:grid;gap:5px;min-width:0}
+.tp-profile-copy strong{color:var(--text);font-size:12px;font-weight:750;line-height:1.25;overflow-wrap:anywhere}
+.tp-points{justify-self:start;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text-dim);font-size:10px;font-weight:700;font-variant-numeric:tabular-nums}
+.tp-open-indicator{justify-self:end;color:var(--text-dim);font-size:21px;line-height:1}
+.tp-profile-btn:hover .tp-open-indicator{color:var(--team-color,var(--accent))}
+.tp-empty{grid-column:1/-1;padding:32px 18px;border:1px dashed var(--border);border-radius:12px;color:var(--text-dim);font-size:13px;text-align:center}
+.tp-history{margin:0 21px 20px;background:var(--panel-alt)}
+@media(max-width:520px){.team-popup-backdrop{padding:10px}.team-popup{width:100%;max-height:92vh;border-radius:14px}.tp-head{padding:15px 14px 11px}.tp-meta{padding:10px 14px;gap:7px}.tp-grid{grid-template-columns:minmax(0,1fr);max-height:calc(92vh - 145px);padding:12px 14px 15px}}
+
+/* CP4.184 shared signature Pokémon frame. Keep the art box fixed-size so
+   remote sprites cannot shrink, stretch, or clip differently across pages. */
+.sbl-signature-sprite-frame{box-sizing:border-box;display:grid;place-items:center;flex:0 0 76px;width:76px;height:76px;min-width:76px;min-height:76px;padding:2px;overflow:hidden;border:1px solid var(--border);border-radius:12px;background:var(--panel-alt)}
+.sbl-signature-sprite-frame img,.sbl-signature-sprite-frame .sprite{display:block;flex:none!important;width:70px!important;height:70px!important;max-width:none!important;max-height:none!important;object-fit:contain!important;object-position:center!important;image-rendering:auto!important}
+@media(max-width:520px){.sbl-signature-sprite-frame{flex-basis:68px;width:68px;height:68px;min-width:68px;min-height:68px}.sbl-signature-sprite-frame img,.sbl-signature-sprite-frame .sprite{width:62px!important;height:62px!important}}
